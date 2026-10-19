@@ -10,7 +10,7 @@
 The **OOTP Hosting** suite is an autonomous local web server, online league hosting environment, and StatsPlus analytics platform designed for Out of the Park Baseball 27. It automatically discovers active `.lg` saves, parses and imports monthly/yearly simulation CSV dumps, box scores, almanac files, and player rating snapshots, and serves comprehensive analytics, Statcast visualizers, Cooperstown Hall of Fame JAWS profiles, League Evolution blueprints, and online league reporting portals at `http://localhost:8080`.
 
 - **Local Path:** `D:\Code\Projects\OOTP Hosting`
-- **GitHub Repository:** `https://github.com/davidMcM84/OOTP27-Analytics-Hub`
+- **GitHub Repository:** `https://github.com/davidMcM84/OOTP-Hosting`
 - **Current Execution Status:** Active / Operational
 - **Primary Stack:** Python 3.13, Starlette, Uvicorn, Pandas, NumPy, SQLite3, HTML5/Tailwind/Bootstrap 5
 - **Google Drive Folder:** `https://drive.google.com/drive/folders/1Q8FyiRALq6Uqg0TReuSuPk1w0_X1E0lw`
