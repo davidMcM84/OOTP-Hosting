@@ -1,0 +1,5 @@
+uvicorn>=0.30.0
+starlette>=0.38.0
+pandas>=2.2.0
+numpy>=2.0.0
+aiofiles>=24.1.0

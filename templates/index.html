@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OOTP 27 Analytics, Statcast & League Hosting Suite</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Bootstrap 5.3 CSS & Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        screens: {
+          'sm': '640px',
+          'md': '768px',
+          'lg': '1024px',
+          'xl': '1280px',
+          '2xl': '1536px',
+          '3xl': '1720px',
+          'uw': '1800px',
+          'suw': '2400px',
+        },
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            white: '#dbdbdb',
+            slate: {
+              50: '#dbdbdb',
+              100: '#dbdbdb',
+              200: '#dbdbdb',
+              300: '#b8b8b8',
+              400: '#999999',
+              500: '#7a7b7d',
+              600: '#5f6062',
+              700: '#5f6062',
+              800: '#373839',
+              900: '#1f1f20',
+              950: '#0a0a0a',
+            },
+            sky: {
+              200: '#dbdbdb',
+              300: '#dbdbdb',
+              400: '#dbdbdb',
+              500: '#dbdbdb',
+              600: '#999999',
+              950: '#1f1f20',
+            },
+            octet: {
+              100: '#dbdbdb',
+              200: '#999999',
+              300: '#5f6062',
+              400: '#373839',
+              500: '#1f1f20',
+              600: '#0a0a0a',
+            }
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+
+  <!-- Custom Broadcast CSS -->
+  <link rel="stylesheet" href="/static/css/app.css?v=20261019hof" />
+</head>
+<body class="antialiased selection:bg-slate-200 selection:text-slate-950">
+
+  <!-- Global Loading Overlay -->
+  <div id="global-loader" class="hidden fixed inset-0 z-[9999] bg-slate-950/85 backdrop-blur-md flex items-center justify-center">
+    <div class="glass-card p-6 text-center max-w-sm border border-slate-600 shadow-2xl">
+      <div class="spinner-border text-light mb-3" role="status"></div>
+      <div id="global-loader-text" class="text-sm font-bold text-white tracking-wide">Loading OOTP 27 SQLite Analytics...</div>
+      <div class="text-[11px] text-slate-400 mt-1">Querying local SQLite database on port 8080</div>
+    </div>
+  </div>
+
+  <!-- Top Broadcast Command Bar (Full-Bleed Ultrawide Fluid Header) -->
+  <header class="sticky top-0 z-50 bg-slate-950/95 backdrop-blur-xl border-b border-slate-800 shadow-xl">
+    <div class="w-full max-w-none mx-auto px-4 lg:px-6 uw:px-8 py-2 flex flex-wrap items-center justify-between gap-2.5">
+      <!-- Brand Identity -->
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-slate-200 to-slate-400 flex items-center justify-center text-slate-950 font-black text-lg shadow-lg border border-slate-300">
+          <i class="bi bi-diamond-half"></i>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-sm sm:text-base font-black tracking-tight text-white mb-0">OOTP 27 COMMAND SUITE</h1>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-slate-800 text-white border border-slate-600 font-mono">ULTRAWIDE EDITION</span>
+          </div>
+          <p class="text-[10.5px] text-slate-400 mb-0 hidden sm:block">Multi-League & Year Browser • Sabermetrics • Spray Charts • Evolution Hub • BNN & Almanac Portal</p>
+        </div>
+      </div>
+
+      <!-- Selectable Save, League, Year, Dump, Team & Ultrawide Workspace Switchers -->
+      <div class="flex flex-wrap items-center gap-1.5 uw:gap-2">
+        <div class="flex items-center bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1">
+          <i class="bi bi-hdd-stack text-white text-xs mr-1.5"></i>
+          <div class="text-[10px] text-slate-400 uppercase font-bold mr-1.5">Save:</div>
+          <select id="save-selector" onchange="onSaveChanged(this.value)" class="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer max-w-[200px] uw:max-w-[260px] truncate"></select>
+        </div>
+
+        <div id="league-selector-wrap" class="flex items-center bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1">
+          <i class="bi bi-diagram-2-fill text-amber-400 text-xs mr-1.5"></i>
+          <div class="text-[10px] text-slate-400 uppercase font-bold mr-1.5">League:</div>
+          <select id="league-selector" onchange="onLeagueChanged(this.value)" class="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer max-w-[200px] uw:max-w-[260px] truncate"></select>
+        </div>
+
+        <div id="year-selector-wrap" class="flex items-center bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1">
+          <i class="bi bi-calendar3 text-emerald-400 text-xs mr-1.5"></i>
+          <div class="text-[10px] text-slate-400 uppercase font-bold mr-1.5">Year:</div>
+          <select id="year-selector" onchange="onYearChanged(this.value)" class="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer"></select>
+        </div>
+
+        <div id="dump-selector-wrap" class="flex items-center bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1" title="Switch between Monthly/Yearly CSV Dumps and import_export">
+          <i class="bi bi-archive-fill text-purple-400 text-xs mr-1.5"></i>
+          <div class="text-[10px] text-slate-400 uppercase font-bold mr-1.5">Dump:</div>
+          <select id="dump-selector" onchange="onDumpSourceChanged(this.value)" class="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer max-w-[165px] uw:max-w-[220px] truncate"></select>
+        </div>
+
+        <div class="flex items-center bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1">
+          <i class="bi bi-shield-fill text-white text-xs mr-1.5"></i>
+          <div class="text-[10px] text-slate-400 uppercase font-bold mr-1.5">Team:</div>
+          <select id="team-selector" onchange="onTeamPerspectiveChanged(this.value)" class="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer max-w-[185px] uw:max-w-[240px] truncate"></select>
+        </div>
+
+        <!-- Ultrawide Side Dock & Density Toggles -->
+        <button id="btn-toggle-dock" onclick="togglePlayerSideDock()" title="Toggle Persistent Right-Side Player Scouting & Statcast Dock for Ultrawide Monitors" class="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-sky-300 border border-slate-700 text-xs font-bold transition flex items-center gap-1">
+          <i class="bi bi-layout-sidebar-inset-reverse"></i> <span id="btn-toggle-dock-label">Scout Dock</span>
+        </button>
+
+        <button id="btn-toggle-density" onclick="toggleTableDensity()" title="Toggle High-Density Compact Table Rows for Ultrawide Displays" class="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 text-xs font-bold transition flex items-center gap-1">
+          <i class="bi bi-distribute-vertical"></i> <span id="btn-toggle-density-label">Dense</span>
+        </button>
+
+        <button onclick="onSaveChanged(AppState.activeSave, true)" title="Re-ingest CSV files & dumps from OOTP 27 save folder into SQLite" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white border border-slate-600 text-xs font-bold transition flex items-center gap-1">
+          <i class="bi bi-arrow-repeat"></i> Sync
+        </button>
+
+        <button onclick="openOnlineModal()" title="Import Online League Export or Configure Save" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-600 text-xs font-bold transition flex items-center gap-1">
+          <i class="bi bi-cloud-check"></i> Online
+        </button>
+
+        <button onclick="openSetupWizardModal()" title="Open Setup & Functionality Verification Wizard" class="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-400/50 text-xs font-bold transition flex items-center gap-1">
+          <i class="bi bi-magic"></i> Setup Wizard
+        </button>
+      </div>
+    </div>
+
+    <!-- Primary Module Navigation Bar -->
+    <div class="w-full max-w-none mx-auto px-4 lg:px-6 uw:px-8 py-1.5 border-t border-slate-800/80 flex items-center justify-between gap-2 overflow-x-auto">
+      <div class="flex items-center gap-1.5">
+        <button data-tab="overview" onclick="switchTab('overview')" class="nav-tab-btn active">
+          <i class="bi bi-speedometer2"></i> League Pulse & Standings
+        </button>
+        <button data-tab="teamhub" onclick="switchTab('teamhub')" class="nav-tab-btn">
+          <i class="bi bi-shield-shaded"></i> Team Franchise Hub
+        </button>
+        <button data-tab="leaders" onclick="switchTab('leaders')" class="nav-tab-btn">
+          <i class="bi bi-award-fill text-amber-400"></i> League Leaders
+        </button>
+        <button data-tab="records" onclick="switchTab('records')" class="nav-tab-btn">
+          <i class="bi bi-journal-bookmark-fill text-emerald-400"></i> Records
+        </button>
+        <button data-tab="hof" onclick="switchTab('hof')" class="nav-tab-btn">
+          <i class="bi bi-Columns-gap bi-bank2 text-amber-300"></i> HOF
+        </button>
+        <button data-tab="statcast" onclick="switchTab('statcast')" class="nav-tab-btn">
+          <i class="bi bi-bullseye"></i> Spray Charts & Statcast
+        </button>
+        <button data-tab="gamelogs" onclick="switchTab('gamelogs')" class="nav-tab-btn">
+          <i class="bi bi-play-btn-fill"></i> Game Logs & Replay
+        </button>
+        <button data-tab="sabermetrics" onclick="switchTab('sabermetrics')" class="nav-tab-btn">
+          <i class="bi bi-calculator-fill"></i> Sabermetric Lab
+        </button>
+        <button data-tab="evolution" onclick="switchTab('evolution')" class="nav-tab-btn">
+          <i class="bi bi-compass-fill"></i> Evolution Hub
+        </button>
+        <button data-tab="statsplus" onclick="switchTab('statsplus')" class="nav-tab-btn">
+          <i class="bi bi-graph-up-arrow"></i> StatsPlus & Trade
+        </button>
+        <button data-tab="bnn" onclick="switchTab('bnn')" class="nav-tab-btn">
+          <i class="bi bi-globe2"></i> OOTP HTML & Almanacs
+        </button>
+      </div>
+
+      <!-- Quick Player Search & Ultrawide Status Pill -->
+      <div class="hidden xl:flex items-center gap-2 shrink-0">
+        <div class="relative flex items-center bg-slate-900 border border-slate-700/90 rounded-lg px-2.5 py-1">
+          <i class="bi bi-search text-slate-400 text-[11px] mr-1.5"></i>
+          <input id="global-player-quick-search" type="text" placeholder="Quick-Scout Player..." oninput="onGlobalPlayerQuickSearch(this.value)" class="bg-transparent text-xs text-white focus:outline-none w-40 uw:w-56 font-mono" />
+          <div id="global-player-search-results" class="hidden absolute right-0 top-full mt-1 w-80 max-h-80 overflow-y-auto glass-card border border-slate-700 shadow-2xl z-[9995] p-1.5 space-y-1"></div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Dynamic Ultrawide Workspace (Supports Full-Bleed Canvas + Persistent Side Scout Dock) -->
+  <div id="ultrawide-workspace" class="w-full max-w-none mx-auto px-4 lg:px-6 uw:px-8 py-4 flex flex-col xl:flex-row gap-5 items-start">
+    <main id="main-view-container" class="flex-1 min-w-0 w-full"></main>
+
+    <!-- Persistent Ultrawide Player Scouting & Statcast Side Dock -->
+    <aside id="ultrawide-side-dock" class="hidden w-full xl:w-[460px] uw:w-[540px] suw:w-[640px] shrink-0 xl:sticky xl:top-[104px] xl:max-h-[calc(100vh-118px)] overflow-y-auto glass-card border border-sky-500/40 shadow-2xl">
+      <div class="px-4 py-2.5 bg-slate-950 border-b border-slate-800 flex justify-between items-center sticky top-0 z-20">
+        <div class="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-sky-400">
+          <i class="bi bi-layout-sidebar-inset-reverse"></i> Ultrawide Live Player Scout Dock
+        </div>
+        <div class="flex items-center gap-1.5">
+          <button id="dock-expand-modal-btn" onclick="expandDockedPlayerToModal()" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono font-bold text-slate-200 border border-slate-700 transition" title="Open in Full Ultrawide Modal">
+            <i class="bi bi-arrows-angle-expand mr-1"></i>Modal
+          </button>
+          <button onclick="togglePlayerSideDock(false)" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 flex items-center justify-center transition" title="Close Side Dock">
+            <i class="bi bi-x-lg text-xs"></i>
+          </button>
+        </div>
+      </div>
+      <div id="ultrawide-side-dock-body" class="p-4"></div>
+    </aside>
+  </div>
+
+  <!-- Player Deep-Dive Dossier Modal (Expanded for Ultrawide 3-Column Layout) -->
+  <div id="player-dossier-modal" class="hidden fixed inset-0 z-[9990] bg-slate-950/85 backdrop-blur-md overflow-y-auto p-3 md:p-6 uw:p-8">
+    <div class="w-full max-w-[96vw] uw:max-w-[2400px] mx-auto glass-card border border-sky-500/40 shadow-2xl overflow-hidden">
+      <div class="px-5 py-3 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
+        <div class="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-sky-400">
+          <i class="bi bi-person-badge-fill"></i> OOTP 27 Player Analytical Dossier — Baseball Savant + FanGraphs + Scouting Card
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="pinCurrentModalPlayerToDock()" class="px-3 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-400/50 text-xs font-bold transition flex items-center gap-1.5" title="Pin this player to the right-hand Ultrawide Side Dock so you can keep browsing tables">
+            <i class="bi bi-layout-sidebar-inset-reverse"></i> Pin to Right Dock
+          </button>
+          <button onclick="closePlayerModal()" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 flex items-center justify-center transition">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>
+      </div>
+      <div id="player-dossier-body" class="p-5"></div>
+    </div>
+  </div>
+
+  <!-- Online League Import & Save Configuration Modal -->
+  <div id="online-league-modal" class="hidden fixed inset-0 z-[9990] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="max-w-lg w-full glass-card border border-emerald-500/40 shadow-2xl overflow-hidden">
+      <div class="px-5 py-3.5 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
+        <h3 class="text-sm font-extrabold uppercase tracking-wider text-emerald-400 mb-0">
+          <i class="bi bi-cloud-upload-fill mr-1.5"></i> OOTP 27 Online League & CSV Import Center
+        </h3>
+        <button onclick="closeOnlineModal()" class="text-slate-400 hover:text-white"><i class="bi bi-x-lg"></i></button>
+      </div>
+      <div class="p-5 space-y-4 text-xs text-slate-300">
+        <p>
+          This local hosting suite automatically detects all local saves in your <code>OOTP Baseball 27\saved_games</code> folder and is 100% compatible with <b>OOTP Online League saves</b>.
+        </p>
+        <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 space-y-3">
+          <div class="font-bold text-white uppercase">Upload Online League CSV / HTML Export (.zip)</div>
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1">Online League Name</label>
+            <input id="online-save-name-input" type="text" placeholder="e.g. Championship Online League" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
+          </div>
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1">Select .zip Archive (containing CSVs and/or HTML reports)</label>
+            <input id="online-zip-input" type="file" accept=".zip" class="w-full text-xs text-slate-300" />
+          </div>
+          <button onclick="uploadOnlineArchive()" class="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs transition">
+            Import Archive & Build SQLite Database
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Setup & Functionality Verification Wizard Modal -->
+  <div id="setup-wizard-modal" class="hidden fixed inset-0 z-[9992] bg-slate-950/90 backdrop-blur-md overflow-y-auto p-3 md:p-6 uw:p-8">
+    <div class="w-full max-w-5xl mx-auto glass-card border border-amber-400/40 shadow-2xl overflow-hidden">
+      <div class="px-5 py-3.5 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-amber-400 text-slate-950 flex items-center justify-center font-black">
+            <i class="bi bi-magic"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-black uppercase tracking-wider text-white mb-0">
+              OOTP 27 Command Suite — Setup & Functionality Verification Wizard
+            </h3>
+            <p class="text-[11px] text-slate-400 mb-0">Configure OOTP Saved Games Paths • Ingest Saves or Load Demo League • Run 8-Point System Self-Test</p>
+          </div>
+        </div>
+        <button onclick="closeSetupWizardModal()" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 flex items-center justify-center transition">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+      <div id="setup-wizard-body" class="p-5"></div>
+    </div>
+  </div>
+
+  <!-- Bootstrap JS Bundle + App Controllers -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="/static/js/charts.js?v=20261019setup"></script>
+  <script src="/static/js/app.js?v=20261019setup"></script>
+</body>
+</html>

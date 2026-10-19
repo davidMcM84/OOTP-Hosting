@@ -1,0 +1,336 @@
+:root {
+  /* Octet Design White-on-Black Palette (https://octet.design/colors/palette/white-on-color-palette-1731323024/) */
+  --octet-white: #dbdbdb;
+  --octet-muted: #999999;
+  --octet-mid: #5f6062;
+  --octet-elevated: #373839;
+  --octet-surface: #1f1f20;
+  --octet-bg: #0a0a0a;
+
+  --bg-obsidian: #0a0a0a;
+  --bg-card: rgba(31, 31, 32, 0.92);
+  --bg-card-hover: rgba(55, 56, 57, 0.96);
+  --border-glass: rgba(95, 96, 98, 0.42);
+  --accent-primary: #dbdbdb;
+  --accent-emerald: #10b981;
+  --accent-amber: #f59e0b;
+  --accent-rose: #f43f5e;
+  --accent-purple: #a855f7;
+  --team-primary: #1f1f20;
+  --team-accent: #dbdbdb;
+}
+
+body {
+  background-color: var(--bg-obsidian);
+  background-image:
+    radial-gradient(circle at 12% 8%, rgba(219, 219, 219, 0.05), transparent 34%),
+    radial-gradient(circle at 88% 12%, rgba(153, 153, 153, 0.04), transparent 30%),
+    radial-gradient(circle at 50% 90%, rgba(95, 96, 98, 0.06), transparent 38%);
+  background-attachment: fixed;
+  color: var(--octet-white);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Glassmorphic Broadcast Cards */
+.glass-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-glass);
+  border-radius: 14px;
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.75);
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.22s ease, box-shadow 0.22s ease;
+}
+
+.glass-card-interactive:hover {
+  transform: translateY(-3px);
+  border-color: rgba(219, 219, 219, 0.5);
+  box-shadow: 0 16px 36px -8px rgba(0, 0, 0, 0.65);
+}
+
+/* Team Dynamic Header Accent */
+.team-banner-gradient {
+  background: linear-gradient(135deg, var(--team-primary, #1f1f20) 0%, rgba(31, 31, 32, 0.96) 65%, rgba(10, 10, 10, 0.99) 100%);
+  border: 1px solid rgba(219, 219, 219, 0.18);
+}
+
+/* Navigation Pills */
+.nav-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 1rem;
+  border-radius: 10px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--octet-muted);
+  border: 1px solid transparent;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+
+.nav-tab-btn:hover {
+  color: var(--octet-white);
+  background: rgba(55, 56, 57, 0.75);
+  border-color: rgba(95, 96, 98, 0.5);
+}
+
+.nav-tab-btn.active {
+  color: var(--octet-bg);
+  background: linear-gradient(135deg, #dbdbdb 0%, #b8b8b8 100%);
+  box-shadow: 0 0 18px rgba(219, 219, 219, 0.25);
+  font-weight: 800;
+}
+
+/* 20-80 Scouting Scale Color Badges */
+.rtg-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-weight: 800;
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.rtg-80 { background: rgba(219, 219, 219, 0.22); color: #dbdbdb; border: 1px solid rgba(219, 219, 219, 0.55); }
+.rtg-70 { background: rgba(16, 185, 129, 0.22); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.45); }
+.rtg-60 { background: rgba(132, 204, 22, 0.20); color: #a3e635; border: 1px solid rgba(132, 204, 22, 0.4); }
+.rtg-50 { background: rgba(234, 179, 8, 0.18); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.38); }
+.rtg-40 { background: rgba(249, 115, 22, 0.18); color: #fb923c; border: 1px solid rgba(249, 115, 22, 0.38); }
+.rtg-20 { background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.38); }
+
+/* High-density Data Tables */
+.saber-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.81rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.saber-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #141415;
+  color: var(--octet-muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.70rem;
+  letter-spacing: 0.04em;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--octet-elevated);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.saber-table thead th:hover {
+  color: var(--octet-white);
+  background: var(--octet-elevated);
+}
+
+.saber-table thead th[data-sort-dir="asc"]::after {
+  content: " ▲";
+  font-size: 0.62rem;
+  color: #38bdf8;
+}
+
+.saber-table thead th[data-sort-dir="desc"]::after {
+  content: " ▼";
+  font-size: 0.62rem;
+  color: #38bdf8;
+}
+
+.saber-table tbody td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(55, 56, 57, 0.65);
+  white-space: nowrap;
+  color: var(--octet-white);
+}
+
+.saber-table tbody tr {
+  transition: background-color 0.12s ease;
+}
+
+.saber-table tbody tr:hover {
+  background-color: rgba(95, 96, 98, 0.22);
+}
+
+/* Ultrawide High-Density Compact Mode */
+body.density-compact .saber-table {
+  font-size: 0.76rem;
+}
+
+body.density-compact .saber-table thead th {
+  padding: 5px 7px;
+  font-size: 0.66rem;
+}
+
+body.density-compact .saber-table tbody td {
+  padding: 4px 7px;
+}
+
+body.density-compact .rtg-badge {
+  min-width: 28px;
+  padding: 1px 4px;
+  font-size: 0.70rem;
+}
+
+/* Savant Percentile Bar */
+.savant-bar-track {
+  height: 10px;
+  background: var(--octet-elevated);
+  border-radius: 999px;
+  position: relative;
+  overflow: visible;
+}
+
+.savant-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.savant-bubble {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 0.68rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  border: 2px solid var(--octet-bg);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.65);
+}
+
+/* Spray Chart Interactive Dots */
+.spray-dot {
+  cursor: pointer;
+  transition: r 0.15s ease, stroke-width 0.15s ease, opacity 0.15s ease;
+}
+
+.spray-dot:hover {
+  r: 8px !important;
+  stroke: #dbdbdb !important;
+  stroke-width: 2.5px !important;
+  opacity: 1 !important;
+}
+
+/* Select dropdown option styling for dark mode */
+select option {
+  background-color: #1f1f20;
+  color: #dbdbdb;
+}
+
+/* Animations */
+@keyframes fadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-view {
+  animation: fadeSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+::-webkit-scrollbar-thumb {
+  background: #373839;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #5f6062;
+}
+
+/* Flagship Team Franchise Hub Hero Showcase */
+.team-hero-showcase {
+  position: relative;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid rgba(219, 219, 219, 0.24);
+  box-shadow: 0 22px 50px -12px rgba(0, 0, 0, 0.88), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.team-crest-pedestal {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 24px;
+  background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.16), rgba(10, 10, 10, 0.86) 75%);
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.8), 0 0 36px var(--team-glow, rgba(219, 219, 219, 0.22));
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease;
+}
+
+.team-crest-pedestal:hover {
+  transform: scale(1.04);
+  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.9), 0 0 48px var(--team-glow, rgba(219, 219, 219, 0.35));
+}
+
+.team-hero-title {
+  letter-spacing: -0.03em;
+  line-height: 0.98;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.85), 0 1px 2px rgba(0, 0, 0, 0.95);
+}
+
+.team-crest-watermark {
+  position: absolute;
+  right: -28px;
+  top: 50%;
+  transform: translateY(-50%) rotate(-6deg);
+  width: 340px;
+  height: 340px;
+  opacity: 0.085;
+  pointer-events: none;
+  filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.6));
+  user-select: none;
+}
+
+/* Cooperstown Hall of Fame Plaques */
+.hof-plaque-card {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(155deg, rgba(38, 33, 22, 0.92) 0%, rgba(22, 20, 16, 0.96) 55%, rgba(12, 12, 12, 0.99) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.42);
+  border-radius: 16px;
+  box-shadow: 0 14px 34px -10px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(251, 191, 36, 0.22);
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.22s ease, box-shadow 0.22s ease;
+}
+
+.hof-plaque-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(251, 191, 36, 0.78);
+  box-shadow: 0 20px 42px -10px rgba(245, 158, 11, 0.24), inset 0 1px 0 rgba(251, 191, 36, 0.35);
+}
+
+.hof-bronze-inscription {
+  background: linear-gradient(180deg, rgba(20, 17, 12, 0.88) 0%, rgba(10, 9, 7, 0.94) 100%);
+  border: 1px solid rgba(217, 119, 6, 0.32);
+  border-radius: 10px;
+}
+
