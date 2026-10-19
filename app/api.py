@@ -27,6 +27,9 @@ from app.analytics import (
     get_league_leaders_hub,
     get_league_records_book,
     get_hall_of_fame_hub,
+    get_stretch_hub,
+    get_world_dashboard,
+    get_newspaper_front_page,
     safe_int,
 )
 from app.bnn_generator import (
@@ -209,6 +212,31 @@ async def api_hof(request):
     return JSONResponse(data)
 
 
+async def api_stretch(request):
+    save_slug = request.query_params.get("save") or get_active_save_slug()
+    league_id = safe_int(request.query_params.get("league_id"), 0) or None
+    league_ids_str = request.query_params.get("league_ids") or None
+    year = safe_int(request.query_params.get("year"), 0) or None
+    data = get_stretch_hub(save_slug, league_id=league_id, league_ids_str=league_ids_str, year=year)
+    return JSONResponse(data)
+
+
+async def api_world_dashboard(request):
+    save_slug = request.query_params.get("save") or get_active_save_slug()
+    year = safe_int(request.query_params.get("year"), 0) or None
+    data = get_world_dashboard(save_slug, year=year)
+    return JSONResponse(data)
+
+
+async def api_frontpage(request):
+    save_slug = request.query_params.get("save") or get_active_save_slug()
+    league_id = safe_int(request.query_params.get("league_id"), 0) or None
+    year = safe_int(request.query_params.get("year"), 0) or None
+    headline_mode = request.query_params.get("headline_mode") or "auto"
+    data = get_newspaper_front_page(save_slug, league_id=league_id, year=year, headline_mode=headline_mode)
+    return JSONResponse(data)
+
+
 async def api_bnn_catalog(request):
     save_slug = request.query_params.get("save") or get_active_save_slug()
     league_id = safe_int(request.query_params.get("league_id"), 0) or None
@@ -349,6 +377,9 @@ routes = [
     Route("/api/saves/select", api_select_save, methods=["POST"]),
     Route("/api/saves/upload", api_upload_online_save, methods=["POST"]),
     Route("/api/overview", api_overview),
+    Route("/api/frontpage", api_frontpage),
+    Route("/api/stretch", api_stretch),
+    Route("/api/world_dashboard", api_world_dashboard),
     Route("/api/sabermetrics", api_sabermetrics),
     Route("/api/spray", api_spray),
     Route("/api/games", api_games),

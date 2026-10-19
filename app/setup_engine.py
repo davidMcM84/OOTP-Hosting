@@ -993,6 +993,24 @@ def generate_demo_save(save_name: str = "OOTP27_Demo_League") -> dict:
         {"message_id": 2, "subject": f"{top_batters[0]['first_name']} {top_batters[0]['last_name']} Leads League MVP Chase", "date": "2026-09-28", "sender_type": 0, "sender_id": 0, "Importance": 1, "message_type": 1, "team_id_0": top_batters[0]["team_id"], "player_id_0": top_batters[0]["player_id"]},
     ])
 
+    league_playoffs_df = pd.DataFrame([
+        {
+            "league_id": 200, "play_off_mode": 4, "round": 2, "max_round": 3,
+            "round_names0": "Division Series", "round_names1": "League Championship Series", "round_names2": "World Series",
+            "best_of0": 5, "best_of1": 7, "best_of2": 7, "split0": 1, "split1": 1, "split2": 1,
+        }
+    ])
+
+    league_playoff_fixtures_df = pd.DataFrame([
+        {"league_id": 200, "team_id0": 1, "team_id1": 4, "winner": 1, "finished": 1, "best_of": 5, "played": 4, "round": 0, "series": 0, "result0": 3, "result1": 1},
+        {"league_id": 200, "team_id0": 5, "team_id1": 2, "winner": 5, "finished": 1, "best_of": 5, "played": 5, "round": 0, "series": 1, "result0": 3, "result1": 2},
+        {"league_id": 200, "team_id0": 9, "team_id1": 12, "winner": 9, "finished": 1, "best_of": 5, "played": 4, "round": 0, "series": 2, "result0": 3, "result1": 1},
+        {"league_id": 200, "team_id0": 13, "team_id1": 10, "winner": 13, "finished": 1, "best_of": 5, "played": 5, "round": 0, "series": 3, "result0": 3, "result1": 2},
+        {"league_id": 200, "team_id0": 1, "team_id1": 5, "winner": 1, "finished": 1, "best_of": 7, "played": 6, "round": 1, "series": 4, "result0": 4, "result1": 2},
+        {"league_id": 200, "team_id0": 9, "team_id1": 13, "winner": 13, "finished": 1, "best_of": 7, "played": 7, "round": 1, "series": 5, "result0": 3, "result1": 4},
+        {"league_id": 200, "team_id0": 1, "team_id1": 13, "winner": 0, "finished": 0, "best_of": 7, "played": 5, "round": 2, "series": 6, "result0": 3, "result1": 2},
+    ])
+
     # Write CSV tables to 2025 dump, 2026 dump, and import_export/csv
     t_rec_25, t_bat_25, t_pit_25, t_fin_25 = build_team_season_tables(2025)
     t_rec_26, t_bat_26, t_pit_26, t_fin_26 = build_team_season_tables(2026)
@@ -1023,6 +1041,8 @@ def generate_demo_save(save_name: str = "OOTP27_Demo_League") -> dict:
         "players_streak": pd.DataFrame(streak_rows),
         "trade_history": trades_df,
         "messages": messages_df,
+        "league_playoffs": league_playoffs_df,
+        "league_playoff_fixtures": league_playoff_fixtures_df,
     }
 
     for target_dir, yr, t_rec, t_bat, t_pit, t_fin in [
@@ -1074,7 +1094,7 @@ def generate_demo_save(save_name: str = "OOTP27_Demo_League") -> dict:
 
 def run_functionality_verification(save_slug: str = None) -> dict:
     """
-    Executes an 8-point end-to-end diagnostic verification suite across the application's
+    Executes a 9-point end-to-end diagnostic verification suite across the application's
     core subsystems to guarantee functionality.
     """
     from app.analytics import (
@@ -1086,6 +1106,9 @@ def run_functionality_verification(save_slug: str = None) -> dict:
         get_league_evolution_hub,
         get_league_leaders_hub,
         get_hall_of_fame_hub,
+        get_newspaper_front_page,
+        get_stretch_hub,
+        get_world_dashboard,
     )
     from app.bnn_generator import list_available_bnn_reports
 
@@ -1257,9 +1280,34 @@ def run_functionality_verification(save_slug: str = None) -> dict:
             "detail": f"Error: {exc}",
         })
 
+    # 9. Front Page Gazette, "The Stretch" & World Dashboard
+    t0 = time.perf_counter()
+    try:
+        fp = get_newspaper_front_page(target_slug)
+        st = get_stretch_hub(target_slug)
+        wd = get_world_dashboard(target_slug)
+        hl_cnt = len(fp.get("headlines") or [])
+        pkg_cnt = len(st.get("league_packages") or [])
+        org_cnt = len(wd.get("organizational_pyramid") or [])
+        checks.append({
+            "id": "frontpage_stretch_world",
+            "name": "9. Front Page Gazette, 'The Stretch' & World Dashboard",
+            "status": "pass" if (hl_cnt > 0 and pkg_cnt > 0 and org_cnt > 0) else "warn",
+            "duration_ms": round((time.perf_counter() - t0) * 1000, 1),
+            "detail": f"Generated {hl_cnt} dynamic headlines ('{fp.get('primary_headline', {}).get('headline', '')}') | {pkg_cnt} Stretch race package(s) | {org_cnt} World Organizations",
+        })
+    except Exception as exc:
+        checks.append({
+            "id": "frontpage_stretch_world",
+            "name": "9. Front Page Gazette, 'The Stretch' & World Dashboard",
+            "status": "fail",
+            "duration_ms": round((time.perf_counter() - t0) * 1000, 1),
+            "detail": f"Error: {exc}",
+        })
+
     pass_cnt = sum(1 for c in checks if c["status"] == "pass")
     fail_cnt = sum(1 for c in checks if c["status"] == "fail")
-    overall = "healthy" if fail_cnt == 0 and pass_cnt >= 6 else ("warning" if fail_cnt == 0 else "error")
+    overall = "healthy" if fail_cnt == 0 and pass_cnt >= 7 else ("warning" if fail_cnt == 0 else "error")
 
     return {
         "overall_status": overall,

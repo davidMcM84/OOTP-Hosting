@@ -5,13 +5,13 @@ Ensures 100% out-of-the-box functionality on any machine:
 1. Checks Python 3.10+ runtime and automatically installs/verifies requirements.txt dependencies.
 2. Auto-detects OOTP Baseball 27/26/25 saved_games folders (or accepts a custom path).
 3. Discovers .lg saves, or generates a full multi-season Demo League (OOTP27_Demo_League.lg) if no CSV exports exist yet.
-4. Ingests the active save into SQLite and executes an 8-point end-to-end functionality self-test.
+4. Ingests the active save into SQLite and executes a 9-point end-to-end functionality self-test.
 5. Optionally creates the Windows Desktop Shortcut and launches the standalone web suite.
 
 Usage:
   python setup_wizard.py            # Interactive step-by-step setup wizard
-  python setup_wizard.py --auto     # Unattended setup, demo fallback if needed, & 8-point verification
-  python setup_wizard.py --verify   # Run the 8-point functionality verification suite and exit
+  python setup_wizard.py --auto     # Unattended setup, demo fallback if needed, & 9-point verification
+  python setup_wizard.py --verify   # Run the 9-point functionality verification suite and exit
   python setup_wizard.py --demo     # Generate/refresh the bundled OOTP27_Demo_League.lg save and verify
 """
 
@@ -63,7 +63,7 @@ def ensure_dependencies(auto_install: bool = True) -> bool:
 
 def print_verification_table(report: dict):
     print("\n" + "-" * 78)
-    print(f"  8-POINT FUNCTIONALITY VERIFICATION REPORT (Save: {report.get('save_slug')})")
+    print(f"  9-POINT FUNCTIONALITY VERIFICATION REPORT (Save: {report.get('save_slug')})")
     print("-" * 78)
     for chk in report.get("checks", []):
         st = chk["status"].upper()
@@ -167,8 +167,8 @@ def run_wizard():
                 set_active_save_slug(chosen_save)
                 update_setup_config({"default_save_slug": chosen_save})
 
-    # Step 4: Run 8-Point Functionality Verification
-    print("\n[STEP 4/4] Running 8-Point End-to-End Functionality Verification Suite...")
+    # Step 4: Run 9-Point Functionality Verification
+    print("\n[STEP 4/4] Running 9-Point End-to-End Functionality Verification Suite...")
     report = run_functionality_verification()
     print_verification_table(report)
 

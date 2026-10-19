@@ -334,3 +334,193 @@ select option {
   border-radius: 10px;
 }
 
+/* ============================================================================
+   1. BRAND NEW LANDING PAGE — EDITORIAL NEWSPAPER BROADSHEET ("THE CHRONICLE")
+   ============================================================================ */
+.newspaper-sheet {
+  position: relative;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(245, 158, 11, 0.06), transparent 55%),
+    linear-gradient(180deg, #161513 0%, #11100f 55%, #0c0c0b 100%);
+  border: 1px solid rgba(219, 219, 219, 0.28);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.92), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  color: #e6e2d8;
+  transition: background 0.25s ease, color 0.25s ease;
+}
+
+/* Optional Classic Warm Newsprint Paper Mode */
+.newspaper-sheet.newsprint-light {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(180, 145, 85, 0.12), transparent 60%),
+    linear-gradient(180deg, #f4efe4 0%, #ece4d4 55%, #e5dcc9 100%);
+  border: 1px solid #8a7f6d;
+  color: #181613;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), inset 0 0 36px rgba(138, 127, 109, 0.22);
+}
+
+.newspaper-sheet.newsprint-light .text-white,
+.newspaper-sheet.newsprint-light .np-ink {
+  color: #141210 !important;
+}
+
+.newspaper-sheet.newsprint-light .text-slate-300,
+.newspaper-sheet.newsprint-light .text-slate-400,
+.newspaper-sheet.newsprint-light .np-muted {
+  color: #4a453d !important;
+}
+
+.newspaper-sheet.newsprint-light .np-box {
+  background: rgba(255, 252, 245, 0.72) !important;
+  border-color: rgba(40, 35, 28, 0.28) !important;
+}
+
+.newspaper-sheet.newsprint-light .agate-table thead th {
+  background: #dcd2be !important;
+  color: #181613 !important;
+  border-bottom-color: #2b2620 !important;
+}
+
+.newspaper-sheet.newsprint-light .agate-table tbody td {
+  color: #181613 !important;
+  border-bottom-color: rgba(40, 35, 28, 0.16) !important;
+}
+
+.newspaper-double-rule {
+  border-top: 3px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  height: 6px;
+  opacity: 0.75;
+}
+
+.newspaper-thin-rule {
+  border-top: 1px solid rgba(219, 219, 219, 0.26);
+}
+
+.newspaper-sheet.newsprint-light .newspaper-thin-rule {
+  border-top: 1px solid rgba(24, 22, 19, 0.35);
+}
+
+.newspaper-masthead-title {
+  font-family: 'Playfair Display', Georgia, 'Times New Roman', serif;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  line-height: 0.96;
+  text-transform: uppercase;
+}
+
+.newspaper-banner-headline {
+  font-family: 'Playfair Display', Georgia, 'Times New Roman', serif;
+  font-weight: 900;
+  letter-spacing: -0.025em;
+  line-height: 1.03;
+}
+
+.newspaper-subhead {
+  font-family: 'Newsreader', Georgia, serif;
+  font-style: italic;
+  line-height: 1.38;
+}
+
+.newspaper-body-copy {
+  font-family: 'Newsreader', Georgia, serif;
+  font-size: 0.98rem;
+  line-height: 1.62;
+  text-align: justify;
+}
+
+.newspaper-dropcap::first-letter {
+  float: left;
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 3.35rem;
+  line-height: 0.82;
+  padding-top: 4px;
+  padding-right: 10px;
+  padding-bottom: 2px;
+  font-weight: 900;
+  color: #f59e0b;
+}
+
+.newspaper-sheet.newsprint-light .newspaper-dropcap::first-letter {
+  color: #991b1b;
+}
+
+/* Broadsheet Agate Standings & Box Score Tables */
+.agate-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.73rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.agate-table thead th {
+  background: rgba(10, 10, 10, 0.85);
+  color: #b8b8b8;
+  font-weight: 800;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.05em;
+  padding: 5px 6px;
+  border-bottom: 2px solid rgba(219, 219, 219, 0.45);
+  white-space: nowrap;
+}
+
+.agate-table tbody td {
+  padding: 4.5px 6px;
+  border-bottom: 1px dotted rgba(153, 153, 153, 0.28);
+  white-space: nowrap;
+}
+
+.agate-table tbody tr:hover {
+  background: rgba(245, 158, 11, 0.12);
+}
+
+/* ============================================================================
+   2. "THE STRETCH" — PLAYOFF BRACKET TREE & PENNANT RACE CARDS
+   ============================================================================ */
+.bracket-tree-scroll {
+  display: flex;
+  align-items: stretch;
+  gap: 1.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.75rem;
+}
+
+.bracket-round-col {
+  min-width: 295px;
+  flex: 1 1 295px;
+  display: flex;
+  flex-direction: column;
+}
+
+.bracket-round-matches {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  gap: 1rem;
+}
+
+.bracket-series-card {
+  position: relative;
+  background: linear-gradient(155deg, rgba(31, 31, 32, 0.96) 0%, rgba(16, 16, 18, 0.99) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 12px;
+  box-shadow: 0 12px 26px -8px rgba(0, 0, 0, 0.8);
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.bracket-series-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(245, 158, 11, 0.65);
+  box-shadow: 0 16px 32px -8px rgba(245, 158, 11, 0.2);
+}
+
+.bracket-series-card.championship-card {
+  background: linear-gradient(155deg, rgba(42, 34, 18, 0.96) 0%, rgba(20, 17, 12, 0.99) 100%);
+  border: 1.5px solid rgba(251, 191, 36, 0.65);
+  box-shadow: 0 16px 38px -8px rgba(245, 158, 11, 0.25);
+}
+
+

@@ -1181,3 +1181,442 @@ function renderPositionalSupplyChart(canvasId, positionalSupply) {
   });
 }
 
+/**
+ * 18. "The Stretch" — Pennant Race Momentum Worm Chart (Games Above/Below .500)
+ */
+function renderStretchTrajectoryChart(canvasId, trajectories) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId);
+  if (!ctx || !Array.isArray(trajectories) || !trajectories.length) return;
+
+  const palette = [
+    "#f59e0b", "#38bdf8", "#10b981", "#f43f5e",
+    "#a855f7", "#eab308", "#06b6d4", "#ec4899",
+  ];
+  const maxPts = Math.max(...trajectories.map(t => (t.points || []).length), 1);
+  const labels = Array.from({ length: maxPts }, (_, i) => {
+    const sample = trajectories[0]?.points?.[i];
+    return sample ? `G${sample.g}` : `Pt ${i + 1}`;
+  });
+
+  const datasets = trajectories.slice(0, 8).map((tm, idx) => {
+    const col = palette[idx % palette.length];
+    return {
+      label: `${tm.abbr} (${tm.record_str})`,
+      data: (tm.points || []).map(p => p.above_500),
+      borderColor: col,
+      backgroundColor: col + "22",
+      borderWidth: idx < 2 ? 3 : 2,
+      pointRadius: 2,
+      pointHoverRadius: 5,
+      tension: 0.28,
+      fill: false,
+    };
+  });
+
+  window._chartInstances[canvasId] = new Chart(ctx, {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          position: "top",
+          labels: { color: "#dbdbdb", font: { size: 10.5, weight: "700" }, boxWidth: 12 },
+        },
+        tooltip: {
+          callbacks: {
+            label: (context) => {
+              const v = Number(context.parsed.y || 0);
+              return ` ${context.dataset.label}: ${v >= 0 ? "+" : ""}${v} games vs .500`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid: { color: "rgba(95, 96, 98, 0.16)" },
+          ticks: { color: "#999999", font: { size: 10 } },
+        },
+        y: {
+          title: { display: true, text: "Games Above / Below .500", color: "#dbdbdb", font: { size: 10, weight: "700" } },
+          grid: {
+            color: (c) => (c.tick && c.tick.value === 0 ? "rgba(245, 158, 11, 0.55)" : "rgba(95, 96, 98, 0.18)"),
+          },
+          ticks: {
+            color: "#dbdbdb",
+            callback: (v) => (v > 0 ? `+${v}` : v),
+          },
+        },
+      },
+    },
+  });
+}
+
+/**
+ * 19. World Dashboard — Player Talent Tier & Age Distribution Chart
+ */
+function renderWorldTalentChart(canvasId, talentDist, mode = "tiers") {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId);
+  if (!ctx || !talentDist) return;
+
+  if (mode === "ages" && Array.isArray(talentDist.age_brackets) && talentDist.age_brackets.length) {
+    const rows = talentDist.age_brackets;
+    window._chartInstances[canvasId] = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: rows.map(r => `Age ${r.bracket}`),
+        datasets: [
+          {
+            label: "Active Players in Age Bracket",
+            data: rows.map(r => r.count),
+            backgroundColor: "rgba(56, 189, 248, 0.65)",
+            borderColor: "#38bdf8",
+            borderWidth: 1.5,
+            borderRadius: 5,
+            yAxisID: "yCount",
+          },
+          {
+            type: "line",
+            label: "Avg Potential (20-80 Scale)",
+            data: rows.map(r => r.avg_pot),
+            borderColor: "#f59e0b",
+            backgroundColor: "rgba(245, 158, 11, 0.2)",
+            borderWidth: 2.5,
+            pointRadius: 3.5,
+            tension: 0.3,
+            yAxisID: "yRating",
+          },
+          {
+            type: "line",
+            label: "Avg Overall (20-80 Scale)",
+            data: rows.map(r => r.avg_ovr),
+            borderColor: "#10b981",
+            backgroundColor: "rgba(16, 185, 129, 0.2)",
+            borderWidth: 2,
+            pointRadius: 3,
+            tension: 0.3,
+            yAxisID: "yRating",
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: "#dbdbdb", font: { size: 10, weight: "700" } } },
+        },
+        scales: {
+          x: {
+            grid: { color: "rgba(95, 96, 98, 0.16)" },
+            ticks: { color: "#dbdbdb", font: { size: 10, weight: "700" } },
+          },
+          yCount: {
+            position: "left",
+            title: { display: true, text: "Player Count", color: "#38bdf8", font: { size: 10 } },
+            grid: { color: "rgba(95, 96, 98, 0.18)" },
+            ticks: { color: "#dbdbdb" },
+          },
+          yRating: {
+            position: "right",
+            min: 20,
+            max: 80,
+            title: { display: true, text: "20-80 Scouting Scale", color: "#f59e0b", font: { size: 10 } },
+            grid: { drawOnChartArea: false },
+            ticks: { color: "#f59e0b" },
+          },
+        },
+      },
+    });
+    return;
+  }
+
+  const tiers = talentDist.ovr_tiers || [];
+  const colors = ["#f59e0b", "#10b981", "#38bdf8", "#a855f7", "#64748b"];
+  window._chartInstances[canvasId] = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: tiers.map(t => t.tier),
+      datasets: [
+        {
+          label: "World Player Population by Scouting Tier",
+          data: tiers.map(t => t.count),
+          backgroundColor: tiers.map((_, i) => (colors[i % colors.length]) + "bb"),
+          borderColor: tiers.map((_, i) => colors[i % colors.length]),
+          borderWidth: 1.5,
+          borderRadius: 6,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: "#dbdbdb", font: { size: 10, weight: "700" } } },
+      },
+      scales: {
+        x: {
+          grid: { color: "rgba(95, 96, 98, 0.16)" },
+          ticks: { color: "#dbdbdb", font: { size: 10, weight: "700" } },
+        },
+        y: {
+          title: { display: true, text: "Active Players", color: "#dbdbdb", font: { size: 10 } },
+          grid: { color: "rgba(95, 96, 98, 0.18)" },
+          ticks: { color: "#dbdbdb" },
+        },
+      },
+    },
+  });
+}
+
+/**
+ * 20. World Dashboard — International Talent Pipeline Horizontal Bar Chart
+ */
+function renderWorldNationsChart(canvasId, nationsPipeline) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId);
+  if (!ctx || !Array.isArray(nationsPipeline) || !nationsPipeline.length) return;
+
+  const topNations = nationsPipeline.slice(0, 10);
+  window._chartInstances[canvasId] = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: topNations.map(n => `${n.abbr} • ${n.name}`),
+      datasets: [
+        {
+          label: "Active Players",
+          data: topNations.map(n => n.player_count),
+          backgroundColor: "rgba(16, 185, 129, 0.72)",
+          borderColor: "#10b981",
+          borderWidth: 1.5,
+          borderRadius: 5,
+        },
+      ],
+    },
+    options: {
+      indexAxis: "y",
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (c) => {
+              const row = topNations[c.dataIndex] || {};
+              return ` ${row.player_count} players (${row.share_pct}% of world • ${row.elite_count} stars 60+ OVR)`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid: { color: "rgba(95, 96, 98, 0.18)" },
+          ticks: { color: "#dbdbdb", font: { size: 10 } },
+        },
+        y: {
+          grid: { display: false },
+          ticks: { color: "#dbdbdb", font: { size: 10.5, weight: "700" } },
+        },
+      },
+    },
+  });
+}
+
+/**
+ * 21. World Dashboard — Financial Power (Payroll $M) vs. On-Field Win% Quadrant Scatter
+ */
+function renderWorldFinancialQuadrantChart(canvasId, financialPoints) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId);
+  if (!ctx || !Array.isArray(financialPoints) || !financialPoints.length) return;
+
+  const quadColors = {
+    "Moneyball Contender": "#10b981",
+    "Juggernaut": "#f59e0b",
+    "Underachiever": "#f43f5e",
+    "Rebuilding": "#38bdf8",
+  };
+
+  const groups = ["Moneyball Contender", "Juggernaut", "Underachiever", "Rebuilding"];
+  const datasets = groups.map(qName => {
+    const pts = financialPoints.filter(p => p.quadrant === qName);
+    const col = quadColors[qName] || "#dbdbdb";
+    return {
+      label: qName,
+      data: pts.map(p => ({
+        x: p.payroll_m > 0 ? p.payroll_m : p.budget_m,
+        y: Number((p.pct * 1000).toFixed(0)),
+        raw: p,
+      })),
+      backgroundColor: col + "cc",
+      borderColor: col,
+      borderWidth: 1.5,
+      pointRadius: 6,
+      pointHoverRadius: 9,
+    };
+  }).filter(ds => ds.data.length > 0);
+
+  window._chartInstances[canvasId] = new Chart(ctx, {
+    type: "scatter",
+    data: { datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: "top",
+          labels: { color: "#dbdbdb", font: { size: 10, weight: "700" }, boxWidth: 10 },
+        },
+        tooltip: {
+          callbacks: {
+            label: (c) => {
+              const p = c.raw?.raw || {};
+              return ` ${p.abbr} (${p.full_name}): .${String(Math.round((p.pct || 0) * 1000)).padStart(3, "0")} Win% • $${p.payroll_m || p.budget_m}M • ${p.total_war} WAR`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          title: { display: true, text: "Club Payroll / Budget ($ Millions)", color: "#dbdbdb", font: { size: 10, weight: "700" } },
+          grid: { color: "rgba(95, 96, 98, 0.18)" },
+          ticks: {
+            color: "#dbdbdb",
+            callback: (v) => `$${v}M`,
+          },
+        },
+        y: {
+          title: { display: true, text: "Winning Percentage (pts)", color: "#dbdbdb", font: { size: 10, weight: "700" } },
+          grid: {
+            color: (c) => (c.tick && c.tick.value === 500 ? "rgba(245, 158, 11, 0.55)" : "rgba(95, 96, 98, 0.18)"),
+          },
+          ticks: {
+            color: "#dbdbdb",
+            callback: (v) => `.${String(v).padStart(3, "0")}`,
+          },
+        },
+      },
+    },
+  });
+}
+
+/**
+ * 22. World Dashboard — League Ecosystem Run Environment & Offense vs. ERA Chart
+ */
+function renderWorldEcosystemChart(canvasId, leaguesEcosystem, histTrends) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+
+  if (Array.isArray(leaguesEcosystem) && leaguesEcosystem.length > 1) {
+    const lgs = leaguesEcosystem.slice(0, 15);
+    window._chartInstances[canvasId] = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: lgs.map(l => `${l.abbr} (Lvl ${l.level})`),
+        datasets: [
+          {
+            label: "League OPS (x1000)",
+            data: lgs.map(l => Math.round((l.league_ops || 0.720) * 1000)),
+            backgroundColor: "rgba(56, 189, 248, 0.7)",
+            borderColor: "#38bdf8",
+            borderWidth: 1.5,
+            borderRadius: 4,
+            yAxisID: "yOps",
+          },
+          {
+            type: "line",
+            label: "League ERA",
+            data: lgs.map(l => Number(l.league_era || 4.15)),
+            borderColor: "#f43f5e",
+            backgroundColor: "rgba(244, 63, 94, 0.2)",
+            borderWidth: 2.5,
+            pointRadius: 3.5,
+            tension: 0.25,
+            yAxisID: "yEra",
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: "#dbdbdb", font: { size: 10, weight: "700" } } },
+        },
+        scales: {
+          x: {
+            grid: { color: "rgba(95, 96, 98, 0.16)" },
+            ticks: { color: "#dbdbdb", font: { size: 10, weight: "700" } },
+          },
+          yOps: {
+            position: "left",
+            title: { display: true, text: "League OPS (pts)", color: "#38bdf8", font: { size: 10 } },
+            grid: { color: "rgba(95, 96, 98, 0.18)" },
+            ticks: { color: "#38bdf8", callback: (v) => `.${v}` },
+          },
+          yEra: {
+            position: "right",
+            title: { display: true, text: "League ERA", color: "#f43f5e", font: { size: 10 } },
+            grid: { drawOnChartArea: false },
+            ticks: { color: "#f43f5e" },
+          },
+        },
+      },
+    });
+    return;
+  }
+
+  const rows = (histTrends && histTrends.length) ? histTrends : (leaguesEcosystem || []).map(l => ({
+    year: l.season_year || 2026,
+    rpg: Number(((l.league_era || 4.15) * 2.15).toFixed(2)),
+    era: Number(l.league_era || 4.15),
+  }));
+  window._chartInstances[canvasId] = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: rows.map(r => String(r.year)),
+      datasets: [
+        {
+          label: "World Runs / Game",
+          data: rows.map(r => r.rpg),
+          borderColor: "#f59e0b",
+          backgroundColor: "rgba(245, 158, 11, 0.18)",
+          borderWidth: 2.5,
+          tension: 0.3,
+          fill: true,
+        },
+        {
+          label: "World League ERA",
+          data: rows.map(r => r.era),
+          borderColor: "#38bdf8",
+          backgroundColor: "rgba(56, 189, 248, 0.12)",
+          borderWidth: 2,
+          tension: 0.3,
+          fill: false,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: "#dbdbdb", font: { size: 10, weight: "700" } } },
+      },
+      scales: {
+        x: {
+          grid: { color: "rgba(95, 96, 98, 0.16)" },
+          ticks: { color: "#dbdbdb", font: { size: 10 } },
+        },
+        y: {
+          grid: { color: "rgba(95, 96, 98, 0.18)" },
+          ticks: { color: "#dbdbdb" },
+        },
+      },
+    },
+  });
+}
+
+

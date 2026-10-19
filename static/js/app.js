@@ -6,7 +6,16 @@ const AppState = {
   activeYear: null,
   activeDump: null,
   activeTeamId: null,
-  activeTab: "overview",
+  activeTab: "frontpage",
+  frontPageData: null,
+  frontPageHeadlineMode: "auto", // auto | matchup | champions | phillies_fire | hot_streak | superstar
+  frontPagePaperTheme: "dark", // dark | light
+  stretchData: null,
+  stretchLeagueIds: [],
+  worldData: null,
+  worldTalentMode: "tiers", // tiers | ages
+  worldOrgSearch: "",
+  worldSelectedOrgId: null,
   teamHubSubTab: "depth", // depth | strengths | roadmap | roster | command
   selectedDepthPos: "SS",
   saberSubTab: "batting", // batting | pitching | split_saber | proj_teams | proj_batters | proj_pitchers | split_proj
@@ -405,6 +414,10 @@ async function onSaveChanged(newSaveSlug, forceSync = false, sourceLabel = null)
     }
     AppState.activeYear = null;
     AppState.activeDump = sourceLabel;
+    AppState.frontPageData = null;
+    AppState.stretchData = null;
+    AppState.stretchLeagueIds = [];
+    AppState.worldData = null;
     AppState.teamDashboard = null;
     AppState.sabermetrics = null;
     AppState.spray = null;
@@ -432,6 +445,9 @@ async function onSaveChanged(newSaveSlug, forceSync = false, sourceLabel = null)
 async function onLeagueChanged(newLeagueId) {
   AppState.activeLeagueId = Number(newLeagueId) || null;
   AppState.activeTeamId = null;
+  AppState.frontPageData = null;
+  AppState.stretchData = null;
+  AppState.stretchLeagueIds = AppState.activeLeagueId ? [AppState.activeLeagueId] : [];
   AppState.teamDashboard = null;
   AppState.sabermetrics = null;
   AppState.projections = null;
@@ -454,6 +470,9 @@ async function onLeagueChanged(newLeagueId) {
 
 async function onYearChanged(newYear) {
   AppState.activeYear = Number(newYear) || null;
+  AppState.frontPageData = null;
+  AppState.stretchData = null;
+  AppState.worldData = null;
   AppState.sabermetrics = null;
   AppState.projections = null;
   AppState.evolutionData = null;
@@ -509,28 +528,48 @@ async function switchTab(tabName) {
     return;
   }
 
-  if (tabName === "overview") {
-    renderOverviewTab(container);
-  } else if (tabName === "teamhub") {
-    await renderTeamHubTab(container);
-  } else if (tabName === "leaders") {
-    await renderLeagueLeadersTab(container);
-  } else if (tabName === "records") {
-    await renderRecordsTab(container);
-  } else if (tabName === "hof") {
-    await renderHofTab(container);
-  } else if (tabName === "statcast") {
-    await renderStatcastTab(container);
-  } else if (tabName === "gamelogs") {
-    await renderGameLogsTab(container);
-  } else if (tabName === "sabermetrics") {
-    await renderSabermetricsTab(container);
-  } else if (tabName === "evolution") {
-    await renderEvolutionTab(container);
-  } else if (tabName === "statsplus") {
-    await renderStatsPlusTab(container);
-  } else if (tabName === "bnn") {
-    await renderBnnPortalTab(container);
+  try {
+    if (tabName === "frontpage") {
+      await renderFrontPageTab(container);
+    } else if (tabName === "stretch") {
+      await renderStretchTab(container);
+    } else if (tabName === "world") {
+      await renderWorldDashboardTab(container);
+    } else if (tabName === "overview") {
+      renderOverviewTab(container);
+    } else if (tabName === "teamhub") {
+      await renderTeamHubTab(container);
+    } else if (tabName === "leaders") {
+      await renderLeagueLeadersTab(container);
+    } else if (tabName === "records") {
+      await renderRecordsTab(container);
+    } else if (tabName === "hof") {
+      await renderHofTab(container);
+    } else if (tabName === "statcast") {
+      await renderStatcastTab(container);
+    } else if (tabName === "gamelogs") {
+      await renderGameLogsTab(container);
+    } else if (tabName === "sabermetrics") {
+      await renderSabermetricsTab(container);
+    } else if (tabName === "evolution") {
+      await renderEvolutionTab(container);
+    } else if (tabName === "statsplus") {
+      await renderStatsPlusTab(container);
+    } else if (tabName === "bnn") {
+      await renderBnnPortalTab(container);
+    }
+  } catch (err) {
+    console.error(`Error rendering tab '${tabName}':`, err);
+    container.innerHTML = `
+      <div class="glass-card p-6 my-4 border border-rose-500/40 text-center max-w-2xl mx-auto animate-view">
+        <div class="text-rose-400 text-2xl mb-2"><i class="bi bi-exclamation-triangle-fill"></i></div>
+        <h3 class="text-base font-black text-white uppercase tracking-wider mb-1">Could Not Load View (${tabName})</h3>
+        <p class="text-xs font-mono text-slate-300 mb-4">${err.message || err}</p>
+        <button onclick="switchTab('${tabName}')" class="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs uppercase tracking-wider transition">
+          <i class="bi bi-arrow-clockwise mr-1"></i> Retry Loading View
+        </button>
+      </div>
+    `;
   }
 }
 
@@ -602,6 +641,8 @@ function renderOverviewTab(container) {
               <th class="text-right" title="Tied Games">T</th>
               <th class="text-right">PCT</th>
               <th class="text-right">GB</th>
+              <th class="text-right" title="Division Magic / Elimination Number">Magic#</th>
+              <th class="text-right" title="Record in Last 10 Games">L10</th>
               <th class="text-right">Strk</th>
               <th class="text-right" title="Pythagorean Expected W-L-T (RS^1.83 / (RS^1.83 + RA^1.83))">Pyth W-L-T</th>
               <th class="text-right" title="Actual Wins minus Pythagorean Wins">Luck</th>
@@ -625,6 +666,10 @@ function renderOverviewTab(container) {
               const luckCls = t.luck_diff > 0 ? "text-emerald-400" : (t.luck_diff < 0 ? "text-rose-400" : "text-slate-400");
               const tiesCount = Number(t.t || 0);
               const pythStr = tiesCount > 0 ? `${t.pyth_w}-${t.pyth_l}-${tiesCount}` : `${t.pyth_w}-${t.pyth_l}`;
+              const mStr = t.magic_str || "-";
+              const mCls = mStr === "CLINCHED" ? "text-amber-300 font-extrabold" : (mStr === "ELIM" ? "text-slate-500" : "text-sky-300");
+              const l10Str = t.l10_str || "5-5";
+              const l10Cls = (t.l10_w || 0) >= 7 ? "text-emerald-400 font-bold" : ((t.l10_w || 0) <= 3 ? "text-rose-400" : "text-slate-200");
               return `
                 <tr onclick="switchTeamAndGo(${t.team_id})" class="cursor-pointer">
                   <td class="font-bold">
@@ -643,6 +688,8 @@ function renderOverviewTab(container) {
                   <td class="text-right font-mono ${tiesCount > 0 ? 'text-amber-300 font-bold' : 'text-slate-500'}">${tiesCount}</td>
                   <td class="text-right font-mono font-bold text-sky-300">${fmtAvg(t.pct)}</td>
                   <td class="text-right font-mono text-slate-400">${t.gb === 0 ? "-" : t.gb.toFixed(1)}</td>
+                  <td class="text-right font-mono text-xs ${mCls}">${mStr}</td>
+                  <td class="text-right font-mono text-xs ${l10Cls}">${l10Str}</td>
                   <td class="text-right font-mono text-xs ${t.streak > 0 ? 'text-emerald-400' : 'text-rose-400'}">${t.streak_str}</td>
                   <td class="text-right font-mono text-slate-200">${pythStr}</td>
                   <td class="text-right font-mono ${luckCls}">${t.luck_diff > 0 ? '+' : ''}${t.luck_diff}</td>
@@ -7618,6 +7665,1449 @@ window.finishSetupWizard = async function() {
   } catch (e) {}
   closeSetupWizardModal();
 };
+
+/* ============================================================================
+ * 12. BRAND NEW LANDING PAGE — EDITORIAL NEWSPAPER FRONT PAGE ("THE CHRONICLE")
+ * ============================================================================ */
+window.setNewspaperHeadlineMode = function(modeId) {
+  AppState.frontPageHeadlineMode = modeId || "auto";
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "frontpage") {
+    renderFrontPageTab(container);
+  }
+};
+
+window.toggleNewspaperPaperTheme = function() {
+  AppState.frontPagePaperTheme = AppState.frontPagePaperTheme === "light" ? "dark" : "light";
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "frontpage") {
+    renderFrontPageTab(container);
+  }
+};
+
+window.jumpToGameReplayFromFrontPage = async function(gameId) {
+  await switchTab("gamelogs");
+  if (typeof selectGameReplay === "function" && gameId) {
+    setTimeout(() => selectGameReplay(gameId), 150);
+  }
+};
+
+async function renderFrontPageTab(container) {
+  if (!AppState.frontPageData) {
+    showLoading("Typesetting Broadsheet Front Page & Headlines...");
+    try {
+      const params = new URLSearchParams({ save: AppState.activeSave });
+      if (AppState.activeLeagueId) params.set("league_id", AppState.activeLeagueId);
+      if (AppState.activeYear) params.set("year", AppState.activeYear);
+      AppState.frontPageData = await fetchJSON(`/api/frontpage?${params.toString()}`);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  const fp = AppState.frontPageData || {};
+  const mast = fp.masthead || {};
+  const headlines = fp.headlines || [];
+  const mode = AppState.frontPageHeadlineMode || "auto";
+  const activeHead = (mode !== "auto" && headlines.find(h => h.id === mode)) || fp.primary_headline || headlines[0] || {
+    id: "matchup",
+    kicker: "CHAMPIONSHIP EDITION",
+    headline: "Senators and Reds set for World Series Matchup",
+    subhead: "Top clubs collide on the grandest stage.",
+    byline: "By BNN National Desk",
+    badge: "FRONT PAGE LEAD",
+    hero_teams: [],
+    paragraphs: [],
+  };
+
+  const standingsGroups = fp.standings_groups || [];
+  const wildCards = fp.wild_cards || [];
+  const bracket = fp.playoff_bracket || {};
+  const hottestTeams = fp.hottest_teams || [];
+  const coldTeams = fp.cold_teams || [];
+  const activeStreaks = fp.active_streaks || [];
+  const wireStories = fp.wire_stories || [];
+  const leaders = fp.leaders || {};
+  const recentGames = fp.recent_games || [];
+  const isLightPaper = AppState.frontPagePaperTheme === "light";
+
+  // Build Hero Teams Banner inside the Lead Story
+  const heroTeams = activeHead.hero_teams || [];
+  const heroTeamsHtml = heroTeams.length >= 2 ? `
+    <div class="np-box my-4 p-4 rounded-xl bg-slate-900/85 border border-amber-500/35 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div onclick="switchTeamAndGo(${heroTeams[0].team_id})" class="flex items-center gap-3 cursor-pointer group">
+        <img src="${teamLogoUrl(heroTeams[0].logo_file_name)}" class="w-14 h-14 object-contain rounded-xl bg-slate-950/90 p-1.5 border border-slate-700 group-hover:border-amber-400 transition" alt="">
+        <div>
+          <div class="text-[10px] font-mono uppercase tracking-wider text-amber-400 font-bold">CONTENDER / PENNANT WINNER</div>
+          <div class="text-base font-black text-white np-ink group-hover:text-amber-400 transition">${heroTeams[0].full_name}</div>
+          <div class="text-xs font-mono text-slate-300 np-muted">${heroTeams[0].record_str} (${fmtAvg(heroTeams[0].pct)}) • L10: <b>${heroTeams[0].l10_str || '7-3'}</b> • ${Number(heroTeams[0].total_war || 0).toFixed(1)} WAR</div>
+        </div>
+      </div>
+      <div class="text-center px-3 py-1.5 rounded-lg bg-amber-500/15 border border-amber-400/40">
+        <div class="text-[10px] font-mono uppercase tracking-widest text-amber-300 font-extrabold">${bracket.championship_series?.round_name || 'HEAD-TO-HEAD'}</div>
+        <div class="text-lg font-black font-mono text-white np-ink">
+          ${bracket.championship_series && (bracket.championship_series.result0 || bracket.championship_series.result1)
+            ? `${bracket.championship_series.result0} — ${bracket.championship_series.result1}`
+            : `VS`}
+        </div>
+        <div class="text-[9.5px] font-mono text-slate-400 np-muted">Best of ${bracket.championship_series?.best_of || 7}</div>
+      </div>
+      <div onclick="switchTeamAndGo(${heroTeams[1].team_id})" class="flex items-center gap-3 sm:flex-row-reverse sm:text-right cursor-pointer group">
+        <img src="${teamLogoUrl(heroTeams[1].logo_file_name)}" class="w-14 h-14 object-contain rounded-xl bg-slate-950/90 p-1.5 border border-slate-700 group-hover:border-amber-400 transition" alt="">
+        <div>
+          <div class="text-[10px] font-mono uppercase tracking-wider text-sky-400 font-bold">CONTENDER / PENNANT WINNER</div>
+          <div class="text-base font-black text-white np-ink group-hover:text-sky-400 transition">${heroTeams[1].full_name}</div>
+          <div class="text-xs font-mono text-slate-300 np-muted">${heroTeams[1].record_str} (${fmtAvg(heroTeams[1].pct)}) • L10: <b>${heroTeams[1].l10_str || '7-3'}</b> • ${Number(heroTeams[1].total_war || 0).toFixed(1)} WAR</div>
+        </div>
+      </div>
+    </div>
+  ` : (heroTeams.length === 1 ? `
+    <div onclick="switchTeamAndGo(${heroTeams[0].team_id})" class="np-box my-4 p-4 rounded-xl bg-slate-900/85 border border-amber-500/35 flex flex-wrap items-center justify-between gap-4 cursor-pointer group">
+      <div class="flex items-center gap-3.5">
+        <img src="${teamLogoUrl(heroTeams[0].logo_file_name)}" class="w-14 h-14 object-contain rounded-xl bg-slate-950/90 p-1.5 border border-slate-700 group-hover:border-amber-400 transition" alt="">
+        <div>
+          <div class="text-[10px] font-mono uppercase tracking-wider text-amber-400 font-bold">${activeHead.badge || 'FEATURED FRANCHISE'}</div>
+          <div class="text-lg font-black text-white np-ink group-hover:text-amber-400 transition">${heroTeams[0].full_name} (${heroTeams[0].abbr})</div>
+          <div class="text-xs font-mono text-slate-300 np-muted">Season: <b>${heroTeams[0].record_str}</b> (${fmtAvg(heroTeams[0].pct)}) • Last 10: <b class="text-emerald-400">${heroTeams[0].l10_str || '7-3'}</b> • Streak: <b>${heroTeams[0].streak_str || 'W3'}</b></div>
+        </div>
+      </div>
+      <div class="flex items-center gap-4 font-mono text-xs">
+        <div class="text-center">
+          <div class="text-[10px] text-slate-400 np-muted">RUN DIFF</div>
+          <div class="font-black text-sm ${(heroTeams[0].run_diff || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${(heroTeams[0].run_diff || 0) >= 0 ? '+' : ''}${heroTeams[0].run_diff || 0}</div>
+        </div>
+        <div class="text-center">
+          <div class="text-[10px] text-slate-400 np-muted">PYTH W-L</div>
+          <div class="font-bold text-white np-ink">${heroTeams[0].pyth_w || 0}-${heroTeams[0].pyth_l || 0}</div>
+        </div>
+        <div class="text-center">
+          <div class="text-[10px] text-slate-400 np-muted">TEAM WAR</div>
+          <div class="font-black text-sky-400 text-sm">${Number(heroTeams[0].total_war || 0).toFixed(1)}</div>
+        </div>
+      </div>
+    </div>
+  ` : "");
+
+  // Secondary Column 2 Story: "On Fire! Last-10 Surge & Pennant Fever"
+  const hotClub = hottestTeams[0] || heroTeams[0] || {};
+  const secondHot = hottestTeams[1] || hotClub;
+  const tightestRace = standingsGroups.slice().sort((a, b) => (a.lead_gb || 99) - (b.lead_gb || 99))[0] || standingsGroups[0];
+
+  // Agate Standings Tables (Right Column Rail)
+  const agateStandingsHtml = standingsGroups.map(grp => `
+    <div class="np-box rounded-lg bg-slate-950/65 border border-slate-800/90 overflow-hidden mb-3">
+      <div class="px-2.5 py-1.5 bg-slate-900/95 border-b border-slate-800 flex items-center justify-between">
+        <span class="font-mono font-extrabold text-[11px] uppercase tracking-wider text-amber-300">${grp.title}</span>
+        <span class="font-mono text-[9.5px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">${grp.race_status}</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="agate-table">
+          <thead>
+            <tr>
+              <th class="text-left">Club</th>
+              <th class="text-right">W-L</th>
+              <th class="text-right">PCT</th>
+              <th class="text-right">GB</th>
+              <th class="text-right" title="Record in Last 10 Games">L10</th>
+              <th class="text-right">Strk</th>
+              <th class="text-right">RD</th>
+              <th class="text-right" title="Magic / Elimination Number">M#</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(grp.teams || []).map((t, i) => {
+              const l10W = Number(t.l10_w || 0);
+              const l10Cls = l10W >= 7 ? "text-emerald-400 font-bold" : (l10W <= 3 ? "text-rose-400" : "text-slate-200");
+              const mStr = t.magic_str || "-";
+              const mCls = mStr === "CLINCHED" ? "text-amber-300 font-black" : (mStr === "ELIM" ? "text-slate-500" : "text-sky-300");
+              return `
+                <tr onclick="switchTeamAndGo(${t.team_id})" class="cursor-pointer">
+                  <td class="font-bold">
+                    <div class="flex items-center gap-1.5">
+                      <span class="text-slate-500 text-[10px] w-3">${i + 1}</span>
+                      <img src="${teamLogoUrl(t.logo_file_name)}" class="w-4 h-4 object-contain" alt="">
+                      <span class="text-white np-ink hover:text-amber-400">${t.nickname || t.name}</span>
+                      <span class="text-[9.5px] text-slate-400 np-muted">(${t.abbr})</span>
+                    </div>
+                  </td>
+                  <td class="text-right font-bold text-white np-ink">${t.record_str}</td>
+                  <td class="text-right text-sky-300 font-semibold">${fmtAvg(t.pct)}</td>
+                  <td class="text-right text-slate-400 np-muted">${t.gb === 0 ? "—" : t.gb.toFixed(1)}</td>
+                  <td class="text-right ${l10Cls}">${t.l10_str || "5-5"}</td>
+                  <td class="text-right ${t.streak > 0 ? 'text-emerald-400' : 'text-rose-400'}">${t.streak_str}</td>
+                  <td class="text-right ${t.run_diff >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${t.run_diff >= 0 ? '+' : ''}${t.run_diff}</td>
+                  <td class="text-right ${mCls}">${mStr}</td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `).join("");
+
+  // Postseason Series / Bracket Mini-Agate inside Lead Column
+  const bracketRounds = bracket.rounds || [];
+  const bracketMiniHtml = bracketRounds.length ? `
+    <div class="np-box mt-4 p-3.5 rounded-xl bg-slate-900/80 border border-slate-700/80">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2 mb-2.5">
+        <div class="flex items-center gap-2">
+          <i class="bi bi-diagram-3-fill text-amber-400"></i>
+          <span class="font-mono text-xs font-black uppercase tracking-wider text-white np-ink">
+            ${bracket.is_projected ? 'Projected Postseason Bracket Snapshot' : `${fp.selected_year} Official Postseason Bracket`}
+          </span>
+        </div>
+        <button onclick="switchTab('stretch')" class="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-400/40 text-[10.5px] font-mono font-bold transition">
+          Open Full Bracket on "The Stretch" &rarr;
+        </button>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+        ${bracketRounds.flatMap(r => r.series || []).slice(0, 6).map(s => `
+          <div class="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 flex items-center justify-between text-xs font-mono">
+            <div class="min-w-0">
+              <div class="text-[9.5px] text-amber-300 uppercase font-bold truncate">${s.round_name} • ${s.status_label}</div>
+              <div class="flex items-center gap-2 mt-1">
+                <img src="${teamLogoUrl(s.team0?.logo_file_name)}" class="w-4 h-4 object-contain" alt="">
+                <span class="${s.winner_id === s.team0?.team_id ? 'font-black text-emerald-400' : 'text-white np-ink'}">${s.team0?.abbr || 'TBD'}</span>
+                <span class="text-slate-500">vs</span>
+                <img src="${teamLogoUrl(s.team1?.logo_file_name)}" class="w-4 h-4 object-contain" alt="">
+                <span class="${s.winner_id === s.team1?.team_id ? 'font-black text-emerald-400' : 'text-white np-ink'}">${s.team1?.abbr || 'TBD'}</span>
+              </div>
+            </div>
+            <div class="text-right shrink-0 ml-2">
+              <div class="text-sm font-black text-white np-ink">${s.result0} - ${s.result1}</div>
+              <div class="text-[9.5px] text-slate-400">Best of ${s.best_of}</div>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  ` : "";
+
+  container.innerHTML = `
+    <div class="animate-view space-y-4">
+      <!-- Interactive Headline Experimentation & Press Room Bar -->
+      <div class="glass-card p-3 border border-amber-500/35 flex flex-wrap items-center justify-between gap-2.5">
+        <div class="flex flex-wrap items-center gap-1.5">
+          <span class="text-[11px] font-mono font-extrabold uppercase tracking-wider text-amber-300 mr-1 flex items-center gap-1.5">
+            <i class="bi bi-megaphone-fill"></i> Press Room Headline Desk:
+          </span>
+          <button onclick="setNewspaperHeadlineMode('auto')" class="px-2.5 py-1 rounded-lg text-xs font-bold transition ${mode === 'auto' ? 'bg-amber-400 text-slate-950 font-black shadow' : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-700'}">
+            Auto (Live State)
+          </button>
+          ${headlines.map(h => `
+            <button onclick="setNewspaperHeadlineMode('${h.id}')" class="px-2.5 py-1 rounded-lg text-xs font-bold transition ${mode === h.id ? 'bg-amber-400 text-slate-950 font-black shadow' : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-700'}" title="${h.headline}">
+              ${h.id === 'matchup' ? 'World Series Matchup' : (h.id === 'champions' ? 'World Champs!' : (h.id === 'phillies_fire' ? 'Phillies 7-3 L10!' : (h.id === 'hot_streak' ? 'Hottest L10 Streak' : 'MVP Showcase')))}
+            </button>
+          `).join("")}
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="toggleNewspaperPaperTheme()" class="px-3 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-amber-200 border border-slate-700 text-xs font-mono font-bold transition flex items-center gap-1.5">
+            <i class="bi ${isLightPaper ? 'bi-moon-stars-fill text-sky-400' : 'bi-journal-richtext text-amber-300'}"></i>
+            ${isLightPaper ? 'Dark Broadsheet Ink' : 'Classic Warm Newsprint'}
+          </button>
+          <button onclick="switchTab('stretch')" class="px-3 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-400/40 text-xs font-bold transition flex items-center gap-1">
+            <i class="bi bi-flag-fill"></i> The Stretch
+          </button>
+          <button onclick="switchTab('world')" class="px-3 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-400/40 text-xs font-bold transition flex items-center gap-1">
+            <i class="bi bi-globe-americas"></i> World Dashboard
+          </button>
+        </div>
+      </div>
+
+      <!-- Broadsheet Front Page Sheet -->
+      <div class="newspaper-sheet ${isLightPaper ? 'newsprint-light' : ''} p-4 sm:p-6 lg:p-8">
+        <!-- Broadsheet Masthead with Left & Right Ears -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center pb-3">
+          <!-- Left Ear: Run Environment & Weather Report -->
+          <div class="lg:col-span-3 np-box p-2.5 rounded-lg border border-slate-700/70 bg-slate-900/50 text-xs font-mono">
+            <div class="text-[10px] font-extrabold uppercase tracking-widest text-amber-400 mb-0.5">LEAGUE RUN ENVIRONMENT</div>
+            <div class="text-white np-ink font-bold leading-snug">${mast.environment_note || 'Slash .260/.330/.420'}</div>
+            <div class="text-[10px] text-slate-400 np-muted mt-0.5">OOTP 27 Official Sabermetric Bureau</div>
+          </div>
+
+          <!-- Center Newspaper Title Flag -->
+          <div class="lg:col-span-6 text-center">
+            <div class="text-[10px] font-mono uppercase tracking-[0.25em] text-amber-400 font-bold mb-1">${mast.edition_badge || 'SPECIAL BROADSHEET EDITION'}</div>
+            <h1 class="newspaper-masthead-title text-3xl sm:text-5xl uw:text-6xl text-white np-ink tracking-tight">
+              ${mast.paper_title || 'THE BASEBALL CHRONICLE'}
+            </h1>
+            <div class="newspaper-subhead text-xs sm:text-sm text-slate-300 np-muted mt-1">
+              ${mast.sub_motto || '“All The Diamond News, Sabermetrics & Postseason Drama Fit To Print”'}
+            </div>
+          </div>
+
+          <!-- Right Ear: Featured Final Score / Late Wire -->
+          <div class="lg:col-span-3 np-box p-2.5 rounded-lg border border-slate-700/70 bg-slate-900/50 text-xs font-mono">
+            ${mast.featured_final ? `
+              <div class="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 mb-0.5">
+                <span>LATEST FINAL BOX</span>
+                <span>${mast.featured_final.date || ''}</span>
+              </div>
+              <div onclick="jumpToGameReplayFromFrontPage(${mast.featured_final.game_id})" class="font-black text-white np-ink hover:text-amber-400 cursor-pointer transition">
+                ${mast.featured_final.away_abbr} ${mast.featured_final.away_runs}, ${mast.featured_final.home_abbr} ${mast.featured_final.home_runs}
+                ${mast.featured_final.innings > 9 ? `(${mast.featured_final.innings} Inn)` : '(Final)'}
+              </div>
+              <div class="text-[10px] text-slate-400 np-muted mt-0.5">Click score for Pitch-by-Pitch Replay &rarr;</div>
+            ` : `
+              <div class="text-[10px] font-extrabold uppercase tracking-wider text-amber-400">BNN WIRE SERVICE</div>
+              <div class="font-bold text-white np-ink">All Standings & Box Scores Verified</div>
+            `}
+          </div>
+        </div>
+
+        <!-- Double Rule & Dateline Strip -->
+        <div class="newspaper-double-rule my-1"></div>
+        <div class="py-1.5 px-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono font-bold uppercase tracking-wider text-slate-300 np-muted">
+          <span>${mast.volume_str || 'VOL. I • NO. 162'}</span>
+          <span class="text-white np-ink font-black">${mast.dateline_date || `SEASON ${fp.selected_year}`}</span>
+          <span>${mast.price_str || 'FINAL EDITION • 25¢'}</span>
+        </div>
+        <div class="newspaper-double-rule my-1 mb-5"></div>
+
+        <!-- Banner Headline Deck (Above the Fold) -->
+        <div class="text-center max-w-5xl mx-auto mb-6 pb-5 border-b-2 border-slate-700/80">
+          <div class="inline-flex items-center gap-2 px-3 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/40 text-amber-300 font-mono text-[11px] font-extrabold uppercase tracking-widest mb-2">
+            <i class="bi bi-stars"></i> ${activeHead.kicker}
+          </div>
+          <h2 class="newspaper-banner-headline text-3xl sm:text-5xl lg:text-6xl text-white np-ink my-1.5">
+            “${activeHead.headline}”
+          </h2>
+          <p class="newspaper-subhead text-base sm:text-xl text-slate-200 np-muted max-w-4xl mx-auto mt-2 mb-0">
+            ${activeHead.subhead}
+          </p>
+          <div class="mt-2.5 text-[11px] font-mono uppercase tracking-wider text-slate-400 np-muted">
+            ${activeHead.byline}
+          </div>
+        </div>
+
+        <!-- Main 12-Column Newspaper Broadsheet Body -->
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+
+          <!-- LEFT & CENTER EDITORIAL COLUMNS (Cols 1-7 on XL) -->
+          <div class="xl:col-span-7 space-y-6 xl:border-r xl:border-slate-700/70 xl:pr-6">
+
+            <!-- Primary Lead Story Column -->
+            <article>
+              ${heroTeamsHtml}
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mt-3">
+                ${(activeHead.paragraphs || []).map((para, idx) => `
+                  <p class="newspaper-body-copy ${idx === 0 ? 'newspaper-dropcap' : ''} text-slate-200 np-ink mb-0">
+                    ${para}
+                  </p>
+                `).join("")}
+              </div>
+              ${bracketMiniHtml}
+            </article>
+
+            <div class="newspaper-thin-rule my-4"></div>
+
+            <!-- Secondary 2-Column Editorial Feature: "Last-10 Surge & Pennant Race Column" + "Active Player Streaks & Wire" -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+              <!-- Column A: Red-Hot Clubs & Tightest Division Race -->
+              <div class="space-y-4">
+                <div>
+                  <div class="text-[10px] font-mono font-extrabold uppercase tracking-widest text-rose-400 mb-1">
+                    PENNANT FEVER & MOMENTUM WATCH
+                  </div>
+                  <h3 class="font-serif font-black text-xl text-white np-ink leading-tight mb-2">
+                    ${hotClub.nickname || hotClub.name || 'Contenders'} On Fire! ${hotClub.l10_str || '8-2'} in Last Ten as Stretch Run Intensifies
+                  </h3>
+                  <p class="newspaper-body-copy text-slate-300 np-ink text-sm mb-3">
+                    Momentum across ${fp.active_league?.name || 'the league'} has swung dramatically over the past two weeks.
+                    The <b>${hotClub.full_name || 'league leaders'}</b> (${hotClub.record_str || ''}) have ripped off a
+                    <b>${hotClub.l10_str || '8-2'}</b> mark over their last ten games (${hotClub.l10_seq || 'WWWWWLWWWW'}),
+                    while <b>${secondHot.full_name || 'rival contenders'}</b> have posted a <b>${secondHot.l10_str || '7-3'}</b> surge.
+                    ${tightestRace ? `Meanwhile, the <b>${tightestRace.title}</b> race stands at a <b>${tightestRace.lead_gb} GB</b> margin (${tightestRace.race_status}).` : ''}
+                  </p>
+                </div>
+
+                <!-- Hottest & Coldest Last-10 Agate Strip -->
+                <div class="np-box p-3 rounded-xl bg-slate-900/75 border border-slate-800">
+                  <div class="text-[10.5px] font-mono font-extrabold uppercase tracking-wider text-emerald-400 mb-2 flex items-center justify-between">
+                    <span><i class="bi bi-fire mr-1"></i> Hottest Clubs (Last 10 Games)</span>
+                    <span>L10 • DIFF • STRK</span>
+                  </div>
+                  <div class="space-y-1.5">
+                    ${hottestTeams.slice(0, 5).map(t => `
+                      <div onclick="switchTeamAndGo(${t.team_id})" class="flex items-center justify-between text-xs font-mono py-1 px-1.5 rounded hover:bg-slate-800/60 cursor-pointer transition">
+                        <div class="flex items-center gap-2 truncate">
+                          <img src="${teamLogoUrl(t.logo_file_name)}" class="w-4 h-4 object-contain" alt="">
+                          <span class="font-bold text-white np-ink truncate">${t.full_name}</span>
+                          <span class="text-[10px] text-slate-400">(${t.record_str})</span>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
+                          <span class="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-black">${t.l10_str}</span>
+                          <span class="text-slate-300 w-8 text-right">${(t.l10_run_diff || 0) >= 0 ? '+' : ''}${t.l10_run_diff || 0}</span>
+                          <span class="text-amber-300 w-7 text-right">${t.streak_str}</span>
+                        </div>
+                      </div>
+                    `).join("")}
+                  </div>
+                </div>
+
+                <!-- Recent Final Box Scores Agate -->
+                <div class="np-box p-3 rounded-xl bg-slate-900/75 border border-slate-800">
+                  <div class="text-[10.5px] font-mono font-extrabold uppercase tracking-wider text-sky-400 mb-2 flex items-center justify-between">
+                    <span><i class="bi bi-card-checklist mr-1"></i> Latest Box Score Finals</span>
+                    <button onclick="switchTab('gamelogs')" class="text-[10px] text-amber-300 hover:underline">Replay Hub &rarr;</button>
+                  </div>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    ${recentGames.slice(0, 8).map(g => `
+                      <div onclick="jumpToGameReplayFromFrontPage(${g.game_id})" class="p-1.5 rounded bg-slate-950/75 border border-slate-800/90 hover:border-sky-400/50 cursor-pointer flex items-center justify-between text-[11px] font-mono transition">
+                        <div>
+                          <span class="${g.away_runs > g.home_runs ? 'font-black text-white np-ink' : 'text-slate-400'}">${g.away_abbr} ${g.away_runs}</span>
+                          <span class="text-slate-600 mx-1">@</span>
+                          <span class="${g.home_runs > g.away_runs ? 'font-black text-white np-ink' : 'text-slate-400'}">${g.home_abbr} ${g.home_runs}</span>
+                        </div>
+                        <span class="text-[9.5px] text-slate-500">${g.date || ''}</span>
+                      </div>
+                    `).join("")}
+                  </div>
+                </div>
+              </div>
+
+              <!-- Column B: BNN Wire Dispatches & Active Player Streaks -->
+              <div class="space-y-4">
+                <div>
+                  <div class="text-[10px] font-mono font-extrabold uppercase tracking-widest text-amber-400 mb-1">
+                    DIAMOND WIRE & STREAK TRACKER
+                  </div>
+                  <h3 class="font-serif font-black text-xl text-white np-ink leading-tight mb-2">
+                    Around the Horn: Headlines, Hot Bats & Front-Office Dispatches
+                  </h3>
+                </div>
+
+                ${activeStreaks.length ? `
+                  <div class="np-box p-3 rounded-xl bg-slate-900/75 border border-slate-800">
+                    <div class="text-[10.5px] font-mono font-extrabold uppercase tracking-wider text-amber-300 mb-2">
+                      <i class="bi bi-lightning-charge-fill mr-1"></i> Active Player Streaks
+                    </div>
+                    <div class="space-y-1.5">
+                      ${activeStreaks.slice(0, 5).map(st => `
+                        <div onclick="openPlayerModal(${st.player_id})" class="flex items-center justify-between text-xs py-1 px-1.5 rounded hover:bg-slate-800/60 cursor-pointer transition">
+                          <div class="flex items-center gap-2 min-w-0">
+                            <img src="${playerPicUrl(st.player_id)}" class="w-6 h-7 object-cover rounded border border-slate-700" alt="">
+                            <div class="truncate">
+                              <div class="font-bold text-white np-ink truncate">${st.player_name} <span class="text-[10px] font-mono text-slate-400">(${st.team_abbr})</span></div>
+                              <div class="text-[10px] text-slate-400 np-muted">${st.streak_name}</div>
+                            </div>
+                          </div>
+                          <span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-400/40 font-mono font-black text-xs shrink-0">
+                            ${st.value} G
+                          </span>
+                        </div>
+                      `).join("")}
+                    </div>
+                  </div>
+                ` : ""}
+
+                <div class="space-y-2.5">
+                  ${wireStories.slice(0, 5).map(ws => `
+                    <div class="np-box p-3 rounded-xl bg-slate-900/65 border border-slate-800/90">
+                      <div class="flex items-center justify-between text-[9.5px] font-mono uppercase tracking-wider text-sky-400 mb-1">
+                        <span class="font-extrabold">${ws.category} • ${ws.team_abbr}</span>
+                        <span class="text-slate-400">${ws.date || ''}</span>
+                      </div>
+                      <div ${ws.player_id ? `onclick="openPlayerModal(${ws.player_id})"` : (ws.team_id ? `onclick="switchTeamAndGo(${ws.team_id})"` : '')}
+                           class="font-serif font-bold text-sm text-white np-ink hover:text-amber-400 cursor-pointer leading-snug mb-1">
+                        ${ws.headline}
+                      </div>
+                      <p class="text-xs text-slate-300 np-muted leading-relaxed mb-0 line-clamp-3">
+                        ${ws.body}
+                      </p>
+                    </div>
+                  `).join("")}
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- RIGHT AGATE STANDINGS & LEADERS RAIL (Cols 8-12 on XL) -->
+          <div class="xl:col-span-5 space-y-4">
+            <div class="flex items-center justify-between border-b-2 border-amber-400/60 pb-1.5">
+              <div>
+                <div class="text-[10px] font-mono font-extrabold uppercase tracking-widest text-amber-400">OFFICIAL LEAGUE TABLE & AGATE</div>
+                <h3 class="font-serif font-black text-lg text-white np-ink mb-0">${fp.active_league?.name || 'League'} Standings (${fp.selected_year})</h3>
+              </div>
+              <button onclick="switchTab('overview')" class="text-[11px] font-mono text-sky-400 hover:underline">
+                Full Pythagorean Matrix &rarr;
+              </button>
+            </div>
+
+            ${agateStandingsHtml}
+
+            <!-- Front Page League Leaders Agate Box -->
+            <div class="np-box rounded-xl bg-slate-950/75 border border-slate-800 p-3.5">
+              <div class="flex items-center justify-between border-b border-slate-800 pb-2 mb-2.5">
+                <span class="font-mono text-xs font-black uppercase tracking-wider text-amber-300">
+                  <i class="bi bi-award-fill mr-1"></i> ${fp.selected_year} League Leaders Agate
+                </span>
+                <button onclick="switchTab('leaders')" class="text-[10.5px] font-mono text-sky-400 hover:underline">All Leaders &rarr;</button>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">
+                <div>
+                  <div class="text-[10px] uppercase font-extrabold text-slate-400 mb-1">Batting WAR Leaders</div>
+                  ${(leaders.bat_war || []).slice(0, 4).map((p, i) => `
+                    <div onclick="openPlayerModal(${p.player_id})" class="flex items-center justify-between py-1 border-b border-slate-800/60 hover:text-amber-300 cursor-pointer">
+                      <span class="truncate text-white np-ink">${i + 1}. ${p.name} <span class="text-slate-500">(${p.team_abbr})</span></span>
+                      <span class="font-black text-sky-400 ml-2">${Number(p.war || 0).toFixed(1)}</span>
+                    </div>
+                  `).join("")}
+                </div>
+                <div>
+                  <div class="text-[10px] uppercase font-extrabold text-slate-400 mb-1">Pitching WAR Leaders</div>
+                  ${(leaders.pit_war || []).slice(0, 4).map((p, i) => `
+                    <div onclick="openPlayerModal(${p.player_id})" class="flex items-center justify-between py-1 border-b border-slate-800/60 hover:text-amber-300 cursor-pointer">
+                      <span class="truncate text-white np-ink">${i + 1}. ${p.name} <span class="text-slate-500">(${p.team_abbr})</span></span>
+                      <span class="font-black text-emerald-400 ml-2">${Number(p.war || 0).toFixed(1)}</span>
+                    </div>
+                  `).join("")}
+                </div>
+                <div>
+                  <div class="text-[10px] uppercase font-extrabold text-slate-400 mb-1">Home Run Kings</div>
+                  ${(leaders.bat_hr || []).slice(0, 4).map((p, i) => `
+                    <div onclick="openPlayerModal(${p.player_id})" class="flex items-center justify-between py-1 border-b border-slate-800/60 hover:text-amber-300 cursor-pointer">
+                      <span class="truncate text-white np-ink">${i + 1}. ${p.name} <span class="text-slate-500">(${p.team_abbr})</span></span>
+                      <span class="font-black text-amber-300 ml-2">${p.hr} HR</span>
+                    </div>
+                  `).join("")}
+                </div>
+                <div>
+                  <div class="text-[10px] uppercase font-extrabold text-slate-400 mb-1">ERA / FIP Leaders</div>
+                  ${(leaders.pit_fip || []).slice(0, 4).map((p, i) => `
+                    <div onclick="openPlayerModal(${p.player_id})" class="flex items-center justify-between py-1 border-b border-slate-800/60 hover:text-amber-300 cursor-pointer">
+                      <span class="truncate text-white np-ink">${i + 1}. ${p.name} <span class="text-slate-500">(${p.team_abbr})</span></span>
+                      <span class="font-black text-rose-300 ml-2">${Number(p.era || 0).toFixed(2)}</span>
+                    </div>
+                  `).join("")}
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ============================================================================
+ * 13. "THE STRETCH" SCREEN — PENNANT RACES, WILD CARD CUTLINES & PLAYOFF BRACKETS
+ * ============================================================================ */
+window.toggleStretchLeagueSelection = async function(lid, mode = "toggle") {
+  const numId = Number(lid);
+  if (mode === "single") {
+    AppState.stretchLeagueIds = [numId];
+  } else if (mode === "all_top") {
+    const lgs = (AppState.overview && AppState.overview.leagues) || [];
+    const topIds = lgs.filter(l => l.level === 1).map(l => l.league_id);
+    AppState.stretchLeagueIds = topIds.length ? topIds : lgs.slice(0, 4).map(l => l.league_id);
+  } else if (mode === "all") {
+    const lgs = (AppState.overview && AppState.overview.leagues) || [];
+    AppState.stretchLeagueIds = lgs.slice(0, 8).map(l => l.league_id);
+  } else {
+    const cur = new Set(AppState.stretchLeagueIds || []);
+    if (cur.has(numId)) {
+      if (cur.size > 1) cur.delete(numId);
+    } else {
+      cur.add(numId);
+    }
+    AppState.stretchLeagueIds = Array.from(cur);
+  }
+  AppState.stretchData = null;
+  const container = document.getElementById("main-view-container");
+  if (container) await renderStretchTab(container);
+};
+
+async function renderStretchTab(container) {
+  if (!AppState.stretchLeagueIds || !AppState.stretchLeagueIds.length) {
+    AppState.stretchLeagueIds = [AppState.activeLeagueId || 100];
+  }
+  if (!AppState.stretchData) {
+    showLoading("Computing Pennant Races, Magic Numbers & Playoff Brackets...");
+    try {
+      const params = new URLSearchParams({
+        save: AppState.activeSave,
+        league_ids: AppState.stretchLeagueIds.join(","),
+      });
+      if (AppState.activeLeagueId) params.set("league_id", AppState.activeLeagueId);
+      if (AppState.activeYear) params.set("year", AppState.activeYear);
+      AppState.stretchData = await fetchJSON(`/api/stretch?${params.toString()}`);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  const st = AppState.stretchData || {};
+  const allLeagues = st.leagues || (AppState.overview && AppState.overview.leagues) || [];
+  const packages = st.league_packages || [];
+  const selectedSet = new Set(st.selected_league_ids || AppState.stretchLeagueIds);
+
+  const renderSingleLeagueStretchHtml = (pkg, pkgIdx) => {
+    const lg = pkg.league || {};
+    const bracket = pkg.playoff_bracket || {};
+    const rounds = bracket.rounds || [];
+    const divRaces = pkg.division_races || [];
+    const wildCards = pkg.wild_cards || [];
+    const trajectories = pkg.trajectories || [];
+    const canvasId = `stretch-worm-chart-${lg.league_id}-${pkgIdx}`;
+
+    // 1. Playoff Bracket Tree HTML
+    const bracketHtml = rounds.length ? `
+      <div class="glass-card p-5 border border-amber-500/35 mb-6">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3.5 mb-4">
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-300 text-lg">
+              <i class="bi bi-diagram-3-fill"></i>
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <h3 class="text-base font-black uppercase tracking-wider text-white mb-0">
+                  ${lg.name} (${lg.abbr}) — ${bracket.is_projected ? 'Projected Playoff Bracket (If Season Ended Today)' : `${pkg.season_year} Official Postseason Bracket`}
+                </h3>
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold ${bracket.is_projected ? 'bg-sky-500/20 text-sky-300 border border-sky-400/40' : 'bg-amber-500/20 text-amber-300 border border-amber-400/40'}">
+                  ${pkg.phase_badge}
+                </span>
+              </div>
+              <p class="text-xs text-slate-400 mb-0 mt-0.5">
+                Format: ${bracket.playoff_mode || 'Bracket'} • Click any team to open Franchise Hub or click series games to inspect box scores
+              </p>
+            </div>
+          </div>
+          ${bracket.champion ? `
+            <div onclick="switchTeamAndGo(${bracket.champion.team_id})" class="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500/25 to-yellow-500/15 border border-amber-400/60 flex items-center gap-2.5 cursor-pointer hover:scale-[1.02] transition">
+              <img src="${teamLogoUrl(bracket.champion.logo_file_name)}" class="w-8 h-8 object-contain" alt="">
+              <div>
+                <div class="text-[9.5px] font-mono uppercase tracking-widest text-amber-300 font-black">🏆 ${pkg.season_year} LEAGUE CHAMPION</div>
+                <div class="text-sm font-black text-white">${bracket.champion.full_name} (${bracket.champion.record_str})</div>
+              </div>
+            </div>
+          ` : ""}
+        </div>
+
+        <div class="bracket-tree-scroll">
+          ${rounds.map((r, rIdx) => {
+            const isFinalRound = rIdx === rounds.length - 1;
+            return `
+              <div class="bracket-round-col">
+                <div class="px-3 py-2 rounded-lg bg-slate-900/90 border border-slate-800 mb-3 flex items-center justify-between">
+                  <span class="font-mono text-xs font-black uppercase tracking-wider ${isFinalRound ? 'text-amber-300' : 'text-sky-300'}">
+                    ${isFinalRound ? '<i class="bi bi-trophy-fill mr-1"></i>' : ''}${r.round_name}
+                  </span>
+                  <span class="text-[10px] font-mono text-slate-400">Best of ${r.best_of}</span>
+                </div>
+                <div class="bracket-round-matches">
+                  ${(r.series || []).map(s => {
+                    const t0 = s.team0 || {};
+                    const t1 = s.team1 || {};
+                    const w0 = s.winner_id && s.winner_id === t0.team_id;
+                    const w1 = s.winner_id && s.winner_id === t1.team_id;
+                    const winsNeeded = s.wins_needed || Math.floor((s.best_of || 7) / 2) + 1;
+                    const statusBadgeCls = s.status_badge === "FINAL"
+                      ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                      : (s.status_badge === "LIVE" ? "bg-rose-500/25 text-rose-300 border-rose-400/50 animate-pulse" : "bg-slate-800 text-slate-300 border-slate-700");
+                    return `
+                      <div class="bracket-series-card ${isFinalRound ? 'championship-card' : ''} p-3.5">
+                        <div class="flex items-center justify-between text-[10px] font-mono mb-2 pb-1.5 border-b border-slate-800/80">
+                          <span class="px-1.5 py-0.5 rounded border font-extrabold ${statusBadgeCls}">${s.status_badge}</span>
+                          <span class="text-slate-300 font-bold">${s.status_label}</span>
+                        </div>
+
+                        <!-- Team 0 Row -->
+                        <div onclick="${t0.team_id ? `switchTeamAndGo(${t0.team_id})` : ''}" class="flex items-center justify-between py-1.5 px-2 rounded-lg ${w0 ? 'bg-emerald-500/15 border border-emerald-500/35' : 'hover:bg-slate-800/60'} cursor-pointer transition mb-1">
+                          <div class="flex items-center gap-2 min-w-0">
+                            <img src="${teamLogoUrl(t0.logo_file_name)}" class="w-6 h-6 object-contain shrink-0" alt="">
+                            <div class="truncate">
+                              <div class="text-xs font-extrabold ${w0 ? 'text-emerald-300' : 'text-white'} truncate">
+                                ${t0.full_name || 'TBD'} ${w0 ? '✓' : ''}
+                              </div>
+                              <div class="text-[10px] font-mono text-slate-400">${t0.record_str || ''} ${t0.seed_label ? `• ${t0.seed_label}` : ''}</div>
+                            </div>
+                          </div>
+                          <div class="flex items-center gap-2 shrink-0">
+                            <div class="flex gap-0.5">
+                              ${Array.from({ length: winsNeeded }, (_, i) => `
+                                <span class="w-2 h-2 rounded-full ${i < s.result0 ? 'bg-amber-400' : 'bg-slate-800 border border-slate-700'}"></span>
+                              `).join("")}
+                            </div>
+                            <span class="font-mono text-base font-black ${s.result0 >= s.result1 ? 'text-white' : 'text-slate-400'} w-4 text-right">${s.result0}</span>
+                          </div>
+                        </div>
+
+                        <!-- Team 1 Row -->
+                        <div onclick="${t1.team_id ? `switchTeamAndGo(${t1.team_id})` : ''}" class="flex items-center justify-between py-1.5 px-2 rounded-lg ${w1 ? 'bg-emerald-500/15 border border-emerald-500/35' : 'hover:bg-slate-800/60'} cursor-pointer transition">
+                          <div class="flex items-center gap-2 min-w-0">
+                            <img src="${teamLogoUrl(t1.logo_file_name)}" class="w-6 h-6 object-contain shrink-0" alt="">
+                            <div class="truncate">
+                              <div class="text-xs font-extrabold ${w1 ? 'text-emerald-300' : 'text-white'} truncate">
+                                ${t1.full_name || 'TBD'} ${w1 ? '✓' : ''}
+                              </div>
+                              <div class="text-[10px] font-mono text-slate-400">${t1.record_str || ''} ${t1.seed_label ? `• ${t1.seed_label}` : ''}</div>
+                            </div>
+                          </div>
+                          <div class="flex items-center gap-2 shrink-0">
+                            <div class="flex gap-0.5">
+                              ${Array.from({ length: winsNeeded }, (_, i) => `
+                                <span class="w-2 h-2 rounded-full ${i < s.result1 ? 'bg-amber-400' : 'bg-slate-800 border border-slate-700'}"></span>
+                              `).join("")}
+                            </div>
+                            <span class="font-mono text-base font-black ${s.result1 >= s.result0 ? 'text-white' : 'text-slate-400'} w-4 text-right">${s.result1}</span>
+                          </div>
+                        </div>
+
+                        <!-- Series Game Scores Strip (if played) -->
+                        ${(s.games && s.games.length) ? `
+                          <div class="mt-2 pt-2 border-t border-slate-800/80 flex flex-wrap gap-1">
+                            ${s.games.map((g, gi) => `
+                              <span onclick="jumpToGameReplayFromFrontPage(${g.game_id})"
+                                    title="Click to replay Game ${gi + 1} (${g.date})"
+                                    class="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 hover:border-amber-400 text-[9.5px] font-mono text-slate-300 cursor-pointer transition">
+                                G${gi + 1}: <b>${g.winner_abbr}</b> ${Math.max(g.away_runs, g.home_runs)}-${Math.min(g.away_runs, g.home_runs)}
+                              </span>
+                            `).join("")}
+                          </div>
+                        ` : ""}
+                      </div>
+                    `;
+                  }).join("")}
+                </div>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    ` : "";
+
+    // 2. Division Pennant Race Cards
+    const divCardsHtml = divRaces.map(dr => {
+      const badgeCls = dr.race_status === "DEAD HEAT"
+        ? "bg-rose-500/20 text-rose-300 border-rose-400/50"
+        : (dr.race_status === "DOWN TO THE WIRE"
+            ? "bg-amber-500/20 text-amber-300 border-amber-400/50"
+            : (dr.race_status === "CLINCHED" ? "bg-emerald-500/20 text-emerald-300 border-emerald-400/50" : "bg-sky-500/20 text-sky-300 border-sky-400/40"));
+      return `
+        <div class="glass-card overflow-hidden border border-slate-800">
+          <div class="px-4 py-3 bg-slate-900/95 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div class="flex items-center gap-2">
+                <i class="bi bi-flag-fill text-rose-400"></i>
+                <h4 class="font-black text-sm uppercase tracking-wider text-white mb-0">${dr.title} Pennant Race</h4>
+              </div>
+              <div class="text-[11px] text-slate-400 mt-0.5">
+                Leader: <b class="text-white">${dr.leader?.full_name || '—'}</b> (${dr.leader?.record_str || ''})
+                ${dr.runner_up ? `• Chaser: <b class="text-slate-200">${dr.runner_up.full_name}</b> (${dr.lead_gb} GB)` : ''}
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="text-right hidden sm:block">
+                <div class="text-[9.5px] font-mono text-slate-400 uppercase">RACE TENSION</div>
+                <div class="w-24 h-1.5 bg-slate-800 rounded-full overflow-hidden mt-0.5">
+                  <div class="h-full bg-gradient-to-r from-sky-400 via-amber-400 to-rose-500" style="width:${dr.closeness_score || 50}%"></div>
+                </div>
+              </div>
+              <span class="px-2.5 py-1 rounded-lg border text-[10px] font-mono font-extrabold ${badgeCls}">
+                ${dr.race_status}
+              </span>
+            </div>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="saber-table">
+              <thead>
+                <tr>
+                  <th class="text-left">Club</th>
+                  <th class="text-right">W-L</th>
+                  <th class="text-right">PCT</th>
+                  <th class="text-right">GB</th>
+                  <th class="text-right" title="Division Magic / Elimination Number">Magic#</th>
+                  <th class="text-right">L10</th>
+                  <th class="text-right">Strk</th>
+                  <th class="text-right">RD</th>
+                  <th class="text-right">Pyth</th>
+                  <th class="text-right">Playoff%</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${(dr.teams || []).map((t, idx) => {
+                  const mStr = t.magic_str || "-";
+                  const mCls = mStr === "CLINCHED" ? "text-amber-300 font-black" : (mStr === "ELIM" ? "text-slate-500" : "text-sky-300 font-bold");
+                  const l10W = Number(t.l10_w || 0);
+                  const l10Cls = l10W >= 7 ? "text-emerald-400 font-bold" : (l10W <= 3 ? "text-rose-400" : "text-slate-200");
+                  return `
+                    <tr onclick="switchTeamAndGo(${t.team_id})" class="cursor-pointer ${idx === 0 ? 'bg-amber-500/5' : ''}">
+                      <td class="font-bold">
+                        <div class="flex items-center gap-2">
+                          <span class="text-xs font-mono text-slate-500 w-3">${idx + 1}</span>
+                          <img src="${teamLogoUrl(t.logo_file_name)}" class="w-5 h-5 object-contain" alt="">
+                          <span class="text-white hover:text-amber-300 transition">${t.full_name}</span>
+                          <span class="text-[10px] font-mono text-slate-400">(${t.abbr})</span>
+                        </div>
+                      </td>
+                      <td class="text-right font-mono font-bold text-white">${t.record_str}</td>
+                      <td class="text-right font-mono text-sky-300 font-bold">${fmtAvg(t.pct)}</td>
+                      <td class="text-right font-mono ${t.gb === 0 ? 'text-amber-300 font-bold' : 'text-slate-300'}">${t.gb === 0 ? 'LEAD' : t.gb.toFixed(1)}</td>
+                      <td class="text-right font-mono text-xs ${mCls}">${mStr}</td>
+                      <td class="text-right font-mono text-xs ${l10Cls}">${t.l10_str || '5-5'}</td>
+                      <td class="text-right font-mono text-xs ${t.streak > 0 ? 'text-emerald-400' : 'text-rose-400'}">${t.streak_str}</td>
+                      <td class="text-right font-mono ${t.run_diff >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${t.run_diff >= 0 ? '+' : ''}${t.run_diff}</td>
+                      <td class="text-right font-mono text-slate-300">${t.pyth_w}-${t.pyth_l}</td>
+                      <td class="text-right font-mono font-bold text-sky-400">${Number(t.playoff_prob || 0).toFixed(0)}%</td>
+                    </tr>
+                  `;
+                }).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    // 3. Wild Card Bubble & Momentum Trajectory Row
+    const wcHtml = wildCards.map(wc => `
+      <div class="glass-card overflow-hidden border border-slate-800">
+        <div class="px-4 py-2.5 bg-slate-900/95 border-b border-slate-800 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <i class="bi bi-Scissors text-amber-400"></i>
+            <span class="font-extrabold text-xs uppercase tracking-wider text-white">${wc.sub_league_name} Wild Card & Cutline Tracker</span>
+          </div>
+          <span class="text-[10px] font-mono text-amber-300">Top ${wc.wc_spots} Non-Div Winners Qualify</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="saber-table">
+            <thead>
+              <tr>
+                <th class="text-left">Status</th>
+                <th class="text-left">Club</th>
+                <th class="text-right">W-L</th>
+                <th class="text-right">PCT</th>
+                <th class="text-right">WC GB</th>
+                <th class="text-right">L10</th>
+                <th class="text-right">RD</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(wc.standings || []).slice(0, 8).map((t, idx) => {
+                const isCutlineRow = idx === wc.wc_spots - 1;
+                return `
+                  <tr onclick="switchTeamAndGo(${t.team_id})" class="cursor-pointer ${ isCutlineRow ? 'border-b-2 border-dashed border-amber-400' : '' }">
+                    <td>
+                      <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-extrabold ${t.in_wc_spot ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-slate-800 text-slate-400'}">
+                        ${t.wc_status}
+                      </span>
+                    </td>
+                    <td class="font-bold">
+                      <div class="flex items-center gap-2">
+                        <img src="${teamLogoUrl(t.logo_file_name)}" class="w-4 h-4 object-contain" alt="">
+                        <span class="text-white">${t.full_name}</span>
+                      </div>
+                    </td>
+                    <td class="text-right font-mono font-bold text-white">${t.record_str}</td>
+                    <td class="text-right font-mono text-sky-300">${fmtAvg(t.pct)}</td>
+                    <td class="text-right font-mono font-bold ${t.in_wc_spot ? 'text-emerald-400' : 'text-amber-300'}">${t.wc_gb_str}</td>
+                    <td class="text-right font-mono text-xs">${t.l10_str || '5-5'}</td>
+                    <td class="text-right font-mono ${t.run_diff >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${t.run_diff >= 0 ? '+' : ''}${t.run_diff}</td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `).join("");
+
+    return `
+      <section class="space-y-5 pb-8 border-b border-slate-800/80 last:border-b-0">
+        <!-- League Stretch Header Banner -->
+        <div class="glass-card p-4 bg-gradient-to-r from-slate-900 via-slate-900/95 to-slate-950 border border-slate-700/80 flex flex-wrap items-center justify-between gap-4">
+          <div class="flex items-center gap-3">
+            <span class="px-2.5 py-1 rounded-lg bg-rose-500/20 border border-rose-400/40 text-rose-300 font-mono text-xs font-black">
+              ${lg.level_label || `Level ${lg.level || 1}`}
+            </span>
+            <div>
+              <h2 class="text-lg sm:text-xl font-black text-white tracking-tight mb-0">
+                ${lg.name} (${lg.abbr}) — ${pkg.season_year} Stretch & Postseason Center
+              </h2>
+              <div class="text-xs text-slate-400 font-mono">
+                Schedule Progress: <b class="text-white">${pkg.games_played_avg} / ${pkg.scheduled_games} G (${pkg.pct_complete}%)</b> • ${pkg.phase_badge}
+              </div>
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <div class="w-36 sm:w-48">
+              <div class="flex justify-between text-[10px] font-mono text-slate-300 mb-1">
+                <span>SEASON PROGRESS</span>
+                <span class="font-bold text-amber-300">${pkg.pct_complete}%</span>
+              </div>
+              <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-sky-400 via-amber-400 to-emerald-400" style="width:${pkg.pct_complete}%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        ${bracketHtml}
+
+        <!-- Division Pennant Races Grid -->
+        <div class="grid grid-cols-1 ${divRaces.length > 1 ? 'xl:grid-cols-2' : ''} gap-5">
+          ${divCardsHtml}
+        </div>
+
+        <!-- Wild Card Bubble + Momentum Worm Chart -->
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+          <div class="xl:col-span-6 space-y-4">
+            ${wcHtml}
+          </div>
+          <div class="xl:col-span-6 glass-card p-4 border border-slate-800">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
+              <div>
+                <h4 class="font-extrabold text-xs uppercase tracking-wider text-white mb-0">
+                  <i class="bi bi-graph-up text-amber-400 mr-1.5"></i> Pennant Race Momentum Worm (Games Above / Below .500)
+                </h4>
+                <div class="text-[11px] text-slate-400">Cumulative season trajectory across top contenders in ${lg.abbr}</div>
+              </div>
+              <span class="text-[10px] font-mono text-slate-400">${pkg.season_year}</span>
+            </div>
+            <div class="h-[300px] w-full">
+              <canvas id="${canvasId}"></canvas>
+            </div>
+          </div>
+        </div>
+      </section>
+    `;
+  };
+
+  container.innerHTML = `
+    <div class="animate-view space-y-6">
+      <!-- Top Multi-League Selector Bar for "The Stretch" -->
+      <div class="glass-card p-4 border border-rose-500/35 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div class="flex items-center gap-2">
+            <i class="bi bi-flag-fill text-rose-400"></i>
+            <h2 class="text-base font-black uppercase tracking-wider text-white mb-0">
+              “The Stretch” — Multi-League Pennant Races, Magic Numbers & Playoff Brackets
+            </h2>
+          </div>
+          <p class="text-xs text-slate-400 mb-0 mt-0.5">
+            Toggle one or multiple leagues below to compare division races, wild-card cutlines, and live or projected postseason brackets side-by-side.
+          </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-1.5">
+          <button onclick="toggleStretchLeagueSelection(${AppState.activeLeagueId || (allLeagues[0] && allLeagues[0].league_id) || 100}, 'single')"
+                  class="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-bold transition">
+            Active League Only
+          </button>
+          ${allLeagues.length > 1 ? `
+            <button onclick="toggleStretchLeagueSelection(0, 'all')"
+                    class="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-400/40 text-xs font-bold transition">
+              Compare Multiple Leagues (${Math.min(8, allLeagues.length)})
+            </button>
+          ` : ""}
+        </div>
+      </div>
+
+      ${allLeagues.length > 1 ? `
+        <div class="flex flex-wrap items-center gap-1.5">
+          <span class="text-[11px] font-mono uppercase text-slate-400 font-bold mr-1">Select Leagues:</span>
+          ${allLeagues.map(l => {
+            const isSel = selectedSet.has(l.league_id);
+            return `
+              <button onclick="toggleStretchLeagueSelection(${l.league_id}, 'toggle')"
+                      class="px-3 py-1 rounded-xl text-xs font-mono font-bold transition flex items-center gap-1.5 ${isSel ? 'bg-rose-500 text-white shadow-lg border border-rose-300' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'}">
+                <span>${l.abbr}</span>
+                <span class="text-[10px] opacity-80">(${l.name})</span>
+              </button>
+            `;
+          }).join("")}
+        </div>
+      ` : ""}
+
+      <div class="space-y-8">
+        ${packages.map((pkg, idx) => renderSingleLeagueStretchHtml(pkg, idx)).join("")}
+      </div>
+    </div>
+  `;
+
+  // Render Momentum Trajectory Worm Charts
+  packages.forEach((pkg, idx) => {
+    const lg = pkg.league || {};
+    const canvasId = `stretch-worm-chart-${lg.league_id}-${idx}`;
+    if (typeof renderStretchTrajectoryChart === "function") {
+      renderStretchTrajectoryChart(canvasId, pkg.trajectories || []);
+    }
+  });
+}
+
+/* ============================================================================
+ * 14. ASSOCIATION / WORLD DASHBOARD — HOLISTIC ECOSYSTEM & AFFILIATE PYRAMID
+ * ============================================================================ */
+window.setWorldTalentChartMode = function(mode) {
+  AppState.worldTalentMode = mode;
+  if (AppState.worldData && typeof renderWorldTalentChart === "function") {
+    renderWorldTalentChart("world-talent-chart", AppState.worldData.talent_distribution, mode);
+  }
+  document.querySelectorAll("[data-world-talent-btn]").forEach(btn => {
+    const active = btn.getAttribute("data-world-talent-btn") === mode;
+    btn.classList.toggle("bg-amber-400", active);
+    btn.classList.toggle("text-slate-950", active);
+    btn.classList.toggle("bg-slate-900", !active);
+    btn.classList.toggle("text-slate-300", !active);
+  });
+};
+
+window.filterWorldOrgs = function(query) {
+  AppState.worldOrgSearch = String(query || "").trim().toLowerCase();
+  const cards = document.querySelectorAll("[data-org-card]");
+  cards.forEach(c => {
+    const hay = (c.getAttribute("data-org-haystack") || "").toLowerCase();
+    c.classList.toggle("hidden", Boolean(AppState.worldOrgSearch && !hay.includes(AppState.worldOrgSearch)));
+  });
+};
+
+window.jumpToLeagueStretch = async function(lid) {
+  AppState.stretchLeagueIds = [Number(lid)];
+  AppState.stretchData = null;
+  await switchTab("stretch");
+};
+
+async function renderWorldDashboardTab(container) {
+  if (!AppState.worldData) {
+    showLoading("Synthesizing Holistic Association & World Ecosystem Dashboard...");
+    try {
+      const params = new URLSearchParams({ save: AppState.activeSave });
+      if (AppState.activeYear) params.set("year", AppState.activeYear);
+      AppState.worldData = await fetchJSON(`/api/world_dashboard?${params.toString()}`);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  const wd = AppState.worldData || {};
+  const kpis = wd.world_kpis || {};
+  const leaguesEco = wd.leagues_ecosystem || [];
+  const orgPyramid = wd.organizational_pyramid || [];
+  const talentDist = wd.talent_distribution || {};
+  const nationsPipe = wd.nations_pipeline || [];
+  const finQuad = wd.financial_quadrant || [];
+  const histTrends = wd.historical_trends || [];
+  const wLeaders = wd.world_leaders || {};
+  const topOrg = orgPyramid[0] || null;
+
+  container.innerHTML = `
+    <div class="animate-view space-y-6">
+
+      <!-- Association / World Hero Banner & Macro KPIs -->
+      <div class="glass-card p-5 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border border-sky-500/35">
+        <div class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4 mb-4">
+          <div class="flex items-center gap-3.5">
+            <div class="w-11 h-11 rounded-2xl bg-sky-500/20 border border-sky-400/50 flex items-center justify-center text-sky-300 text-2xl shadow-lg">
+              <i class="bi bi-globe-americas"></i>
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <h2 class="text-lg sm:text-2xl font-black tracking-tight text-white mb-0">
+                  Association & World Ecosystem Command Center (${wd.selected_year || ''})
+                </h2>
+                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-extrabold bg-sky-500/20 text-sky-300 border border-sky-400/40">
+                  ${kpis.total_leagues || 1} LEAGUES • ${kpis.total_teams || 0} CLUBS
+                </span>
+              </div>
+              <p class="text-xs text-slate-400 mb-0 mt-0.5">
+                Holistic cross-league analytics, organizational affiliate pyramids (MLB &rarr; Rookie), global player talent/age distributions, international pipelines & financial quadrants.
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="switchTab('frontpage')" class="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-700 text-xs font-bold transition">
+              <i class="bi bi-newspaper mr-1"></i> Front Page Gazette
+            </button>
+            <button onclick="switchTab('stretch')" class="px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-400/40 text-xs font-bold transition">
+              <i class="bi bi-flag-fill mr-1"></i> The Stretch
+            </button>
+          </div>
+        </div>
+
+        <!-- 6 Macro World KPI Cards -->
+        <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
+            <div class="text-[10px] font-mono uppercase text-slate-400 font-bold">ASSOCIATION SCALE</div>
+            <div class="text-xl font-black text-white font-mono mt-0.5">${kpis.total_leagues || 1} Lgs / ${kpis.total_teams || 0} Clubs</div>
+            <div class="text-[10.5px] text-sky-400 font-mono mt-0.5">${Number(kpis.total_games_logged || 0).toLocaleString()} Games Logged</div>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
+            <div class="text-[10px] font-mono uppercase text-slate-400 font-bold">WORLD PLAYER POOL</div>
+            <div class="text-xl font-black text-emerald-400 font-mono mt-0.5">${Number(kpis.active_players || 0).toLocaleString()}</div>
+            <div class="text-[10.5px] text-slate-300 font-mono mt-0.5">${Number(kpis.rostered_players || 0).toLocaleString()} Rostered • ${Number(kpis.free_agents || 0).toLocaleString()} FA</div>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
+            <div class="text-[10px] font-mono uppercase text-slate-400 font-bold">ELITE STARS & PROSPECTS</div>
+            <div class="text-xl font-black text-amber-300 font-mono mt-0.5">${kpis.elite_stars_60plus || 0} Stars (60+)</div>
+            <div class="text-[10.5px] text-slate-300 font-mono mt-0.5">${Number(kpis.u24_prospects || 0).toLocaleString()} U-24 Prospects • Avg Age ${kpis.avg_world_age || 25.5}</div>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
+            <div class="text-[10px] font-mono uppercase text-slate-400 font-bold">GLOBAL RUN ENVIRONMENT</div>
+            <div class="text-xl font-black text-white font-mono mt-0.5">${fmtAvg(kpis.world_avg)}/${fmtAvg(kpis.world_obp)}/${fmtAvg(kpis.world_slg)}</div>
+            <div class="text-[10.5px] text-rose-300 font-mono mt-0.5">${Number(kpis.world_era || 4.15).toFixed(2)} World ERA • ${Number(kpis.world_hr || 0).toLocaleString()} HRs</div>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
+            <div class="text-[10px] font-mono uppercase text-slate-400 font-bold">WORLD ECONOMY</div>
+            <div class="text-xl font-black text-sky-300 font-mono mt-0.5">${fmtMoney(kpis.total_world_payroll)}</div>
+            <div class="text-[10.5px] text-slate-300 font-mono mt-0.5">Avg ${fmtMoney(kpis.avg_team_payroll)} • Max ${fmtMoney(kpis.max_team_payroll)}</div>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-900/90 border border-amber-500/35">
+            <div class="text-[10px] font-mono uppercase text-amber-300 font-bold">#1 ORG POWER INDEX</div>
+            <div class="text-lg font-black text-white truncate mt-0.5">${topOrg ? topOrg.parent_name : '—'}</div>
+            <div class="text-[10.5px] text-amber-300 font-mono mt-0.5">
+              ${topOrg ? `Index ${topOrg.org_power_index} • Org ${fmtAvg(topOrg.org_pct)} (${topOrg.affiliate_count} Aff)` : 'Single-Level Save'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4 High-Level World Analysis Visuals (2x2 Chart.js Grid) -->
+      <div class="grid grid-cols-1 xl:grid-cols-12 gap-5">
+
+        <!-- Visual 1: League Ecosystem / Historical Environment -->
+        <div class="xl:col-span-6 glass-card p-4 border border-slate-800">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
+            <div>
+              <h3 class="font-extrabold text-xs uppercase tracking-wider text-white mb-0">
+                <i class="bi bi-bar-chart-line-fill text-sky-400 mr-1.5"></i>
+                ${leaguesEco.length > 1 ? 'Association Multi-League Offense (OPS) vs. Pitching (ERA)' : 'World Historical Scoring & ERA Macro Trend'}
+              </h3>
+              <p class="text-[11px] text-slate-400 mb-0">Comparing run environments across all active leagues & levels</p>
+            </div>
+            <span class="text-[10px] font-mono text-sky-400">${leaguesEco.length} Leagues</span>
+          </div>
+          <div class="h-[290px] w-full">
+            <canvas id="world-ecosystem-chart"></canvas>
+          </div>
+        </div>
+
+        <!-- Visual 2: Global Player Talent & Age Distribution -->
+        <div class="xl:col-span-6 glass-card p-4 border border-slate-800">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
+            <div>
+              <h3 class="font-extrabold text-xs uppercase tracking-wider text-white mb-0">
+                <i class="bi bi-people-fill text-amber-400 mr-1.5"></i> World Player Talent Pyramid & Age Curve
+              </h3>
+              <p class="text-[11px] text-slate-400 mb-0">20–80 Scouting Scale distribution & demographic aging curve across ${Number(kpis.active_players || 0).toLocaleString()} players</p>
+            </div>
+            <div class="flex items-center gap-1">
+              <button data-world-talent-btn="tiers" onclick="setWorldTalentChartMode('tiers')" class="px-2.5 py-1 rounded text-[10px] font-mono font-bold bg-amber-400 text-slate-950">
+                20-80 Tiers
+              </button>
+              <button data-world-talent-btn="ages" onclick="setWorldTalentChartMode('ages')" class="px-2.5 py-1 rounded text-[10px] font-mono font-bold bg-slate-900 text-slate-300 border border-slate-700">
+                Age Curve
+              </button>
+            </div>
+          </div>
+          <div class="h-[290px] w-full">
+            <canvas id="world-talent-chart"></canvas>
+          </div>
+        </div>
+
+        <!-- Visual 3: Financial Power vs. On-Field Dominance Quadrant -->
+        <div class="xl:col-span-6 glass-card p-4 border border-slate-800">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
+            <div>
+              <h3 class="font-extrabold text-xs uppercase tracking-wider text-white mb-0">
+                <i class="bi bi-cash-coin text-emerald-400 mr-1.5"></i> Financial Power (Payroll/Budget) vs. On-Field Win% Quadrant
+              </h3>
+              <p class="text-[11px] text-slate-400 mb-0">Classifies clubs into Juggernauts, Moneyball Contenders, Rebuilders & Underachievers</p>
+            </div>
+            <span class="text-[10px] font-mono text-emerald-400">Hover dots for club details</span>
+          </div>
+          <div class="h-[290px] w-full">
+            <canvas id="world-financial-chart"></canvas>
+          </div>
+        </div>
+
+        <!-- Visual 4: International Talent Pipeline -->
+        <div class="xl:col-span-6 glass-card p-4 border border-slate-800">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
+            <div>
+              <h3 class="font-extrabold text-xs uppercase tracking-wider text-white mb-0">
+                <i class="bi bi-flag-fill text-emerald-400 mr-1.5"></i> Global International Talent Pipeline (Top Nations)
+              </h3>
+              <p class="text-[11px] text-slate-400 mb-0">Player origins and 60+ OVR star production across the game world</p>
+            </div>
+            <span class="text-[10px] font-mono text-slate-400">Top ${nationsPipe.length} Countries</span>
+          </div>
+          <div class="h-[290px] w-full">
+            <canvas id="world-nations-chart"></canvas>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- All-Leagues Association Ecosystem Table -->
+      <div class="glass-card overflow-hidden border border-slate-800">
+        <div class="px-4 py-3 bg-slate-900/95 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <i class="bi bi-diagram-2-fill text-sky-400"></i>
+            <h3 class="font-extrabold text-sm uppercase tracking-wider text-white mb-0">
+              All-Leagues Association Ecosystem Matrix (${leaguesEco.length} Leagues)
+            </h3>
+          </div>
+          <span class="text-xs text-slate-400">Click any league to switch context or inspect its Pennant Race on "The Stretch"</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="saber-table">
+            <thead>
+              <tr>
+                <th class="text-left">Level</th>
+                <th class="text-left">League Name</th>
+                <th class="text-right">Teams</th>
+                <th class="text-right">Players</th>
+                <th class="text-right">Games</th>
+                <th class="text-right">Slash (AVG/OBP/SLG)</th>
+                <th class="text-right">OPS</th>
+                <th class="text-right">ERA</th>
+                <th class="text-right">Total HR</th>
+                <th class="text-right">Avg Payroll</th>
+                <th class="text-left">Current Leader / Champion</th>
+                <th class="text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${leaguesEco.map(l => `
+                <tr class="hover:bg-slate-800/50">
+                  <td>
+                    <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold ${l.level === 1 ? 'bg-amber-500/20 text-amber-300 border border-amber-400/40' : 'bg-slate-800 text-slate-300'}">
+                      ${l.level_label}
+                    </span>
+                  </td>
+                  <td class="font-bold">
+                    <div class="flex items-center gap-2">
+                      <span class="text-white">${l.name}</span>
+                      <span class="px-1.5 py-0.5 rounded bg-slate-800 text-sky-300 font-mono text-[10px]">${l.abbr}</span>
+                    </div>
+                  </td>
+                  <td class="text-right font-mono text-white font-bold">${l.teams_count}</td>
+                  <td class="text-right font-mono text-slate-300">${Number(l.rostered_players || 0).toLocaleString()}</td>
+                  <td class="text-right font-mono text-slate-300">${Number(l.games_played || 0).toLocaleString()}</td>
+                  <td class="text-right font-mono text-slate-200">${fmtAvg(l.league_avg)}/${fmtAvg(l.league_obp)}/${fmtAvg(l.league_slg)}</td>
+                  <td class="text-right font-mono font-bold text-sky-300">${fmtAvg(l.league_ops)}</td>
+                  <td class="text-right font-mono font-bold text-amber-300">${Number(l.league_era || 0).toFixed(2)}</td>
+                  <td class="text-right font-mono text-emerald-400">${Number(l.total_hr || 0).toLocaleString()}</td>
+                  <td class="text-right font-mono text-slate-300">${fmtMoney(l.avg_payroll)}</td>
+                  <td>
+                    ${l.leader_team ? `
+                      <div onclick="onLeagueChanged(${l.league_id})" class="flex items-center gap-2 cursor-pointer">
+                        <img src="${teamLogoUrl(l.leader_team.logo_file_name)}" class="w-5 h-5 object-contain" alt="">
+                        <span class="font-bold text-white hover:text-amber-300">${l.leader_team.full_name}</span>
+                        <span class="font-mono text-xs text-emerald-400">(${l.leader_team.record_str})</span>
+                      </div>
+                    ` : '<span class="text-slate-500">—</span>'}
+                  </td>
+                  <td class="text-right">
+                    <div class="inline-flex items-center gap-1.5">
+                      <button onclick="onLeagueChanged(${l.league_id})" class="px-2 py-1 rounded bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-400/40 text-[10px] font-mono font-bold">
+                        Select
+                      </button>
+                      <button onclick="jumpToLeagueStretch(${l.league_id})" class="px-2 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-400/40 text-[10px] font-mono font-bold">
+                        Stretch
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Organizational Pyramid & Minor-League Affiliate Explorer -->
+      <div class="glass-card p-5 border border-slate-800">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3.5 mb-4">
+          <div>
+            <div class="flex items-center gap-2">
+              <i class="bi bi-building-fill-check text-amber-400"></i>
+              <h3 class="font-extrabold text-sm uppercase tracking-wider text-white mb-0">
+                Organizational Power Pyramid & Minor-League Affiliate Chains (${orgPyramid.length} Franchises)
+              </h3>
+            </div>
+            <p class="text-xs text-slate-400 mb-0 mt-0.5">
+              Ranks every parent organization by composite Organization Power Index (MLB Win% + Farm System Win% across AAA/AA/A/Rookie + U-24 Prospect Depth + Team WAR).
+            </p>
+          </div>
+          <div class="flex items-center bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5">
+            <i class="bi bi-search text-slate-400 text-xs mr-2"></i>
+            <input type="text" placeholder="Filter Organizations or Affiliates..." oninput="filterWorldOrgs(this.value)" class="bg-transparent text-xs text-white focus:outline-none w-56 font-mono" />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4 max-h-[680px] overflow-y-auto pr-1">
+          ${orgPyramid.map((org, idx) => {
+            const affs = org.affiliates || [];
+            const hay = `${org.parent_name} ${org.parent_abbr} ${affs.map(a => `${a.full_name} ${a.league_abbr}`).join(" ")}`;
+            return `
+              <div data-org-card data-org-haystack="${hay.replace(/"/g, '&quot;')}"
+                   class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-amber-400/50 transition flex flex-col justify-between">
+                <div>
+                  <div class="flex items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-slate-800">
+                    <div onclick="switchTeamAndGo(${org.parent_team_id})" class="flex items-center gap-2.5 min-w-0 cursor-pointer group">
+                      <span class="w-6 h-6 rounded-lg ${idx < 3 ? 'bg-amber-400 text-slate-950' : 'bg-slate-800 text-slate-300'} font-mono text-xs font-black flex items-center justify-center shrink-0">
+                        ${idx + 1}
+                      </span>
+                      <img src="${teamLogoUrl(org.logo_file_name)}" class="w-8 h-8 object-contain shrink-0" alt="">
+                      <div class="truncate">
+                        <div class="text-sm font-black text-white group-hover:text-amber-300 transition truncate">${org.parent_name}</div>
+                        <div class="text-[10.5px] font-mono text-slate-400">
+                          ${org.league_abbr} • <b>${org.parent_record}</b> (${fmtAvg(org.parent_pct)}) • ${org.parent_war} WAR
+                        </div>
+                      </div>
+                    </div>
+                    <div class="text-right shrink-0">
+                      <div class="text-[9.5px] font-mono text-amber-300 uppercase font-bold">ORG INDEX</div>
+                      <div class="text-base font-black font-mono text-white">${org.org_power_index.toFixed(1)}</div>
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-3 gap-2 text-center font-mono text-[11px] mb-3 bg-slate-950/70 p-2 rounded-lg border border-slate-800/80">
+                    <div>
+                      <div class="text-[9.5px] text-slate-400">ORG RECORD</div>
+                      <div class="font-bold text-sky-300">${org.org_w}-${org.org_l} (${fmtAvg(org.org_pct)})</div>
+                    </div>
+                    <div>
+                      <div class="text-[9.5px] text-slate-400">U-24 PROSPECTS</div>
+                      <div class="font-bold text-emerald-400">${org.farm_prospect_count} (Avg ${org.farm_top5_pot} POT)</div>
+                    </div>
+                    <div>
+                      <div class="text-[9.5px] text-slate-400">PAYROLL</div>
+                      <div class="font-bold text-slate-200">${fmtMoney(org.payroll)}</div>
+                    </div>
+                  </div>
+
+                  ${affs.length ? `
+                    <div class="space-y-1">
+                      <div class="text-[9.5px] font-mono uppercase tracking-wider text-slate-400 font-bold mb-1">
+                        Affiliate Farm Chain (${affs.length} Clubs)
+                      </div>
+                      ${affs.slice(0, 6).map(a => `
+                        <div onclick="onLeagueChanged(${a.league_id})" class="flex items-center justify-between text-[11px] font-mono py-1 px-2 rounded bg-slate-950/60 hover:bg-slate-800/80 cursor-pointer transition">
+                          <div class="flex items-center gap-1.5 truncate">
+                            <span class="px-1.5 py-0.2 rounded bg-slate-800 text-amber-300 text-[9.5px] font-bold w-11 text-center shrink-0">${a.level_short}</span>
+                            <span class="text-slate-200 truncate">${a.full_name}</span>
+                            <span class="text-[9.5px] text-slate-500">(${a.league_abbr})</span>
+                          </div>
+                          <span class="font-bold ${a.pct >= 0.500 ? 'text-emerald-400' : 'text-slate-400'} shrink-0 ml-2">${a.record_str}</span>
+                        </div>
+                      `).join("")}
+                    </div>
+                  ` : `<div class="text-[11px] text-slate-500 font-mono text-center py-2">Standalone Club (No Minor League Affiliates)</div>`}
+                </div>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+
+      <!-- Global Pound-for-Pound Leaders & Top World Prospects -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <!-- Top World Batters -->
+        <div class="glass-card p-4 border border-slate-800">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
+            <h4 class="font-extrabold text-xs uppercase tracking-wider text-white mb-0">
+              <i class="bi bi-trophy-fill text-amber-400 mr-1.5"></i> Global Batting WAR Leaders (All Leagues)
+            </h4>
+            <span class="text-[10px] font-mono text-slate-400">${wd.selected_year || ''}</span>
+          </div>
+          <div class="space-y-2">
+            ${(wLeaders.batters || []).slice(0, 8).map((p, i) => `
+              <div onclick="openPlayerModal(${p.player_id})" class="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-800/70 cursor-pointer transition text-xs">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="font-mono font-bold text-slate-500 w-4">${i + 1}</span>
+                  <img src="${playerPicUrl(p.player_id)}" class="w-6 h-8 object-cover rounded border border-slate-700" alt="">
+                  <div class="truncate">
+                    <div class="font-bold text-white truncate">${p.name}</div>
+                    <div class="text-[10px] font-mono text-slate-400">${p.league_abbr} • ${p.team_abbr} • ${p.position}</div>
+                  </div>
+                </div>
+                <div class="text-right font-mono shrink-0">
+                  <div class="font-black text-sky-400">${Number(p.war).toFixed(1)} WAR</div>
+                  <div class="text-[10px] text-slate-400">${fmtAvg(p.avg)} • ${p.hr} HR</div>
+                </div>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+
+        <!-- Top World Pitchers -->
+        <div class="glass-card p-4 border border-slate-800">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
+            <h4 class="font-extrabold text-xs uppercase tracking-wider text-white mb-0">
+              <i class="bi bi-lightning-fill text-emerald-400 mr-1.5"></i> Global Pitching WAR Leaders (All Leagues)
+            </h4>
+            <span class="text-[10px] font-mono text-slate-400">${wd.selected_year || ''}</span>
+          </div>
+          <div class="space-y-2">
+            ${(wLeaders.pitchers || []).slice(0, 8).map((p, i) => `
+              <div onclick="openPlayerModal(${p.player_id})" class="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-800/70 cursor-pointer transition text-xs">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="font-mono font-bold text-slate-500 w-4">${i + 1}</span>
+                  <img src="${playerPicUrl(p.player_id)}" class="w-6 h-8 object-cover rounded border border-slate-700" alt="">
+                  <div class="truncate">
+                    <div class="font-bold text-white truncate">${p.name}</div>
+                    <div class="text-[10px] font-mono text-slate-400">${p.league_abbr} • ${p.team_abbr} • ${p.ip} IP</div>
+                  </div>
+                </div>
+                <div class="text-right font-mono shrink-0">
+                  <div class="font-black text-emerald-400">${Number(p.war).toFixed(1)} WAR</div>
+                  <div class="text-[10px] text-slate-400">${Number(p.era).toFixed(2)} ERA • ${p.k} K</div>
+                </div>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+
+        <!-- Top World U-24 Prospects -->
+        <div class="glass-card p-4 border border-slate-800">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
+            <h4 class="font-extrabold text-xs uppercase tracking-wider text-white mb-0">
+              <i class="bi bi-stars text-purple-400 mr-1.5"></i> Top World U-24 Prospects (20–80 Scale)
+            </h4>
+            <span class="text-[10px] font-mono text-slate-400">OVR / POT</span>
+          </div>
+          <div class="space-y-2">
+            ${(wLeaders.prospects || []).slice(0, 8).map((p, i) => `
+              <div onclick="openPlayerModal(${p.player_id})" class="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-800/70 cursor-pointer transition text-xs">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="font-mono font-bold text-slate-500 w-4">${i + 1}</span>
+                  <img src="${playerPicUrl(p.player_id)}" class="w-6 h-8 object-cover rounded border border-slate-700" alt="">
+                  <div class="truncate">
+                    <div class="font-bold text-white truncate">${p.name} <span class="text-[10px] text-slate-400">(Age ${p.age})</span></div>
+                    <div class="text-[10px] font-mono text-slate-400">${p.league_abbr} • ${p.team_abbr} • ${p.position}</div>
+                  </div>
+                </div>
+                <div class="text-right font-mono shrink-0">
+                  ${rtgBadge(p.oa, p.pot)}
+                </div>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      </div>
+
+    </div>
+  `;
+
+  // Render the 4 Chart.js Visuals on the World Dashboard
+  if (typeof renderWorldEcosystemChart === "function") {
+    renderWorldEcosystemChart("world-ecosystem-chart", leaguesEco, histTrends);
+  }
+  if (typeof renderWorldTalentChart === "function") {
+    renderWorldTalentChart("world-talent-chart", talentDist, AppState.worldTalentMode || "tiers");
+  }
+  if (typeof renderWorldFinancialQuadrantChart === "function") {
+    renderWorldFinancialQuadrantChart("world-financial-chart", finQuad);
+  }
+  if (typeof renderWorldNationsChart === "function") {
+    renderWorldNationsChart("world-nations-chart", nationsPipe);
+  }
+}
 
 document.addEventListener("DOMContentLoaded", initApp);
 
