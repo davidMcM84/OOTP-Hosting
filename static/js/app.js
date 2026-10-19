@@ -124,8 +124,8 @@ function parseSortableCellValue(rawText) {
     const mult = moneyMatch[3].toUpperCase() === "M" ? 1e6 : (moneyMatch[3].toUpperCase() === "K" ? 1e3 : 1);
     return { isNum: true, val: sign * base * mult };
   }
-  // W-L or W-L-T record (e.g., 92-70 or 88-72-2)
-  const recMatch = s.match(/^(\d+)-(\d+)(?:-(\d+))?$/);
+  // W-L or W-L-T record (e.g., 92-70, 88-72-2, or 1,250-1,100)
+  const recMatch = s.replace(/,/g, "").match(/^(\d+)-(\d+)(?:-(\d+))?$/);
   if (recMatch) {
     return { isNum: true, val: parseInt(recMatch[1], 10) * 1000 - parseInt(recMatch[2], 10) };
   }
@@ -143,6 +143,9 @@ function parseSortableCellValue(rawText) {
 }
 
 function initGlobalTableSorting() {
+  if (window._globalTableSortingBound) return;
+  window._globalTableSortingBound = true;
+
   document.addEventListener("click", e => {
     const th = e.target.closest(".saber-table thead th");
     if (!th || th.hasAttribute("onclick")) return;
@@ -190,6 +193,17 @@ function initGlobalTableSorting() {
     }
   });
 }
+
+function initSortableTables(container = document) {
+  initGlobalTableSorting();
+  const root = container && typeof container.querySelectorAll === "function" ? container : document;
+  root.querySelectorAll(".saber-table thead th").forEach(th => {
+    if (!th.hasAttribute("title")) {
+      th.setAttribute("title", "Click to sort column");
+    }
+  });
+}
+window.initSortableTables = initSortableTables;
 
 window.toggleTableDensity = function() {
   AppState.compactDensity = !AppState.compactDensity;
@@ -7686,9 +7700,10 @@ window.toggleNewspaperPaperTheme = function() {
 };
 
 window.jumpToGameReplayFromFrontPage = async function(gameId) {
-  await switchTab("gamelogs");
-  if (typeof selectGameReplay === "function" && gameId) {
-    setTimeout(() => selectGameReplay(gameId), 150);
+  if (gameId && typeof openGameReplayModal === "function") {
+    openGameReplayModal(gameId);
+  } else {
+    await switchTab("gamelogs");
   }
 };
 
