@@ -1,0 +1,28 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local SQLite databases, uploaded league archives, and local user config
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+data/saves/*.db
+data/saves/*.tmp.db
+data/uploaded_saves/*
+!data/saves/.gitkeep
+!data/uploaded_saves/.gitkeep
+data/user_config.json
+data/.write_probe
+
+# OS / IDE artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
