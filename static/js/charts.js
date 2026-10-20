@@ -1571,7 +1571,7 @@ function renderWorldEcosystemChart(canvasId, leaguesEcosystem, histTrends) {
 
   const rows = (histTrends && histTrends.length) ? histTrends : (leaguesEcosystem || []).map(l => ({
     year: l.season_year || 2026,
-    rpg: Number(((l.league_era || 4.15) * 2.15).toFixed(2)),
+    rpg: Number(l.runs_per_game || ((l.league_era || 4.15) * 1.07).toFixed(2)),
     era: Number(l.league_era || 4.15),
   }));
   window._chartInstances[canvasId] = new Chart(ctx, {

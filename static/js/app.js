@@ -8702,10 +8702,10 @@ async function renderWorldDashboardTab(container) {
   const kpis = wd.world_kpis || {};
   const leaguesEco = wd.leagues_ecosystem || [];
   const orgPyramid = wd.organizational_pyramid || [];
-  const talentDist = wd.talent_distribution || {};
-  const nationsPipe = wd.nations_pipeline || [];
-  const finQuad = wd.financial_quadrant || [];
-  const histTrends = wd.historical_trends || [];
+  const talentDist = wd.talent_distribution || wd.visuals?.talent_distribution || {};
+  const nationsPipe = wd.nations_pipeline || wd.visuals?.nations_pipeline || [];
+  const finQuad = wd.financial_quadrant || wd.visuals?.financial_quadrant || [];
+  const histTrends = Array.isArray(wd.historical_trends) ? wd.historical_trends : [];
   const wLeaders = wd.world_leaders || {};
   const topOrg = orgPyramid[0] || null;
 

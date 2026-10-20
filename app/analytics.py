@@ -6598,6 +6598,7 @@ def _build_single_league_stretch(
             "lead_gb": lead_gb,
             "leader": enriched_div_teams[0] if enriched_div_teams else None,
             "chaser": enriched_div_teams[1] if len(enriched_div_teams) > 1 else None,
+            "runner_up": enriched_div_teams[1] if len(enriched_div_teams) > 1 else None,
             "teams": enriched_div_teams,
         })
 
@@ -6638,11 +6639,14 @@ def _build_single_league_stretch(
                 wc_gb_val = abs(diff_games)
                 wc_gb_str = f"{wc_gb_val:.1f}"
 
+            status_lbl = f"{label_prefix} {idx + 1}" if in_field else f"BUBBLE #{idx - cut_spots + 1}"
             wc_rows.append({
                 **tm,
                 "wc_rank": idx + 1,
                 "in_playoff_field": in_field,
-                "seed_badge": f"{label_prefix} {idx + 1}" if in_field else f"BUBBLE #{idx - cut_spots + 1}",
+                "in_wc_spot": in_field,
+                "seed_badge": status_lbl,
+                "wc_status": status_lbl,
                 "wc_gb": wc_gb_val,
                 "wc_gb_str": wc_gb_str,
                 "rem_games": max(0, sched_games - tm["g"]),
@@ -6653,12 +6657,14 @@ def _build_single_league_stretch(
             "sub_league_name": sl_name,
             "title": f"{sl_name} {'Postseason Qualification Table' if is_single_table else 'Wild Card Bubble & Cutline'}",
             "spots_count": cut_spots,
+            "wc_spots": cut_spots,
             "is_single_table": is_single_table,
             "cutline_team": cut_team["full_name"],
             "cutline_record": cut_team["record_str"],
             "in_field": wc_rows[:cut_spots],
             "on_bubble": wc_rows[cut_spots:cut_spots + 6],
             "teams": wc_rows[:cut_spots + 8],
+            "standings": wc_rows[:cut_spots + 8],
         })
 
     # Postseason games lookup (game_type >= 3)
@@ -6673,6 +6679,8 @@ def _build_single_league_stretch(
             pair_key = tuple(sorted((ht, at)))
             ht_info = team_by_id.get(ht, {"abbr": "HME", "full_name": "Home"})
             at_info = team_by_id.get(at, {"abbr": "AWY", "full_name": "Away"})
+            hr_v = safe_int(gd.get("runs1"))
+            ar_v = safe_int(gd.get("runs0"))
             postseason_games_by_pair.setdefault(pair_key, []).append({
                 "game_id": safe_int(gd.get("game_id")),
                 "date": gd.get("date", ""),
@@ -6681,8 +6689,9 @@ def _build_single_league_stretch(
                 "away_team_id": at,
                 "home_abbr": ht_info["abbr"],
                 "away_abbr": at_info["abbr"],
-                "home_runs": safe_int(gd.get("runs1")),
-                "away_runs": safe_int(gd.get("runs0")),
+                "home_runs": hr_v,
+                "away_runs": ar_v,
+                "winner_abbr": ht_info["abbr"] if hr_v >= ar_v else at_info["abbr"],
             })
 
     def _pack_bracket_team(tid_val: int, seed_num: int = 0) -> dict:
@@ -6700,6 +6709,7 @@ def _build_single_league_stretch(
                 "pct": 0.0,
                 "power_score": 0.0,
                 "seed": seed_num,
+                "seed_label": "",
             }
         tm = team_by_id.get(tid_val, {})
         return {
@@ -6720,6 +6730,7 @@ def _build_single_league_stretch(
             "total_war": safe_float(tm.get("total_war")),
             "power_score": safe_float(tm.get("power_score"), 50.0),
             "seed": seed_num,
+            "seed_label": f"Seed #{seed_num}" if seed_num > 0 else "",
         }
 
     # Build Playoff Bracket (Actual from league_playoff_fixtures, Historical from team_history, or Projected if regular season)
@@ -6779,11 +6790,13 @@ def _build_single_league_stretch(
                 else:
                     status_lbl = f"Best of {bo} • Series Set"
 
+                s_badge = "FINAL" if fin else ("LIVE" if (res0 > 0 or res1 > 0) else "SERIES SET")
                 s_obj = {
                     "series_id": f"r{r_idx}_s{s_idx}",
                     "round_index": r_idx,
                     "round_name": r_name,
                     "best_of": bo,
+                    "wins_needed": (bo // 2) + 1,
                     "is_bye": is_bye,
                     "is_projected": False,
                     "finished": fin,
@@ -6792,6 +6805,7 @@ def _build_single_league_stretch(
                     "team1": tm1,
                     "result0": res0,
                     "result1": res1,
+                    "status_badge": s_badge,
                     "status_label": status_lbl,
                     "games": pair_games,
                 }
@@ -6839,28 +6853,28 @@ def _build_single_league_stretch(
 
         if len(qual_teams) >= 4:
             semi_0 = {
-                "series_id": "hist_r0_s0", "round_index": 0, "round_name": "League Semifinals", "best_of": 7,
+                "series_id": "hist_r0_s0", "round_index": 0, "round_name": "League Semifinals", "best_of": 7, "wins_needed": 4,
                 "is_bye": False, "is_projected": False, "finished": True,
                 "winner_id": champion_team["team_id"] if champion_team else qual_teams[0]["team_id"],
                 "team0": champion_team or qual_teams[0], "team1": qual_teams[3] if len(qual_teams) > 3 else qual_teams[-1],
-                "result0": 4, "result1": 2, "status_label": f"{(champion_team or qual_teams[0])['abbr']} wins 4-2", "games": [],
+                "result0": 4, "result1": 2, "status_badge": "FINAL", "status_label": f"{(champion_team or qual_teams[0])['abbr']} wins 4-2", "games": [],
             }
             semi_1 = {
-                "series_id": "hist_r0_s1", "round_index": 0, "round_name": "League Semifinals", "best_of": 7,
+                "series_id": "hist_r0_s1", "round_index": 0, "round_name": "League Semifinals", "best_of": 7, "wins_needed": 4,
                 "is_bye": False, "is_projected": False, "finished": True,
                 "winner_id": (runner_up_team or qual_teams[1])["team_id"],
                 "team0": runner_up_team or qual_teams[1], "team1": qual_teams[2] if len(qual_teams) > 2 else qual_teams[1],
-                "result0": 4, "result1": 3, "status_label": f"{(runner_up_team or qual_teams[1])['abbr']} wins 4-3", "games": [],
+                "result0": 4, "result1": 3, "status_badge": "FINAL", "status_label": f"{(runner_up_team or qual_teams[1])['abbr']} wins 4-3", "games": [],
             }
             rounds_list.append({"round_index": 0, "round_name": "League Semifinals", "best_of": 7, "series": [semi_0, semi_1]})
 
         if champion_team and runner_up_team:
             championship_series = {
-                "series_id": "hist_finals", "round_index": len(rounds_list), "round_name": "World Series", "best_of": 7,
+                "series_id": "hist_finals", "round_index": len(rounds_list), "round_name": "World Series", "best_of": 7, "wins_needed": 4,
                 "is_bye": False, "is_projected": False, "finished": True,
                 "winner_id": champion_team["team_id"],
                 "team0": champion_team, "team1": runner_up_team,
-                "result0": 4, "result1": 2,
+                "result0": 4, "result1": 2, "status_badge": "FINAL",
                 "status_label": f"{champion_team['abbr']} wins {season_year} Championship 4-2",
                 "games": [],
             }
@@ -6885,6 +6899,7 @@ def _build_single_league_stretch(
         seeds.sort(key=lambda x: (-x["pct"], -x["w"], -x["power_score"]))
         for idx, s in enumerate(seeds, start=1):
             s["seed"] = idx
+            s["seed_label"] = f"Seed #{idx}"
 
         def _make_proj_series(sid: str, r_idx: int, r_name: str, bo: int, t0: dict, t1: dict):
             p0 = max(10.0, t0.get("power_score", 50.0))
@@ -6897,6 +6912,7 @@ def _build_single_league_stretch(
                 "round_index": r_idx,
                 "round_name": r_name,
                 "best_of": bo,
+                "wins_needed": (bo // 2) + 1,
                 "is_bye": False,
                 "is_projected": True,
                 "finished": False,
@@ -6907,6 +6923,7 @@ def _build_single_league_stretch(
                 "result1": 0,
                 "prob0": prob0,
                 "prob1": 100 - prob0,
+                "status_badge": "PROJECTED",
                 "status_label": f"Projected • {fav['abbr']} {fav_prob}% Favored",
                 "games": [],
             }
@@ -6965,6 +6982,7 @@ def _build_single_league_stretch(
 
     traj_labels = []
     traj_datasets = []
+    trajectories_list = []
     if not is_hist and table_exists(conn, "games") and top_contenders:
         g_chron = conn.execute(
             "SELECT home_team, away_team, runs0, runs1 FROM games WHERE league_id = ? AND played = 1 AND game_type = 0 ORDER BY game_id ASC",
@@ -7001,6 +7019,14 @@ def _build_single_league_stretch(
                     "color": col,
                     "data": sampled,
                 })
+                trajectories_list.append({
+                    "team_id": tm["team_id"],
+                    "abbr": tm["abbr"],
+                    "full_name": tm["full_name"],
+                    "record_str": tm.get("record_str", f"{tm['w']}-{tm['l']}"),
+                    "color": col,
+                    "points": [{"g": sample_indices[i], "above_500": sampled[i]} for i in range(len(sampled))],
+                })
 
     if not traj_datasets and top_contenders:
         # Fallback trajectory for historical snapshots
@@ -7017,6 +7043,19 @@ def _build_single_league_stretch(
                 "color": col,
                 "data": pts,
             })
+            trajectories_list.append({
+                "team_id": tm["team_id"],
+                "abbr": tm["abbr"],
+                "full_name": tm["full_name"],
+                "record_str": tm.get("record_str", f"{tm['w']}-{tm['l']}"),
+                "color": col,
+                "points": [{"g": int(round((i + 1) * sched_games / num_pts)), "above_500": pts[i]} for i in range(len(pts))],
+            })
+
+    playoff_mode_str = (
+        f"{len(rounds_list)}-Round Bracket ({' / '.join('Bo' + str(r['best_of']) for r in rounds_list)})"
+        if rounds_list else "Standard Postseason Bracket"
+    )
 
     return {
         "league_id": lid,
@@ -7024,15 +7063,25 @@ def _build_single_league_stretch(
         "league_abbr": active_lg.get("abbr", "LGE"),
         "level": active_lg.get("level", 1),
         "level_label": active_lg.get("level_label", "Level 1"),
+        "league": {
+            "league_id": lid,
+            "name": active_lg.get("name", "League"),
+            "abbr": active_lg.get("abbr", "LGE"),
+            "level": active_lg.get("level", 1),
+            "level_label": active_lg.get("level_label", "Level 1"),
+        },
         "season_year": season_year,
         "current_date": active_lg.get("current_date", ""),
         "scheduled_games": sched_games,
         "avg_games_played": avg_g_played,
+        "games_played_avg": avg_g_played,
         "pct_season_complete": pct_complete,
+        "pct_complete": pct_complete,
         "phase_badge": phase_badge,
         "playoff_config": lp_cfg,
         "playoff_bracket": {
             "is_projected": is_projected_bracket,
+            "playoff_mode": playoff_mode_str,
             "rounds": rounds_list,
             "champion": champion_team,
             "runner_up": runner_up_team,
@@ -7040,6 +7089,8 @@ def _build_single_league_stretch(
         },
         "division_races": division_races,
         "wildcard_races": wildcard_races,
+        "wild_cards": wildcard_races,
+        "trajectories": trajectories_list,
         "race_trajectories": {
             "labels": traj_labels,
             "datasets": traj_datasets,
@@ -7148,15 +7199,16 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
     hof_inductees_count = 0
     u24_prospects_count = 0
     elite_stars_count = 0
+    world_age_sum = 0
 
     oa_bat_buckets = [0, 0, 0, 0, 0]  # 20-35, 40-45, 50-55, 60-65, 70-80
     oa_pit_buckets = [0, 0, 0, 0, 0]
     age_buckets_map = {
-        "≤20 (Rookie/Complex)": {"count": 0, "oa_sum": 0, "pot_sum": 0},
-        "21–24 (Developing)": {"count": 0, "oa_sum": 0, "pot_sum": 0},
-        "25–28 (Peak Prime)": {"count": 0, "oa_sum": 0, "pot_sum": 0},
-        "29–32 (Veteran)": {"count": 0, "oa_sum": 0, "pot_sum": 0},
-        "33+ (Senior)": {"count": 0, "oa_sum": 0, "pot_sum": 0},
+        "≤20 (Rookie/Complex)": {"bracket": "≤20", "count": 0, "oa_sum": 0, "pot_sum": 0},
+        "21–24 (Developing)": {"bracket": "21–24", "count": 0, "oa_sum": 0, "pot_sum": 0},
+        "25–28 (Peak Prime)": {"bracket": "25–28", "count": 0, "oa_sum": 0, "pot_sum": 0},
+        "29–32 (Veteran)": {"bracket": "29–32", "count": 0, "oa_sum": 0, "pot_sum": 0},
+        "33+ (Senior)": {"bracket": "33+", "count": 0, "oa_sum": 0, "pot_sum": 0},
     }
 
     nations_lookup = {}
@@ -7174,6 +7226,7 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
 
     league_player_stats = {}  # lid -> {count, oa_sum, pot_sum, age_sum, stars}
     org_prospect_counts = {}  # parent_tid -> count of u24 pot >= 50
+    org_u24_pots = {}         # parent_tid -> list of pot for u24 players
     nation_agg = {}  # nation_id -> {count, oa_sum, stars, top_pid, top_name, top_oa}
     players_meta = {}
 
@@ -7193,7 +7246,7 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
             pname = f"{r['first_name'] or ''} {r['last_name'] or ''}".strip() or f"Player #{pid}"
 
             players_meta[pid] = {
-                "player_id": pid, "name": pname, "team_id": tid, "league_id": lid,
+                "player_id": pid, "name": pname, "team_id": tid, "league_id": abs(lid) if lid != 0 else 0,
                 "position": POSITIONS.get(pos, "P" if pos == 1 else "UT"), "age": age, "oa": oa, "pot": pot,
             }
 
@@ -7204,23 +7257,27 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
                 continue
 
             total_active_players += 1
+            world_age_sum += age
             if fa == 1 or tid == 0:
                 free_agents_count += 1
-            if age <= 24 and pot >= 50:
-                u24_prospects_count += 1
+            if age <= 24:
                 parent_tid = teams_map.get(tid, {}).get("parent_team_id") or org_id or tid
-                org_prospect_counts[parent_tid] = org_prospect_counts.get(parent_tid, 0) + 1
+                if parent_tid > 0:
+                    org_u24_pots.setdefault(parent_tid, []).append(pot)
+                if pot >= 50:
+                    u24_prospects_count += 1
+                    org_prospect_counts[parent_tid] = org_prospect_counts.get(parent_tid, 0) + 1
             if oa >= 60:
                 elite_stars_count += 1
 
             # OA Bucket
-            if oa <= 35:
+            if oa < 40:
                 b_idx = 0
-            elif oa <= 45:
+            elif oa < 50:
                 b_idx = 1
-            elif oa <= 55:
+            elif oa < 60:
                 b_idx = 2
-            elif oa <= 65:
+            elif oa < 70:
                 b_idx = 3
             else:
                 b_idx = 4
@@ -7360,7 +7417,7 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
             {
                 **pm,
                 "team_abbr": teams_map.get(pm["team_id"], {}).get("abbr", "FA"),
-                "league_abbr": league_abbr_map.get(pm["league_id"], "LGE"),
+                "league_abbr": league_abbr_map.get(pm["league_id"], primary_lg.get("abbr", "MLB")),
             }
             for pm in players_meta.values()
             if pm["age"] <= 24 and pm["pot"] >= 55
@@ -7376,6 +7433,18 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
     global_attendance = 0
     total_games_world = 0
     total_hr_world = 0
+    world_ab = 0.0
+    world_h = 0.0
+    world_tb = 0.0
+    world_obp_sum = 0.0
+    world_obp_cnt = 0
+    world_slg_sum = 0.0
+    world_slg_cnt = 0
+    world_ip = 0.0
+    world_er = 0.0
+    world_era_sum = 0.0
+    world_era_cnt = 0
+    all_team_payrolls = []
 
     for lg in leagues:
         lid = lg["league_id"]
@@ -7385,8 +7454,10 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
         t_cnt = len(lg_teams)
         wpcts = []
         tot_g = tot_r = tot_hr_lg = tot_att_lg = 0
-        tot_ab_lg = tot_h_lg = tot_ops_sum = tot_era_sum = 0.0
-        ops_cnt = era_cnt = 0
+        tot_ab_lg = tot_h_lg = tot_tb_lg = tot_bb_lg = tot_hp_lg = tot_sf_lg = 0.0
+        tot_obp_sum = tot_slg_sum = tot_ops_sum = tot_era_sum = 0.0
+        tot_ip_lg = tot_er_lg = 0.0
+        obp_cnt = slg_cnt = ops_cnt = era_cnt = 0
         pay_list = []
         bud_list = []
         best_tm = None
@@ -7412,20 +7483,59 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
             tot_r += rs_v
             hr_v = safe_int(b.get("hr"))
             tot_hr_lg += hr_v
-            tot_ab_lg += safe_float(b.get("ab"))
-            tot_h_lg += safe_float(b.get("h"))
-            if safe_float(b.get("ops")) > 0:
-                tot_ops_sum += safe_float(b.get("ops"))
+
+            ab_t = safe_float(b.get("ab"))
+            h_t = safe_float(b.get("h"))
+            tb_t = safe_float(b.get("tb"))
+            bb_t = safe_float(b.get("bb"))
+            hp_t = safe_float(b.get("hp"))
+            sf_t = safe_float(b.get("sf"))
+            tot_ab_lg += ab_t
+            tot_h_lg += h_t
+            tot_tb_lg += tb_t
+            tot_bb_lg += bb_t
+            tot_hp_lg += hp_t
+            tot_sf_lg += sf_t
+            world_ab += ab_t
+            world_h += h_t
+            world_tb += tb_t
+
+            obp_t = safe_float(b.get("obp"))
+            slg_t = safe_float(b.get("slg"))
+            ops_t = safe_float(b.get("ops"))
+            if obp_t > 0:
+                tot_obp_sum += obp_t
+                obp_cnt += 1
+                world_obp_sum += obp_t
+                world_obp_cnt += 1
+            if slg_t > 0:
+                tot_slg_sum += slg_t
+                slg_cnt += 1
+                world_slg_sum += slg_t
+                world_slg_cnt += 1
+            if ops_t > 0:
+                tot_ops_sum += ops_t
                 ops_cnt += 1
-            if safe_float(p.get("era")) > 0:
-                tot_era_sum += safe_float(p.get("era"))
+
+            ip_t = safe_float(p.get("ip"))
+            er_t = safe_float(p.get("er"))
+            era_t = safe_float(p.get("era"))
+            tot_ip_lg += ip_t
+            tot_er_lg += er_t
+            world_ip += ip_t
+            world_er += er_t
+            if era_t > 0:
+                tot_era_sum += era_t
                 era_cnt += 1
+                world_era_sum += era_t
+                world_era_cnt += 1
 
             pay_v = safe_float(fn.get("player_payroll") or fn.get("player_expenses"))
             bud_v = safe_float(fn.get("budget"))
             att_v = safe_int(fn.get("attendance"))
             if pay_v > 0:
                 pay_list.append(pay_v)
+                all_team_payrolls.append(pay_v)
                 global_payroll += pay_v
             if bud_v > 0:
                 bud_list.append(bud_v)
@@ -7442,11 +7552,13 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
                     "full_name": tm["full_name"],
                     "abbr": tm["abbr"],
                     "logo": tm["logo_file_name"],
+                    "logo_file_name": tm["logo_file_name"],
                     "record_str": f"{w_v}-{l_v}-{t_v}" if t_v > 0 else f"{w_v}-{l_v}",
                     "pct": pct_v,
                 }
 
-        total_games_world += tot_g // 2
+        lg_games_played = tot_g // 2
+        total_games_world += lg_games_played
         total_hr_world += tot_hr_lg
         std_wpct = round(float(np.std(wpcts)), 3) if len(wpcts) >= 2 else 0.060
         parity_sc = int(round(min(98.0, max(30.0, 100.0 - abs(std_wpct - 0.068) * 420.0))))
@@ -7456,6 +7568,24 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
         champ_tid = lp_winners.get(lid, 0)
         champ_tm = teams_map.get(champ_tid) if champ_tid > 0 else None
         top_pl = top_player_by_league.get(lid, {"player_id": 0, "name": "-", "team_abbr": "-", "stat_str": "-"})
+
+        lg_avg_val = round(tot_h_lg / tot_ab_lg, 3) if tot_ab_lg > 0 else 0.258
+        lg_obp_val = (
+            round(tot_obp_sum / obp_cnt, 3)
+            if obp_cnt > 0
+            else (round((tot_h_lg + tot_bb_lg + tot_hp_lg) / max(1.0, tot_ab_lg + tot_bb_lg + tot_hp_lg + tot_sf_lg), 3) if tot_ab_lg > 0 else 0.326)
+        )
+        lg_slg_val = (
+            round(tot_slg_sum / slg_cnt, 3)
+            if slg_cnt > 0
+            else (round(tot_tb_lg / tot_ab_lg, 3) if tot_ab_lg > 0 else 0.412)
+        )
+        lg_ops_val = round(tot_ops_sum / ops_cnt, 3) if ops_cnt > 0 else round(lg_obp_val + lg_slg_val, 3)
+        lg_era_val = (
+            round((tot_er_lg * 9.0) / tot_ip_lg, 2)
+            if tot_ip_lg > 0
+            else (round(tot_era_sum / era_cnt, 2) if era_cnt > 0 else 4.20)
+        )
 
         leagues_ecosystem.append({
             "league_id": lid,
@@ -7467,10 +7597,19 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
             "logo_file_name": lg.get("logo_file_name", ""),
             "teams_count": t_cnt,
             "players_count": lps["count"],
+            "rostered_players": lps["count"],
             "avg_games": tot_g // max(1, t_cnt),
-            "lg_avg": round(tot_h_lg / tot_ab_lg, 3) if tot_ab_lg > 0 else 0.258,
-            "lg_ops": round(tot_ops_sum / ops_cnt, 3) if ops_cnt > 0 else 0.735,
-            "lg_era": round(tot_era_sum / era_cnt, 2) if era_cnt > 0 else 4.20,
+            "games_played": lg_games_played,
+            "lg_avg": lg_avg_val,
+            "league_avg": lg_avg_val,
+            "lg_obp": lg_obp_val,
+            "league_obp": lg_obp_val,
+            "lg_slg": lg_slg_val,
+            "league_slg": lg_slg_val,
+            "lg_ops": lg_ops_val,
+            "league_ops": lg_ops_val,
+            "lg_era": lg_era_val,
+            "league_era": lg_era_val,
             "runs_per_game": round(tot_r / max(1, tot_g), 2) if tot_g > 0 else 4.50,
             "total_hr": tot_hr_lg,
             "parity_std": std_wpct,
@@ -7483,11 +7622,13 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
             "avg_budget": round(float(np.mean(bud_list)), 0) if bud_list else 0.0,
             "total_attendance": tot_att_lg,
             "leader": best_tm,
+            "leader_team": best_tm,
             "champion": {
                 "team_id": champ_tm["team_id"],
                 "full_name": champ_tm["full_name"],
                 "abbr": champ_tm["abbr"],
                 "logo": champ_tm["logo_file_name"],
+                "logo_file_name": champ_tm["logo_file_name"],
             } if champ_tm else None,
             "top_player": top_pl,
         })
@@ -7524,6 +7665,7 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
         if safe_float(tfin.get(t["team_id"], {}).get("player_payroll") or tfin.get(t["team_id"], {}).get("player_expenses")) > 0
     ] or [120_000_000.0]))
 
+    level_short_map = {1: "MLB", 2: "AAA", 3: "AA", 4: "A+", 5: "A", 6: "ROK", 7: "INT", 8: "HS", 9: "COL"}
     organizational_pyramid = []
     financial_quadrant = []
 
@@ -7536,6 +7678,7 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
         t_v = safe_int(rec.get("t"))
         dec = w_v + l_v
         pct_v = round(safe_float(rec.get("pct")) or (w_v / dec if dec > 0 else 0.500), 3)
+        rec_str = f"{w_v}-{l_v}-{t_v}" if t_v > 0 else f"{w_v}-{l_v}"
         twar = round(team_war_totals.get(ptid, 0.0), 1)
         pay_v = safe_float(fn.get("player_payroll") or fn.get("player_expenses"))
         bud_v = safe_float(fn.get("budget"))
@@ -7555,12 +7698,15 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
             apct = round(safe_float(arec.get("pct")) or (aw / adec if adec > 0 else 0.500), 3)
             org_w += aw
             org_l += al
+            alvl = safe_int(atm.get("level"), 2)
             aff_items.append({
                 "team_id": aid,
+                "league_id": atm.get("league_id", pt["league_id"]),
                 "abbr": atm.get("abbr", "AFF"),
                 "full_name": atm.get("full_name", f"Affiliate {aid}"),
-                "level": atm.get("level", 2),
-                "level_label": LEVEL_LABELS.get(atm.get("level", 2), f"Lvl {atm.get('level', 2)}"),
+                "level": alvl,
+                "level_short": level_short_map.get(alvl, f"L{alvl}"),
+                "level_label": LEVEL_LABELS.get(alvl, f"Lvl {alvl}"),
                 "league_abbr": league_abbr_map.get(atm.get("league_id"), "MiLB"),
                 "w": aw,
                 "l": al,
@@ -7571,22 +7717,27 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
         org_dec = org_w + org_l
         org_pct = round(org_w / org_dec, 3) if org_dec > 0 else pct_v
         prosp_cnt = org_prospect_counts.get(ptid, 0)
+        u24_pots = sorted(org_u24_pots.get(ptid, []), reverse=True)
+        farm_top5_pot = round(float(np.mean(u24_pots[:5])), 1) if u24_pots else 50.0
         titles_cnt = hist_titles_map.get(ptid, 0) + (1 if lp_winners.get(pt["league_id"]) == ptid else 0)
         poffs_cnt = hist_poff_map.get(ptid, 0)
 
         # Composite Organizational Power Index (0-100)
-        power_idx = int(round(min(99.0, max(25.0,
+        power_idx = round(min(99.5, max(25.0,
             (pct_v * 52.0) +
             (org_pct * 18.0) +
             min(15.0, max(0.0, (twar + 5.0) * 0.35)) +
             min(10.0, prosp_cnt * 0.45) +
             min(6.0, titles_cnt * 1.5)
-        ))))
+        )), 1)
 
         organizational_pyramid.append({
             "team_id": ptid,
+            "parent_team_id": ptid,
             "full_name": pt["full_name"],
+            "parent_name": pt["full_name"],
             "abbr": pt["abbr"],
+            "parent_abbr": pt["abbr"],
             "logo_file_name": pt.get("logo_file_name", ""),
             "bg_color": pt.get("bg_color", "#1f1f20"),
             "league_id": pt["league_id"],
@@ -7595,18 +7746,25 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
             "l": l_v,
             "t": t_v,
             "pct": pct_v,
-            "record_str": f"{w_v}-{l_v}-{t_v}" if t_v > 0 else f"{w_v}-{l_v}",
+            "parent_pct": pct_v,
+            "record_str": rec_str,
+            "parent_record": rec_str,
             "total_war": twar,
+            "parent_war": twar,
             "payroll": pay_v,
             "budget": bud_v,
             "attendance": att_v,
             "affiliates_count": len(aff_items),
+            "affiliate_count": len(aff_items),
             "affiliates": aff_items,
             "org_w": org_w,
             "org_l": org_l,
             "org_combined_pct": org_pct,
+            "org_pct": org_pct,
             "org_record_str": f"{org_w}-{org_l}",
             "farm_prospects_count": prosp_cnt,
+            "farm_prospect_count": prosp_cnt,
+            "farm_top5_pot": farm_top5_pot,
             "championships": titles_cnt,
             "playoff_appearances": poffs_cnt,
             "org_power_index": power_idx,
@@ -7617,13 +7775,13 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
         is_high_pay = (pay_m * 1e6) >= avg_premier_pay
         is_winning = pct_v >= 0.500
         if is_high_pay and is_winning:
-            quad = "Juggernaut Contender"
+            quad = "Juggernaut"
         elif not is_high_pay and is_winning:
-            quad = "Moneyball Efficiency King"
+            quad = "Moneyball Contender"
         elif is_high_pay and not is_winning:
-            quad = "Heavyweight Underperformer"
+            quad = "Underachiever"
         else:
-            quad = "Developing / Rebuilding Club"
+            quad = "Rebuilding"
 
         financial_quadrant.append({
             "team_id": ptid,
@@ -7649,14 +7807,18 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
             intl_players_count += n_info["count"]
         if len(nations_pipeline) < 12:
             n_meta = nations_lookup.get(nat_id, {"name": f"Nation #{nat_id}", "abbr": "INT"})
+            sh_pct = round((n_info["count"] / max(1, total_active_players)) * 100.0, 1)
             nations_pipeline.append({
                 "nation_id": nat_id,
                 "name": n_meta["name"].replace("The ", ""),
                 "abbr": n_meta["abbr"],
                 "players_count": n_info["count"],
-                "pct_of_world": round((n_info["count"] / max(1, total_active_players)) * 100.0, 1),
+                "player_count": n_info["count"],
+                "pct_of_world": sh_pct,
+                "share_pct": sh_pct,
                 "avg_oa": round(n_info["oa_sum"] / max(1, n_info["count"]), 1),
                 "stars_count": n_info["stars"],
+                "elite_count": n_info["stars"],
                 "top_player_id": n_info["top_pid"],
                 "top_player_name": n_info["top_name"],
                 "top_player_oa": n_info["top_oa"],
@@ -7670,6 +7832,7 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
                COUNT(DISTINCT th.team_id) as teams_count,
                AVG(tb.ops) as lg_ops,
                AVG(tp.era) as lg_era,
+               SUM(tb.r) * 1.0 / NULLIF(SUM(tb.g), 0) as rpg,
                AVG(tf.player_expenses) as avg_payroll
         FROM team_history th
         LEFT JOIN team_history_batting_stats tb ON th.team_id = tb.team_id AND th.year = tb.year
@@ -7689,34 +7852,78 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
         for yr_r in reversed(y_rows):
             yv = safe_int(yr_r["year"])
             c_name, c_rec = champ_by_yr.get(yv, ("-", "-"))
+            ops_y = round(safe_float(yr_r["lg_ops"], 0.740), 3) or 0.740
+            era_y = round(safe_float(yr_r["lg_era"], 4.15), 2) or 4.15
+            rpg_y = round(safe_float(yr_r["rpg"], era_y * 1.07), 2) or round(era_y * 1.07, 2)
             yby_chron.append({
                 "year": yv,
                 "teams_count": safe_int(yr_r["teams_count"], len(premier_teams_list)),
-                "lg_ops": round(safe_float(yr_r["lg_ops"], 0.740), 3) or 0.740,
-                "lg_era": round(safe_float(yr_r["lg_era"], 4.15), 2) or 4.15,
+                "lg_ops": ops_y,
+                "ops": ops_y,
+                "lg_era": era_y,
+                "era": era_y,
+                "rpg": rpg_y,
                 "avg_payroll": safe_float(yr_r["avg_payroll"], 0.0),
                 "parity_std": 0.068,
                 "champion": c_name,
                 "champion_record": c_rec,
             })
-    if not yby_chron and leagues_ecosystem:
+    if leagues_ecosystem and all(r["year"] != world_year for r in yby_chron):
         le0 = leagues_ecosystem[0]
         yby_chron.append({
             "year": world_year,
             "teams_count": le0["teams_count"],
             "lg_ops": le0["lg_ops"],
+            "ops": le0["lg_ops"],
             "lg_era": le0["lg_era"],
+            "era": le0["lg_era"],
+            "rpg": le0["runs_per_game"],
             "avg_payroll": le0["avg_payroll"],
             "parity_std": le0["parity_std"],
             "champion": le0["champion"]["full_name"] if le0.get("champion") else (le0["leader"]["full_name"] if le0.get("leader") else "-"),
             "champion_record": le0["leader"]["record_str"] if le0.get("leader") else "-",
         })
 
+    world_avg_val = round(world_h / world_ab, 3) if world_ab > 0 else 0.258
+    world_obp_val = round(world_obp_sum / world_obp_cnt, 3) if world_obp_cnt > 0 else 0.326
+    world_slg_val = round(world_slg_sum / world_slg_cnt, 3) if world_slg_cnt > 0 else (round(world_tb / world_ab, 3) if world_ab > 0 else 0.412)
+    world_ops_val = round(world_obp_val + world_slg_val, 3)
+    world_era_val = round((world_er * 9.0) / world_ip, 2) if world_ip > 0 else (round(world_era_sum / world_era_cnt, 2) if world_era_cnt > 0 else 4.15)
+    rostered_players_count = max(0, total_active_players - free_agents_count)
+    avg_world_age_val = round(world_age_sum / max(1, total_active_players), 1) if total_active_players > 0 else 25.5
+    avg_team_payroll_val = round(float(np.mean(all_team_payrolls)), 0) if all_team_payrolls else 0.0
+    max_team_payroll_val = round(float(max(all_team_payrolls)), 0) if all_team_payrolls else 0.0
+
+    talent_distribution_obj = {
+        "labels": ["20–35 (Org Depth)", "40–45 (Replacement)", "50–55 (Regular)", "60–65 (All-Star)", "70–80 (Superstar)"],
+        "batters": oa_bat_buckets,
+        "pitchers": oa_pit_buckets,
+        "ovr_tiers": [
+            {"tier": "70–80 (Superstar)", "count": oa_bat_buckets[4] + oa_pit_buckets[4], "batters": oa_bat_buckets[4], "pitchers": oa_pit_buckets[4]},
+            {"tier": "60–65 (All-Star)", "count": oa_bat_buckets[3] + oa_pit_buckets[3], "batters": oa_bat_buckets[3], "pitchers": oa_pit_buckets[3]},
+            {"tier": "50–55 (Starter / Regular)", "count": oa_bat_buckets[2] + oa_pit_buckets[2], "batters": oa_bat_buckets[2], "pitchers": oa_pit_buckets[2]},
+            {"tier": "40–45 (Replacement / Role)", "count": oa_bat_buckets[1] + oa_pit_buckets[1], "batters": oa_bat_buckets[1], "pitchers": oa_pit_buckets[1]},
+            {"tier": "20–35 (Org / Rookie Depth)", "count": oa_bat_buckets[0] + oa_pit_buckets[0], "batters": oa_bat_buckets[0], "pitchers": oa_pit_buckets[0]},
+        ],
+        "age_brackets": [
+            {
+                "bracket": v["bracket"],
+                "label": k,
+                "count": v["count"],
+                "avg_oa": round(v["oa_sum"] / max(1, v["count"]), 1),
+                "avg_ovr": round(v["oa_sum"] / max(1, v["count"]), 1),
+                "avg_pot": round(v["pot_sum"] / max(1, v["count"]), 1),
+            }
+            for k, v in age_buckets_map.items()
+        ],
+    }
+
     conn.close()
     return {
         "save_slug": save_slug,
         "save_name": save_meta.get("save_name", save_slug),
         "world_year": world_year,
+        "selected_year": world_year,
         "world_kpis": {
             "total_leagues": len(leagues),
             "levels_represented": len({l["level"] for l in leagues}),
@@ -7724,18 +7931,34 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
             "premier_teams": len(premier_teams_list),
             "affiliate_teams": max(0, len(teams_map) - len(premier_teams_list)),
             "total_active_players": total_active_players,
+            "active_players": total_active_players,
+            "rostered_players": rostered_players_count,
             "free_agents_count": free_agents_count,
+            "free_agents": free_agents_count,
             "retired_players_count": retired_players_count,
             "hof_inductees_count": hof_inductees_count,
             "u24_prospects_count": u24_prospects_count,
+            "u24_prospects": u24_prospects_count,
             "elite_stars_count": elite_stars_count,
+            "elite_stars_60plus": elite_stars_count,
+            "avg_world_age": avg_world_age_val,
+            "world_avg": world_avg_val,
+            "world_obp": world_obp_val,
+            "world_slg": world_slg_val,
+            "world_ops": world_ops_val,
+            "world_era": world_era_val,
+            "world_hr": total_hr_world,
+            "total_hr_hit": total_hr_world,
             "total_nations": len(nation_agg),
             "international_pct": round((intl_players_count / max(1, total_active_players)) * 100.0, 1),
             "global_payroll": global_payroll,
+            "total_world_payroll": global_payroll,
+            "avg_team_payroll": avg_team_payroll_val,
+            "max_team_payroll": max_team_payroll_val,
             "global_budget": global_budget,
             "global_attendance": global_attendance,
             "total_games_played": total_games_world,
-            "total_hr_hit": total_hr_world,
+            "total_games_logged": total_games_world,
             "at_bats_tracked": save_meta.get("at_bats_count", 0),
             "historical_span": f"{min(avail_years)}–{max(avail_years)}" if avail_years else str(world_year),
             "seasons_logged": len(avail_years),
@@ -7744,21 +7967,12 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
         },
         "leagues_ecosystem": leagues_ecosystem,
         "organizational_pyramid": organizational_pyramid,
+        "talent_distribution": talent_distribution_obj,
+        "nations_pipeline": nations_pipeline,
+        "financial_quadrant": financial_quadrant,
+        "historical_trends": yby_chron,
         "visuals": {
-            "talent_distribution": {
-                "labels": ["20–35 (Org Depth)", "40–45 (Replacement)", "50–55 (Regular)", "60–65 (All-Star)", "70–80 (Superstar)"],
-                "batters": oa_bat_buckets,
-                "pitchers": oa_pit_buckets,
-                "age_brackets": [
-                    {
-                        "label": k,
-                        "count": v["count"],
-                        "avg_oa": round(v["oa_sum"] / max(1, v["count"]), 1),
-                        "avg_pot": round(v["pot_sum"] / max(1, v["count"]), 1),
-                    }
-                    for k, v in age_buckets_map.items()
-                ],
-            },
+            "talent_distribution": talent_distribution_obj,
             "nations_pipeline": nations_pipeline,
             "financial_quadrant": financial_quadrant,
             "historical_trends": {
@@ -7899,12 +8113,16 @@ def get_newspaper_front_page(save_slug: str, league_id: int = None, year: int = 
             })
         pit_war_leaders = sorted(parsed_p, key=lambda x: x["war"], reverse=True)[:8]
         pit_k_leaders = sorted(parsed_p, key=lambda x: (x["k"], -x["era"]), reverse=True)[:8]
+        pit_fip_leaders = sorted([p for p in parsed_p if p["ip"] >= 20], key=lambda x: (x["era"], x["fip"]))[:8] or pit_war_leaders
+    else:
+        pit_fip_leaders = []
 
     leaders = {
         "bat_war": bat_war_leaders,
         "bat_hr": bat_hr_leaders,
         "pit_war": pit_war_leaders,
         "pit_k": pit_k_leaders,
+        "pit_fip": pit_fip_leaders,
     }
 
     stretch_pkg = _build_single_league_stretch(conn, save_slug, lid, season_year, leagues, teams_map, overview=ov)
@@ -7947,9 +8165,11 @@ def get_newspaper_front_page(save_slug: str, league_id: int = None, year: int = 
             tid = safe_int(r["team_id"])
             tm = teams_map.get(tid, {"abbr": "TM", "full_name": "Team"})
             sid = safe_int(r["streak_id"])
+            pname_str = f"{r['first_name'] or ''} {r['last_name'] or ''}".strip()
             active_streaks.append({
                 "player_id": pid,
-                "name": f"{r['first_name'] or ''} {r['last_name'] or ''}".strip(),
+                "name": pname_str,
+                "player_name": pname_str,
                 "team_abbr": tm["abbr"],
                 "streak_name": STREAK_NAMES.get(sid, "Hitting Streak"),
                 "value": safe_int(r["value"]),
@@ -8256,6 +8476,10 @@ def get_newspaper_front_page(save_slug: str, league_id: int = None, year: int = 
         },
         "primary_headline": primary_headline,
         "headlines": headlines,
+        "playoff_bracket": bracket,
+        "wild_cards": wc_races,
+        "hottest_teams": hottest_teams[:8],
+        "cold_teams": list(reversed(hottest_teams))[:8],
         "stretch_summary": {
             "phase_badge": stretch_pkg.get("phase_badge"),
             "pct_complete": stretch_pkg.get("pct_season_complete", 100.0),
