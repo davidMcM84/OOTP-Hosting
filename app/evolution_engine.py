@@ -6,11 +6,90 @@ import numpy as np
 
 from app.config import HOST_DB_PATH, POSITIONS
 from app.irl_counterparts import (
+    METRO_ALIASES,
     get_irl_counterparts_registry,
     get_reference_city_populations,
     haversine_miles,
     lookup_irl_counterparts,
 )
+
+
+METRO_MSA_REFERENCE_POPS = {
+    ("new york", "NY"): 9800000,
+    ("los angeles", "CA"): 6400000,
+    ("chicago", "IL"): 4800000,
+    ("mexico city", "DIS"): 5600000,
+    ("toronto", "ON"): 4100000,
+    ("dallas", "TX"): 3900000,
+    ("arlington", "TX"): 3900000,
+    ("fort worth", "TX"): 2600000,
+    ("houston", "TX"): 3700000,
+    ("philadelphia", "PA"): 3400000,
+    ("washington", "DC"): 3200000,
+    ("atlanta", "GA"): 3200000,
+    ("miami", "FL"): 3100000,
+    ("san francisco", "CA"): 3100000,
+    ("boston", "MA"): 3000000,
+    ("phoenix", "AZ"): 2900000,
+    ("montreal", "QC"): 2450000,
+    ("detroit", "MI"): 2400000,
+    ("seattle", "WA"): 2350000,
+    ("oakland", "CA"): 2200000,
+    ("minneapolis", "MN"): 2150000,
+    ("st. paul", "MN"): 1850000,
+    ("tampa", "FL"): 2050000,
+    ("st. petersburg", "FL"): 1950000,
+    ("san diego", "CA"): 2000000,
+    ("denver", "CO"): 1950000,
+    ("baltimore", "MD"): 1800000,
+    ("st. louis", "MO"): 1800000,
+    ("charlotte", "NC"): 1780000,
+    ("orlando", "FL"): 1760000,
+    ("san antonio", "TX"): 1750000,
+    ("portland", "OR"): 1750000,
+    ("pittsburgh", "PA"): 1650000,
+    ("sacramento", "CA"): 1620000,
+    ("las vegas", "NV"): 1600000,
+    ("austin", "TX"): 1600000,
+    ("round rock", "TX"): 1450000,
+    ("cincinnati", "OH"): 1550000,
+    ("kansas city", "MO"): 1520000,
+    ("columbus", "OH"): 1520000,
+    ("indianapolis", "IN"): 1500000,
+    ("cleveland", "OH"): 1480000,
+    ("nashville", "TN"): 1480000,
+    ("vancouver", "BC"): 1650000,
+    ("monterrey", "NUE"): 2100000,
+    ("guadalajara", "JAL"): 1950000,
+    ("santo domingo", "DIS"): 1850000,
+    ("san juan", "SAN"): 1450000,
+    ("havana", "LA"): 1650000,
+    ("caracas", "DIS"): 1900000,
+    ("allentown", "PA"): 680000,
+    ("harrisburg", "PA"): 490000,
+    ("scranton", "PA"): 460000,
+    ("moosic", "PA"): 460000,
+    ("lancaster", "PA"): 440000,
+    ("reading", "PA"): 380000,
+    ("york", "PA"): 360000,
+    ("erie", "PA"): 250000,
+}
+
+
+def _are_metro_linked(city_a: str, state_a: str, city_b: str, state_b: str) -> bool:
+    ca = (city_a or "").strip().lower()
+    cb = (city_b or "").strip().lower()
+    if not ca or not cb:
+        return False
+    if ca == cb and (not state_a or not state_b or state_a.upper() == state_b.upper()):
+        return True
+    for hub, aliases in METRO_ALIASES.items():
+        hub_low = hub.lower()
+        als_low = [a.lower() for a in aliases]
+        cluster = {hub_low, *als_low}
+        if ca in cluster and cb in cluster:
+            return True
+    return False
 
 
 NICKNAME_FALLBACKS = [
@@ -165,16 +244,20 @@ def build_enhanced_evolution_analysis(
         has_cities = _table_exists(conn, "cities")
         has_states = _table_exists(conn, "states")
         has_parks = _table_exists(conn, "parks")
+        has_leagues_tbl = _table_exists(conn, "leagues")
         q_tgeo = f"""
         SELECT t.team_id, t.name, t.nickname, t.abbr, t.city_id, t.nation_id,
+               t.league_id, t.level, t.parent_team_id,
                t.sub_league_id, t.division_id, t.background_color_id, t.logo_file_name
                {', c.name as city_name, c.latitude as c_lat, c.longitude as c_lon, c.population as c_pop, c.state_id' if has_cities else ''}
                {', s.name as state_name, s.abbreviation as state_abbr' if (has_cities and has_states) else ''}
                {', p.lat as p_lat, p.long as p_lon, p.name as park_name, p.capacity as park_cap' if has_parks else ''}
+               {', l.abbr as lg_abbr, l.name as lg_name' if has_leagues_tbl else ''}
         FROM teams t
         {'LEFT JOIN cities c ON t.city_id = c.city_id' if has_cities else ''}
         {'LEFT JOIN states s ON c.state_id = s.state_id AND c.nation_id = s.nation_id' if (has_cities and has_states) else ''}
         {'LEFT JOIN parks p ON t.park_id = p.park_id' if has_parks else ''}
+        {'LEFT JOIN leagues l ON t.league_id = l.league_id' if has_leagues_tbl else ''}
         WHERE t.allstar_team = 0
         """
         try:
@@ -183,10 +266,19 @@ def build_enhanced_evolution_analysis(
                 tid = _safe_int(d.get("team_id"))
                 lat = _safe_float(d.get("c_lat")) or _safe_float(d.get("p_lat")) or 39.95
                 lon = _safe_float(d.get("c_lon")) or _safe_float(d.get("p_lon")) or -75.16
+                t_name = (d.get("name") or "").strip()
+                t_nick = (d.get("nickname") or "").strip()
                 team_geo_map[tid] = {
                     "team_id": tid,
+                    "name": t_name,
+                    "nickname": t_nick,
+                    "full_name": f"{t_name} {t_nick}".strip(),
+                    "abbr": (d.get("abbr") or "").strip(),
+                    "league_id": _safe_int(d.get("league_id")),
+                    "league_abbr": (d.get("lg_abbr") or "").strip(),
+                    "level": _safe_int(d.get("level"), 1),
                     "city_id": _safe_int(d.get("city_id")),
-                    "city": d.get("city_name") or d.get("name") or "City",
+                    "city": d.get("city_name") or t_name or "City",
                     "state": d.get("state_abbr") or "",
                     "state_name": d.get("state_name") or "",
                     "nation_id": _safe_int(d.get("nation_id"), 206),
@@ -205,6 +297,20 @@ def build_enhanced_evolution_analysis(
     existing_city_names = set()
     existing_city_state_keys = set()
     active_city_teams_map = {}
+    standings_team_ids = {s["team_id"] for s in standings}
+    sister_league_city_map = {}
+
+    for tid_other, g_other in team_geo_map.items():
+        if tid_other in standings_team_ids or g_other.get("league_id", 0) <= 0:
+            continue
+        ocid = g_other.get("city_id") or 0
+        ocname = (g_other.get("city") or "").strip().lower()
+        ost = (g_other.get("state") or "").strip().upper()
+        lbl = f"{g_other['abbr']} ({g_other.get('league_abbr') or 'MiLB'})"
+        if ocid > 0:
+            sister_league_city_map.setdefault(("id", ocid), []).append(lbl)
+        if ocname:
+            sister_league_city_map.setdefault((ocname, ost), []).append(lbl)
 
     for s in standings:
         tid = s["team_id"]
@@ -1161,18 +1267,70 @@ def build_enhanced_evolution_analysis(
                 # Distance to active league teams & centroid
                 dist_centroid = round(haversine_miles(lat, lon, centroid_lat, centroid_lon), 1)
                 dists_to_active = []
+                in_city_teams = []
+                metro_only_teams = []
+                regional_teams = []
                 for tn in active_team_nodes:
                     d_mi = haversine_miles(lat, lon, tn["lat"], tn["lon"])
                     dists_to_active.append((d_mi, tn))
+                    tn_cid = _safe_int(tn.get("city_id"))
+                    tn_city_low = (tn.get("city") or "").strip().lower()
+                    tn_state_up = (tn.get("state") or "").strip().upper()
+                    tn_name_low = (tn.get("name") or "").strip().lower()
+                    is_in_city = (
+                        (cid > 0 and tn_cid == cid)
+                        or (tn_city_low == cname.lower() and (not st_abbr or not tn_state_up or tn_state_up == st_abbr.upper() or d_mi <= 15.0))
+                        or (tn_name_low == cname.lower() and d_mi <= 25.0)
+                    )
+                    if is_in_city:
+                        in_city_teams.append({
+                            "team_id": tn["team_id"],
+                            "abbr": tn["abbr"],
+                            "full_name": tn["full_name"],
+                            "city": tn["city"],
+                            "state": tn["state"],
+                            "distance_mi": round(d_mi, 1),
+                            "service_role": "In-City",
+                        })
+                    elif d_mi <= 38.0 or (d_mi <= 55.0 and _are_metro_linked(cname, st_abbr, tn.get("city", ""), tn.get("state", ""))):
+                        metro_only_teams.append({
+                            "team_id": tn["team_id"],
+                            "abbr": tn["abbr"],
+                            "full_name": tn["full_name"],
+                            "city": tn["city"],
+                            "state": tn["state"],
+                            "distance_mi": round(d_mi, 1),
+                            "service_role": "Metro",
+                        })
+                    elif d_mi <= 85.0:
+                        regional_teams.append({
+                            "team_id": tn["team_id"],
+                            "abbr": tn["abbr"],
+                            "full_name": tn["full_name"],
+                            "city": tn["city"],
+                            "state": tn["state"],
+                            "distance_mi": round(d_mi, 1),
+                            "service_role": "Regional",
+                        })
+
                 dists_to_active.sort(key=lambda x: x[0])
+                in_city_teams.sort(key=lambda x: x["distance_mi"])
+                metro_only_teams.sort(key=lambda x: x["distance_mi"])
+                regional_teams.sort(key=lambda x: x["distance_mi"])
+
+                if in_city_teams:
+                    already_active = True
+
+                in_city_tids = {t["team_id"] for t in in_city_teams}
+                ext_dists = [(d, tn) for d, tn in dists_to_active if tn["team_id"] not in in_city_tids]
 
                 nearest_mi = round(dists_to_active[0][0], 1) if dists_to_active else 150.0
                 nearest_tm = dists_to_active[0][1] if dists_to_active else None
                 second_mi = round(dists_to_active[1][0], 1) if len(dists_to_active) > 1 else nearest_mi
-                if already_active and len(dists_to_active) > 1:
-                    # For cities with an active club, also note nearest external rival distance
-                    nearest_ext_mi = round(dists_to_active[1][0], 1)
-                    nearest_ext_tm = dists_to_active[1][1]
+                if already_active and ext_dists:
+                    # For cities with an active club, note the nearest external rival distance
+                    nearest_ext_mi = round(ext_dists[0][0], 1)
+                    nearest_ext_tm = ext_dists[0][1]
                 else:
                     nearest_ext_mi = nearest_mi
                     nearest_ext_tm = nearest_tm
@@ -1190,7 +1348,10 @@ def build_enhanced_evolution_analysis(
                 # Apply realistic metro population floor for exact-city MLB / Historic MLB / Triple-A hubs
                 # where municipal city limits (e.g. San Francisco 874k, Miami 442k, Atlanta 498k, St. Louis 301k, Pittsburgh 303k)
                 # understate the true MSA media market size.
-                if irl_info.get("is_exact_city_counterpart"):
+                msa_ref_floor = METRO_MSA_REFERENCE_POPS.get(ckey, 0)
+                if msa_ref_floor > 0:
+                    eff_pop = max(eff_pop, msa_ref_floor)
+                elif irl_info.get("is_exact_city_counterpart"):
                     p_lvl = irl_info.get("primary_level", "")
                     if p_lvl == "MLB":
                         eff_pop = max(eff_pop, int(round(eff_pop * 1.45)), 1450000)
@@ -1201,17 +1362,77 @@ def build_enhanced_evolution_analysis(
 
                 # If city already has an active team in this league, only include it in the ledger if it is a major
                 # Real-Life MLB/MiLB counterpart or major metro (for 2nd-team metro expansion / Counterpart Ledger reference)
-                if already_active and not (irl_info["has_irl_counterpart"] or eff_pop >= 750000):
+                if already_active and not (irl_info["has_irl_counterpart"] or eff_pop >= 750000 or is_single_state_league):
                     continue
 
                 # Filter out small residential suburbs that have no IRL counterpart and sit inside an existing active team's metro (<22 mi)
-                if not irl_info["has_irl_counterpart"] and eff_pop < 100000 and nearest_mi < 22.0:
+                if not irl_info["has_irl_counterpart"] and eff_pop < 100000 and nearest_mi < 22.0 and not already_active:
                     continue
 
                 seen_city_ids.add(cid)
                 seen_cand_keys.add(ckey)
 
-                active_abbrs = active_city_teams_map.get(cid) or active_city_teams_map.get(cname.lower()) or []
+                active_abbrs = [t["abbr"] for t in in_city_teams] or (
+                    active_city_teams_map.get(("id", cid))
+                    or active_city_teams_map.get(ckey)
+                    or active_city_teams_map.get(("name", cname.lower()))
+                    or []
+                )
+                active_abbrs = list(dict.fromkeys(active_abbrs))
+                if active_abbrs:
+                    already_active = True
+                in_city_count = len(active_abbrs)
+                metro_teams_count = in_city_count + len(metro_only_teams)
+                regional_teams_count = len(regional_teams)
+
+                sister_clubs = list(dict.fromkeys(
+                    (sister_league_city_map.get(("id", cid)) or [])
+                    + (sister_league_city_map.get(ckey) or [])
+                ))
+
+                # Build Current Market Service Tag & Details
+                serving_teams = in_city_teams + metro_only_teams + regional_teams[:3]
+                serving_team_abbrs = list(dict.fromkeys(active_abbrs + [t["abbr"] for t in serving_teams]))
+                if in_city_count > 0:
+                    market_service_tier = "in_city"
+                    market_service_label = "In-Market Tenant"
+                    if metro_only_teams:
+                        m_extra = ", ".join(t["abbr"] for t in metro_only_teams[:2])
+                        serving_teams_tag = f"Served by: {', '.join(active_abbrs)} (+Metro: {m_extra})"
+                    elif len(in_city_teams) == 1:
+                        serving_teams_tag = f"Served by: {in_city_teams[0]['abbr']} ({in_city_teams[0]['full_name']})"
+                    elif in_city_count == 1:
+                        serving_teams_tag = f"Served by: {active_abbrs[0]} (In-City Club)"
+                    else:
+                        serving_teams_tag = f"Served by: {', '.join(active_abbrs)} ({in_city_count} In-City Clubs)"
+                    serving_teams_detail = " • ".join(
+                        ([f"{t['full_name']} ({t['abbr']}, In-City)" for t in in_city_teams] or [f"{a} (In-City)" for a in active_abbrs])
+                        + [f"{t['full_name']} ({t['abbr']}, Metro {t['distance_mi']:.0f} mi)" for t in metro_only_teams]
+                    )
+                elif metro_only_teams:
+                    market_service_tier = "metro"
+                    market_service_label = "Metro Catchment"
+                    m_str = ", ".join(f"{t['abbr']} ({t['distance_mi']:.0f} mi)" for t in metro_only_teams[:3])
+                    serving_teams_tag = f"Metro Served: {m_str}"
+                    serving_teams_detail = " • ".join(
+                        f"{t['full_name']} ({t['abbr']} — {t['city']}, {t['distance_mi']:.0f} mi)"
+                        for t in metro_only_teams[:4]
+                    )
+                elif regional_teams:
+                    market_service_tier = "regional"
+                    market_service_label = "Regional Catchment"
+                    r_str = ", ".join(f"{t['abbr']} ({t['distance_mi']:.0f} mi)" for t in regional_teams[:2])
+                    serving_teams_tag = f"Regional Reach: {r_str}"
+                    serving_teams_detail = " • ".join(
+                        f"{t['full_name']} ({t['abbr']} — {t['city']}, {t['distance_mi']:.0f} mi)"
+                        for t in regional_teams[:4]
+                    )
+                else:
+                    market_service_tier = "unserved"
+                    market_service_label = "Unserved / Open"
+                    near_lbl = f"Nearest: {nearest_tm['abbr']} {nearest_mi:.0f} mi" if nearest_tm else "Open"
+                    serving_teams_tag = f"Unserved Market ({near_lbl})"
+                    serving_teams_detail = f"Open territory with no active club within 85 miles ({near_lbl})"
 
                 # Compute the 5 Configurable Factor Sub-Scores (0 - 100)
                 # 1. Population & Media Scale Factor (log/power curve on effective metro pop)
@@ -1228,6 +1449,63 @@ def build_enhanced_evolution_analysis(
                 econ_raw = int(round(min(198, max(88, 78 + (pop_factor * 1.15) + irl_econ_bonus))))
                 econ_factor = int(round(min(99.0, max(35.0, (econ_raw - 70) * 0.76))))
 
+                # Determine Market Team Capacity (How Many Teams Market Could Support)
+                if eff_pop >= 8500000:
+                    supported_teams_min, supported_teams_max = 3, 4
+                    supported_teams_display = "3–4 Teams"
+                    capacity_tier_label = "Mega-Metro (Up to 4 Clubs)"
+                elif eff_pop >= 4500000 or (is_single_state_league and eff_pop >= 2800000):
+                    supported_teams_min, supported_teams_max = 2, 3
+                    supported_teams_display = "2–3 Teams"
+                    capacity_tier_label = "Major Metro (Up to 3 Clubs)"
+                elif eff_pop >= 2350000 or (is_single_state_league and eff_pop >= 1500000):
+                    supported_teams_min, supported_teams_max = 2, 2
+                    supported_teams_display = "2 Teams"
+                    capacity_tier_label = "Two-Club Metro"
+                elif eff_pop >= 1650000 and (econ_factor >= 76 or irl_info.get("primary_level") in ("MLB", "Historic MLB", "Triple-A", "International Pro")):
+                    supported_teams_min, supported_teams_max = 1, 2
+                    supported_teams_display = "1–2 Teams"
+                    capacity_tier_label = "Primary Hub (1–2 Clubs)"
+                elif eff_pop >= 130000 or irl_info["has_irl_counterpart"] or (is_single_state_league and eff_pop >= 45000):
+                    supported_teams_min, supported_teams_max = 1, 1
+                    supported_teams_display = "1 Team"
+                    capacity_tier_label = "Single-Club Market"
+                else:
+                    supported_teams_min, supported_teams_max = 1, 1
+                    supported_teams_display = "1 Team"
+                    capacity_tier_label = "Small / Feeder Hub"
+
+                if in_city_count > 0:
+                    available_team_slots = max(0, supported_teams_max - in_city_count)
+                elif metro_teams_count > 0:
+                    # Satellite city in an active metro: check parent metro capacity vs current metro teams
+                    metro_hub_pop = eff_pop
+                    for mt in metro_only_teams:
+                        mt_ckey = ((mt.get("city") or "").strip().lower(), (mt.get("state") or "").strip().upper())
+                        metro_hub_pop = max(metro_hub_pop, METRO_MSA_REFERENCE_POPS.get(mt_ckey, 0))
+                    metro_cap = 4 if metro_hub_pop >= 8500000 else (3 if (metro_hub_pop >= 4500000 or (is_single_state_league and metro_hub_pop >= 2800000)) else (2 if metro_hub_pop >= 1650000 else 1))
+                    available_team_slots = min(supported_teams_max, max(0, metro_cap - metro_teams_count))
+                else:
+                    available_team_slots = supported_teams_max
+
+                if in_city_count == 0 and metro_teams_count == 0:
+                    capacity_status_tier = "open"
+                    capacity_status_tag = f"0/{supported_teams_max} Occupied • +{available_team_slots} Open"
+                elif in_city_count > 0:
+                    if available_team_slots > 0:
+                        capacity_status_tier = "room"
+                        capacity_status_tag = f"{in_city_count}/{supported_teams_max} In-City • +{available_team_slots} Open"
+                    else:
+                        capacity_status_tier = "saturated"
+                        capacity_status_tag = f"{in_city_count}/{supported_teams_max} In-City • Saturated"
+                else:
+                    if available_team_slots > 0:
+                        capacity_status_tier = "room"
+                        capacity_status_tag = f"{metro_teams_count} in Metro • +{available_team_slots} Open"
+                    else:
+                        capacity_status_tier = "saturated"
+                        capacity_status_tag = f"{metro_teams_count} in Metro • Saturated"
+
                 # 3. Geographic Compactness & Footprint Fit Factor
                 ideal_span = max(220.0, (ns_span_miles + ew_span_miles) * 0.65)
                 geo_factor = int(round(min(98.0, max(38.0, 96.0 - (dist_centroid / max(180.0, ideal_span)) * 28.0))))
@@ -1243,8 +1521,13 @@ def build_enhanced_evolution_analysis(
 
                 # 4. Untapped Territory & Optimal Rivalry Spacing Factor
                 if already_active:
-                    # City already hosts 1+ active teams: viable for 2nd-team metro rivalry in mega-metros, lower for single-club markets
-                    gap_factor = 64 if (eff_pop >= 2500000 and len(active_abbrs) == 1) else 42
+                    # City already hosts 1+ active teams: viable for 2nd/3rd-team metro rivalry if capacity slots remain open
+                    if available_team_slots >= 2:
+                        gap_factor = 76
+                    elif available_team_slots == 1:
+                        gap_factor = 68
+                    else:
+                        gap_factor = 38
                 elif 35.0 <= nearest_mi <= 240.0:
                     gap_factor = 94
                 elif 240.0 < nearest_mi <= 650.0:
@@ -1259,9 +1542,9 @@ def build_enhanced_evolution_analysis(
                     else:
                         gap_factor = 70
                 elif 18.0 <= nearest_mi < 35.0:
-                    gap_factor = 82
+                    gap_factor = 82 if available_team_slots > 0 else 58
                 else:
-                    gap_factor = 62  # Metro derby / shared market
+                    gap_factor = 64 if available_team_slots > 0 else 48  # Metro derby / shared market
 
                 # 5. Real-Life Baseball Heritage & Ballpark Readiness Factor
                 irl_factor = int(irl_info.get("irl_tier_score", 42))
@@ -1280,6 +1563,56 @@ def build_enhanced_evolution_analysis(
                 proj_mkt_size = max(2, min(10, int(round(pop_factor / 10.5))))
                 proj_budget = round(avg_bud_val * (0.72 + (proj_mkt_size / 10.0) * 0.52), -5)
                 proj_fan = min(98, max(52, int(round(0.55 * irl_factor + 0.45 * pop_factor))))
+
+                # Potential Revenue & Market Share Calculations
+                avg_full_season_rev = max(tot_rev / max(1, num_teams), avg_bud_val * 0.96, 15000000.0)
+                league_total_rev_pool = avg_full_season_rev * num_teams
+                pop_log_term = (math.log10(max(50000.0, eff_pop)) - 5.5) * 0.22
+                rev_scale = (
+                    0.56
+                    + (proj_mkt_size / 10.0) * 0.36
+                    + pop_log_term
+                    + ((econ_factor - 65.0) / 100.0) * 0.14
+                    + ((proj_fan - 65.0) / 100.0) * 0.12
+                )
+                standalone_club_rev = round(avg_full_season_rev * max(0.50, min(1.62, rev_scale)), -4)
+                multi_team_mult = {1: 1.0, 2: 1.68, 3: 2.28, 4: 2.85}.get(supported_teams_max, 1.0)
+                total_market_revenue_potential = round(standalone_club_rev * multi_team_mult, -4)
+
+                if market_service_tier == "unserved":
+                    local_market_share_pct = 100.0
+                    market_share_type = "Sole Market Club"
+                    projected_revenue = standalone_club_rev
+                elif market_service_tier == "regional":
+                    overlap_loss = sum(max(0.025, (88.0 - t["distance_mi"]) / 380.0) for t in regional_teams[:3])
+                    local_market_share_pct = round(max(66.0, min(95.0, (1.0 - overlap_loss) * 100.0)), 1)
+                    market_share_type = f"Regional Split ({regional_teams_count} Neighbor{'s' if regional_teams_count > 1 else ''})"
+                    projected_revenue = round(standalone_club_rev * (0.42 + 0.58 * (local_market_share_pct / 100.0)), -4)
+                elif market_service_tier == "metro":
+                    total_post = metro_teams_count + 1
+                    sub_w = 0.92 if eff_pop >= 450000 else (0.80 if eff_pop >= 180000 else 0.68)
+                    local_market_share_pct = round(max(14.0, min(50.0, (100.0 / total_post) * sub_w)), 1)
+                    market_share_type = f"Metro Split (1 of {total_post})"
+                    eff_metro_pool = max(
+                        total_market_revenue_potential,
+                        standalone_club_rev * min(2.28, 1.0 + 0.62 * min(max(1, supported_teams_max), metro_teams_count)),
+                    )
+                    projected_revenue = round(max(avg_full_season_rev * 0.45, eff_metro_pool * (local_market_share_pct / 100.0)), -4)
+                else:
+                    total_post = metro_teams_count + 1
+                    local_market_share_pct = round(max(18.0, min(48.0, (100.0 / total_post) * 0.92)), 1)
+                    market_share_type = f"Shared City (1 of {total_post})"
+                    eff_metro_pool = max(
+                        total_market_revenue_potential,
+                        standalone_club_rev * min(2.85, 1.0 + 0.65 * min(max(1, supported_teams_max - 1), metro_teams_count)),
+                    )
+                    projected_revenue = round(max(avg_full_season_rev * 0.48, eff_metro_pool * (local_market_share_pct / 100.0)), -4)
+
+                projected_gate_revenue = round(projected_revenue * 0.40, -4)
+                projected_media_revenue = round(projected_revenue * 0.42, -4)
+                projected_merch_revenue = round(max(0.0, projected_revenue - projected_gate_revenue - projected_media_revenue), -4)
+                league_market_share_pct = round((projected_revenue / max(1.0, league_total_rev_pool + projected_revenue)) * 100.0, 2)
+                market_share_label = f"{local_market_share_pct:.0f}% Local • {league_market_share_pct:.1f}% Lg"
 
                 if proj_mkt_size >= 8:
                     fin_tier = "Large Market (Tier 1)"
@@ -1309,8 +1642,25 @@ def build_enhanced_evolution_analysis(
                     "region_bucket": region_bucket,
                     "is_primary_state": st_abbr in primary_states,
                     "is_active_league_city": already_active,
-                    "active_teams_count": len(active_abbrs),
+                    "active_teams_count": in_city_count,
                     "active_team_abbrs": active_abbrs,
+                    "metro_teams_count": metro_teams_count,
+                    "regional_teams_count": regional_teams_count,
+                    "serving_teams": serving_teams,
+                    "serving_team_abbrs": serving_team_abbrs,
+                    "serving_teams_tag": serving_teams_tag,
+                    "serving_teams_detail": serving_teams_detail,
+                    "market_service_tier": market_service_tier,
+                    "market_service_label": market_service_label,
+                    "in_save_sister_teams": sister_clubs,
+                    "supported_teams_min": supported_teams_min,
+                    "supported_teams_max": supported_teams_max,
+                    "supported_teams": supported_teams_max,
+                    "supported_teams_display": supported_teams_display,
+                    "capacity_tier_label": capacity_tier_label,
+                    "available_team_slots": available_team_slots,
+                    "capacity_status_tier": capacity_status_tier,
+                    "capacity_status_tag": capacity_status_tag,
                     "lat": lat,
                     "lon": lon,
                     "population": save_scaled_pop,
@@ -1321,6 +1671,17 @@ def build_enhanced_evolution_analysis(
                     "market_tier": fin_tier,
                     "projected_market_size": proj_mkt_size,
                     "projected_budget": proj_budget,
+                    "projected_revenue": projected_revenue,
+                    "potential_revenue": projected_revenue,
+                    "total_market_revenue_potential": total_market_revenue_potential,
+                    "projected_gate_revenue": projected_gate_revenue,
+                    "projected_media_revenue": projected_media_revenue,
+                    "projected_merch_revenue": projected_merch_revenue,
+                    "local_market_share_pct": local_market_share_pct,
+                    "projected_market_share_pct": local_market_share_pct,
+                    "league_market_share_pct": league_market_share_pct,
+                    "market_share_type": market_share_type,
+                    "market_share_label": market_share_label,
                     "projected_fan_interest": proj_fan,
                     "dist_to_centroid_miles": dist_centroid,
                     "nearest_team_abbr": (nearest_ext_tm["abbr"] if already_active and nearest_ext_tm else (nearest_tm["abbr"] if nearest_tm else "-")),
@@ -1347,9 +1708,7 @@ def build_enhanced_evolution_analysis(
                     "irl_detail_line": irl_info["detail_line"],
                     "irl_counterparts": irl_info["counterparts"],
                     "rationale": (
-                        f"{irl_info['summary_badge']} • Active club(s): {', '.join(active_abbrs)}"
-                        if already_active and active_abbrs
-                        else f"{irl_info['summary_badge']} • Nearest rival: {nearest_tm['abbr'] if nearest_tm else '-'} ({nearest_mi:.0f} mi)"
+                        f"{irl_info['summary_badge']} • {serving_teams_tag} • {supported_teams_display} ({capacity_status_tag})"
                     ),
                     "fit_tag": fin_tier,
                     "source": "OOTP cities.csv + IRL Registry",

@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 import socket
@@ -18,6 +19,32 @@ def is_port_in_use(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.5)
         return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def stop_existing_server_on_port(port: int):
+    """Terminates any stale background server process holding the port so latest code is always loaded."""
+    my_pid = os.getpid()
+    try:
+        out = subprocess.check_output(["netstat", "-ano"], text=True, stderr=subprocess.DEVNULL)
+        pids = set()
+        target_suffix = f":{port}"
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and parts[0].upper() == "TCP" and parts[1].endswith(target_suffix) and parts[3].upper() == "LISTENING":
+                try:
+                    pid = int(parts[4])
+                    if pid > 0 and pid != my_pid:
+                        pids.add(pid)
+                except ValueError:
+                    pass
+        for pid in pids:
+            subprocess.run(["taskkill", "/F", "/PID", str(pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(20):
+            if not is_port_in_use(port):
+                break
+            time.sleep(0.15)
+    except Exception:
+        pass
 
 
 def open_browser_when_ready(url: str, app_mode: bool = False):
@@ -55,10 +82,12 @@ def main():
     print("=" * 72)
 
     if is_port_in_use(PORT):
-        print(f"[INFO] Server is already running on {url}. Opening interface...")
-        if open_browser:
-            open_browser_when_ready(url, app_mode=app_mode)
-        return
+        print(f"[INFO] Restarting existing background server on {url} to load latest updates...")
+        stop_existing_server_on_port(PORT)
+        if is_port_in_use(PORT):
+            if open_browser:
+                open_browser_when_ready(url, app_mode=app_mode)
+            return
 
     saves = discover_all_saves()
     has_csv_save = any(int(s.get("csv_count") or 0) >= 5 for s in saves)

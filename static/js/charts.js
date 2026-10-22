@@ -992,7 +992,8 @@ function renderExpansionWorkshopMapSVG(containerId, opts = {}) {
       const hasIrl = Boolean(c.has_irl_counterpart);
       const pinCol = hasIrl ? "#fbbf24" : "#94a3b8";
       const showLabel = idx < 10;
-      const titleStr = `${c.city}, ${c.state} (Score ${c.computed_score || c.market_score}) • ${c.irl_summary_badge || 'Untapped'} • Click to toggle expansion target`;
+      const revM = (Number(c.projected_revenue || c.potential_revenue || 0) / 1e6).toFixed(1);
+      const titleStr = `${c.city}, ${c.state} (Score ${c.computed_score || c.market_score}) • ${c.serving_teams_tag || 'Unserved'} • Supports ${c.supported_teams_display || '1 Team'} (${c.capacity_status_tag || 'Open'}) • Pot. Rev $${revM}M/yr (${c.market_share_label || '100% Local'}) • ${c.irl_summary_badge || 'Untapped'}`;
       candPinsSvg += `
         <g class="cursor-pointer" onclick="toggleWorkshopExpansionCity(${c.city_id})">
           <title>${titleStr.replace(/"/g, '&quot;')}</title>
@@ -1030,7 +1031,8 @@ function renderExpansionWorkshopMapSVG(containerId, opts = {}) {
     const cust = customIdentities[c.city_id] || {};
     const abbr = (cust.abbr || c.suggested_abbr || c.city.slice(0, 3)).toUpperCase();
     const nick = cust.nickname || c.suggested_nickname || "Royals";
-    const sTitle = `SELECTED EXPANSION TARGET: ${c.city} ${nick} (${abbr}) • ${c.irl_summary_badge} • Click to remove`;
+    const sRevM = (Number(c.projected_revenue || c.potential_revenue || 0) / 1e6).toFixed(1);
+    const sTitle = `SELECTED EXPANSION TARGET: ${c.city} ${nick} (${abbr}) • ${c.serving_teams_tag || 'Unserved'} • Supports ${c.supported_teams_display || '1 Team'} • Pot. Rev $${sRevM}M/yr (${c.market_share_label || '100% Local'}) • ${c.irl_summary_badge}`;
     selectedNodesSvg += `
       <g class="cursor-pointer" onclick="toggleWorkshopExpansionCity(${c.city_id})">
         <title>${sTitle.replace(/"/g, '&quot;')}</title>

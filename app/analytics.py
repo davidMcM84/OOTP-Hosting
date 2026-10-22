@@ -24,11 +24,45 @@ from app.config import (
 from app.ingestor import ingest_save_to_sqlite, discover_all_saves
 
 
+def get_cached_saves_list() -> list[dict]:
+    try:
+        if HOST_DB_PATH.exists():
+            hconn = sqlite3.connect(HOST_DB_PATH)
+            hconn.row_factory = sqlite3.Row
+            rows = [
+                dict(r)
+                for r in hconn.execute(
+                    """
+                    SELECT * FROM saves_registry
+                    ORDER BY (csv_count > 0) DESC, (html_count > 0) DESC,
+                             CASE WHEN save_slug = 'american_baseball_system' THEN 0 ELSE 1 END,
+                             save_name ASC
+                    """
+                ).fetchall()
+            ]
+            hconn.close()
+            if rows:
+                return rows
+    except Exception:
+        pass
+    return discover_all_saves()
+
+
 def get_save_db_connection(save_slug: str):
     if not save_slug:
         return None
     db_path = SAVES_DB_DIR / f"{save_slug}.db"
-    if not db_path.exists() or db_path.stat().st_size < 65536:
+    needs_ingest = not db_path.exists() or db_path.stat().st_size < 65536
+    if not needs_ingest and HOST_DB_PATH.exists():
+        try:
+            hconn = sqlite3.connect(HOST_DB_PATH)
+            row = hconn.execute("SELECT ingested_at FROM saves_registry WHERE save_slug = ?", (save_slug,)).fetchone()
+            hconn.close()
+            if row and not row[0]:
+                needs_ingest = True
+        except Exception:
+            pass
+    if needs_ingest:
         try:
             ingest_save_to_sqlite(save_slug)
         except Exception:
@@ -340,7 +374,7 @@ get_save_years_and_supplemental = get_save_supplemental_and_years
 
 def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None, year: int = None, include_leaders: bool = True) -> dict:
     conn = get_save_db_connection(save_slug)
-    all_saves = discover_all_saves()
+    all_saves = get_cached_saves_list()
     save_meta = next((s for s in all_saves if s["save_slug"] == save_slug), all_saves[0] if all_saves else {})
 
     if not conn:
@@ -353,10 +387,15 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
             "dumps": [],
             "almanacs": [],
             "teams": [],
+            "all_teams": [],
             "standings": [],
         }
 
     leagues, teams_map, parks_map = get_leagues_and_teams_map(conn)
+    if team_id and team_id in teams_map:
+        t_lid = safe_int(teams_map[team_id].get("league_id"))
+        if t_lid > 0:
+            league_id = t_lid
     if not league_id:
         league_id = leagues[0]["league_id"] if leagues else save_meta.get("primary_league_id", 200)
 
@@ -366,11 +405,20 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
         "level": 1, "level_label": "MLB / Premier (Lvl 1)",
     })
     current_season_year = active_league.get("season_year", 2026)
-    supp_info = get_save_years_and_supplemental(conn, league_id=league_id, default_year=current_season_year)
-    available_years = supp_info["available_years"]
-
     season_year = int(year) if (year and int(year) > 1800) else current_season_year
     is_historical_year = (season_year != current_season_year)
+
+    if is_historical_year and team_id and table_exists(conn, "team_history"):
+        th_lid_row = conn.execute(
+            "SELECT league_id FROM team_history WHERE year = ? AND team_id = ? LIMIT 1",
+            (season_year, team_id),
+        ).fetchone()
+        if th_lid_row and safe_int(th_lid_row[0]) > 0:
+            league_id = safe_int(th_lid_row[0])
+            active_league = next((l for l in leagues if l["league_id"] == league_id), active_league)
+
+    supp_info = get_save_years_and_supplemental(conn, league_id=league_id, default_year=current_season_year)
+    available_years = supp_info["available_years"]
 
     # Filter teams in this league (or all top-level teams if none match)
     league_teams = [t for t in teams_map.values() if t["league_id"] == league_id]
@@ -445,6 +493,7 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
         if table_exists(conn, "team_history_financials"):
             for r in conn.execute("SELECT * FROM team_history_financials WHERE year = ?", (season_year,)):
                 d = dict(r)
+                d.setdefault("player_payroll", d.get("player_expenses", 0))
                 tfin[safe_int(d.get("team_id"))] = d
 
     # If current season (or historical tables were empty for that year), use current tables or dump_team_snapshots
@@ -515,6 +564,40 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
                     d = dict(r)
                     tfin[safe_int(d.get("team_id"))] = d
 
+    # Offseason / preseason fallback: if current season has 0 games played, fall back to the most recent completed season
+    stats_season_year = season_year
+    if sum(safe_int(r.get("g")) for r in records.values()) == 0 and table_exists(conn, "team_history_record"):
+        row_max_yr = conn.execute("SELECT MAX(year) FROM team_history_record WHERE g > 0").fetchone()
+        if row_max_yr and row_max_yr[0]:
+            stats_season_year = safe_int(row_max_yr[0], season_year)
+            for r in conn.execute("SELECT * FROM team_history_record WHERE year = ?", (stats_season_year,)):
+                d = dict(r)
+                records[safe_int(d.get("team_id"))] = d
+            if table_exists(conn, "team_history_batting_stats"):
+                for r in conn.execute("SELECT * FROM team_history_batting_stats WHERE year = ?", (stats_season_year,)):
+                    d = dict(r)
+                    tbat[safe_int(d.get("team_id"))] = d
+            if table_exists(conn, "team_history_pitching_stats"):
+                for r in conn.execute("SELECT * FROM team_history_pitching_stats WHERE year = ?", (stats_season_year,)):
+                    d = dict(r)
+                    tpit[safe_int(d.get("team_id"))] = d
+            if table_exists(conn, "team_history_fielding_stats_stats"):
+                for r in conn.execute("SELECT * FROM team_history_fielding_stats_stats WHERE year = ?", (stats_season_year,)):
+                    d = dict(r)
+                    tfld[safe_int(d.get("team_id"))] = d
+            if table_exists(conn, "team_history_financials"):
+                for r in conn.execute("SELECT * FROM team_history_financials WHERE year = ?", (stats_season_year,)):
+                    d = dict(r)
+                    tid = safe_int(d.get("team_id"))
+                    d.setdefault("player_payroll", d.get("player_expenses", 0))
+                    if tid not in tfin:
+                        tfin[tid] = d
+                    else:
+                        if safe_int(tfin[tid].get("attendance")) == 0:
+                            tfin[tid]["attendance"] = d.get("attendance", 0)
+                        if safe_float(tfin[tid].get("player_payroll")) == 0:
+                            tfin[tid]["player_payroll"] = d.get("player_payroll", 0)
+
     # Human Managers
     hmans = {}
     if table_exists(conn, "human_managers"):
@@ -522,12 +605,12 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
             d = dict(r)
             hmans[safe_int(d.get("human_manager_id"))] = f"{d.get('first_name', '')} {d.get('last_name', '')}".strip()
 
-    # Team WAR totals from career stats for selected season_year
+    # Team WAR totals from career stats for selected season_year (or stats_season_year in preseason)
     team_bat_war = {}
     if table_exists(conn, "players_career_batting_stats"):
         for r in conn.execute(
             "SELECT team_id, SUM(war) as swar FROM players_career_batting_stats WHERE year = ? AND split_id = 1 GROUP BY team_id",
-            (season_year,),
+            (stats_season_year,),
         ):
             team_bat_war[safe_int(r["team_id"])] = round(safe_float(r["swar"]), 1)
 
@@ -535,7 +618,7 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
     if table_exists(conn, "players_career_pitching_stats"):
         for r in conn.execute(
             "SELECT team_id, SUM(war) as swar FROM players_career_pitching_stats WHERE year = ? AND split_id = 1 GROUP BY team_id",
-            (season_year,),
+            (stats_season_year,),
         ):
             team_pit_war[safe_int(r["team_id"])] = round(safe_float(r["swar"]), 1)
 
@@ -543,7 +626,7 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
     if table_exists(conn, "players_career_fielding_stats"):
         for r in conn.execute(
             "SELECT team_id, SUM(zr) as szr, SUM(framing) as sfram FROM players_career_fielding_stats WHERE year = ? GROUP BY team_id",
-            (season_year,),
+            (stats_season_year,),
         ):
             team_zr[safe_int(r["team_id"])] = {
                 "zr": round(safe_float(r["szr"]), 1),
@@ -884,9 +967,9 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
                 "away_errors": safe_int(gd.get("errors0")),
             })
 
-    # Get top leaders via sabermetrics helper for the selected season_year
+    # Get top leaders via sabermetrics helper for the selected season_year (or stats_season_year in preseason)
     if include_leaders:
-        leaders = get_sabermetric_leaderboards(save_slug, league_id=league_id, team_id=team_id, limit_top=150, year=season_year)
+        leaders = get_sabermetric_leaderboards(save_slug, league_id=league_id, team_id=team_id, limit_top=150, year=stats_season_year)
         batters = leaders.get("batters", [])
         pitchers = leaders.get("pitchers", [])
 
@@ -903,6 +986,33 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
         top_bat_war = top_bat_wrc = top_bat_hr = top_bat_ev = []
         top_pit_war = top_pit_era = top_pit_fip = top_pit_k = []
 
+    league_abbr_map = {l["league_id"]: l["abbr"] for l in leagues}
+    league_name_map = {l["league_id"]: l["name"] for l in leagues}
+    all_level1_teams = sorted(
+        [
+            {
+                **t,
+                "league_abbr": league_abbr_map.get(t["league_id"], ""),
+                "league_name": league_name_map.get(t["league_id"], ""),
+            }
+            for t in teams_map.values()
+            if t.get("level") == 1
+        ],
+        key=lambda x: (x.get("league_id", 0), x.get("full_name", "")),
+    )
+    if not all_level1_teams:
+        all_level1_teams = sorted(
+            [
+                {
+                    **t,
+                    "league_abbr": league_abbr_map.get(t["league_id"], ""),
+                    "league_name": league_name_map.get(t["league_id"], ""),
+                }
+                for t in teams_map.values()
+            ],
+            key=lambda x: (x.get("league_id", 0), x.get("full_name", "")),
+        )
+
     conn.close()
     return {
         "save_meta": save_meta,
@@ -918,6 +1028,7 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
         "almanacs": supp_info["almanacs"],
         "league_hints": supp_info["league_hints"][:25],
         "teams": standings,
+        "all_teams": all_level1_teams,
         "standings": standings,
         "parks": list(parks_map.values()),
         "environment": {
@@ -967,6 +1078,10 @@ def get_sabermetric_leaderboards(
         return {"batters": [], "pitchers": [], "fielders": []}
 
     leagues, teams_map, parks_map = get_leagues_and_teams_map(conn)
+    if team_id and team_id in teams_map:
+        t_lid = safe_int(teams_map[team_id].get("league_id"))
+        if t_lid > 0:
+            league_id = t_lid
     if not league_id and leagues:
         league_id = leagues[0]["league_id"]
     active_league = next((l for l in leagues if l["league_id"] == league_id), leagues[0] if leagues else {"season_year": 2026, "league_id": 200})
@@ -983,8 +1098,10 @@ def get_sabermetric_leaderboards(
             base_t = teams_map.get(htid, {})
             hpid = safe_int(hd.get("park_id") or base_t.get("park_id"))
             hslid = safe_int(hd.get("sub_league_id", base_t.get("sub_league_id", 0)))
+            hlid = safe_int(hd.get("league_id") or base_t.get("league_id"))
             hist_teams_map[htid] = {
                 "team_id": htid,
+                "league_id": hlid,
                 "abbr": hd.get("abbr") or base_t.get("abbr", "TM"),
                 "full_name": f"{hd.get('name', '')} {hd.get('nickname', '')}".strip() or base_t.get("full_name", f"Team #{htid}"),
                 "bg_color": base_t.get("bg_color", "#1f1f20"),
@@ -994,6 +1111,8 @@ def get_sabermetric_leaderboards(
                 "sub_league_name": base_t.get("sub_league_name", f"SL {hslid}"),
                 "park": parks_map.get(hpid, base_t.get("park", {"avg": 1.0, "hr": 1.0})),
             }
+        if team_id and team_id in hist_teams_map and hist_teams_map[team_id].get("league_id", 0) > 0:
+            league_id = hist_teams_map[team_id]["league_id"]
 
     # Load players lookup
     players_lookup = {}
@@ -1002,6 +1121,29 @@ def get_sabermetric_leaderboards(
             d = dict(r)
             pid = safe_int(d["player_id"])
             players_lookup[pid] = d
+
+    active_roster_pids = set()
+    reserve_roster_pids = set()
+    if team_id and year_age_offset == 0:
+        if table_exists(conn, "team_roster"):
+            for rr in conn.execute("SELECT player_id, list_id FROM team_roster WHERE team_id = ?", (team_id,)):
+                rpid = safe_int(rr["player_id"])
+                lid_val = safe_int(rr["list_id"])
+                if lid_val in (1, 2, 3, 4):
+                    active_roster_pids.add(rpid)
+                elif lid_val >= 10:
+                    reserve_roster_pids.add(rpid)
+        for pid_k, pinf in players_lookup.items():
+            if safe_int(pinf.get("team_id")) == team_id and safe_int(pinf.get("retired")) == 0:
+                pl_lid = safe_int(pinf.get("league_id"))
+                if pl_lid > 0 and pid_k not in reserve_roster_pids:
+                    active_roster_pids.add(pid_k)
+                elif pl_lid < 0:
+                    reserve_roster_pids.add(pid_k)
+        if not active_roster_pids:
+            for pid_k, pinf in players_lookup.items():
+                if safe_int(pinf.get("team_id")) == team_id and safe_int(pinf.get("retired")) == 0:
+                    active_roster_pids.add(pid_k)
 
     # Load scouting ratings
     bat_ratings = {}
@@ -1155,8 +1297,8 @@ def get_sabermetric_leaderboards(
         bat_rows = conn.execute(q_bat_lg, (season_year, split_id, league_id, min_pa)).fetchall() if league_id else []
         if not bat_rows:
             bat_rows = conn.execute(q_bat, (season_year, split_id, min_pa)).fetchall()
-        if not bat_rows and split_id == 1 and not year:
-            # Fallback to latest year in table only when a specific year wasn't requested
+        if not bat_rows and split_id == 1 and (not year or int(year) == current_league_year):
+            # Fallback to latest year in table when current season is in preseason or specific year wasn't requested
             yr_row = conn.execute("SELECT MAX(year) FROM players_career_batting_stats").fetchone()
             if yr_row and yr_row[0]:
                 season_year = int(yr_row[0])
@@ -1183,16 +1325,35 @@ def get_sabermetric_leaderboards(
         lg_r_pa = tot_r / max(1, tot_pa) or 0.115
         woba_scale = 1.20
 
-        for r in bat_rows:
+        if team_id:
+            if year_age_offset > 0:
+                q_bat_team = q_bat.replace("WHERE year = ? AND split_id = ?", "WHERE year = ? AND split_id = ? AND team_id = ?")
+                iter_bat_rows = conn.execute(q_bat_team, (season_year, split_id, team_id, min_pa)).fetchall()
+                if not iter_bat_rows:
+                    iter_bat_rows = bat_rows
+            else:
+                iter_bat_rows = conn.execute(q_bat, (season_year, split_id, min_pa)).fetchall()
+        else:
+            iter_bat_rows = bat_rows
+
+        for r in iter_bat_rows:
             d = dict(r)
             pid = safe_int(d["player_id"])
             pinfo = players_lookup.get(pid, {})
             stat_tid = safe_int(d.get("stat_team_id"))
-            tid = stat_tid if (year_age_offset > 0 and stat_tid > 0) else safe_int(pinfo.get("team_id") or stat_tid)
-            if team_id and tid != team_id and stat_tid != team_id:
-                continue
-            if league_id and safe_int(d.get("league_id")) not in (0, league_id) and safe_int(pinfo.get("league_id")) != league_id:
-                continue
+            p_curr_tid = safe_int(pinfo.get("team_id"))
+            if team_id:
+                if year_age_offset > 0:
+                    if stat_tid != team_id and p_curr_tid != team_id:
+                        continue
+                else:
+                    if pid not in active_roster_pids and not (p_curr_tid == team_id and safe_int(d["pa"]) > 0) and not (p_curr_tid == 0 and stat_tid == team_id):
+                        continue
+                tid = team_id
+            else:
+                tid = stat_tid if (year_age_offset > 0 and stat_tid > 0) else safe_int(p_curr_tid or stat_tid)
+                if league_id and safe_int(d.get("league_id")) not in (0, league_id) and safe_int(pinfo.get("league_id")) != league_id:
+                    continue
 
             tinfo = hist_teams_map.get(tid) or teams_map.get(tid) or hist_teams_map.get(stat_tid) or teams_map.get(stat_tid) or {
                 "team_id": tid, "abbr": "FA", "full_name": "Free Agent", "bg_color": "#373839", "text_color": "#dbdbdb",
@@ -1435,16 +1596,35 @@ def get_sabermetric_leaderboards(
         if fip_const < 2.4 or fip_const > 4.2:
             fip_const = 3.15
 
-        for r in pit_rows:
+        if team_id:
+            if year_age_offset > 0:
+                q_pit_team = q_pit.replace("WHERE year = ? AND split_id = ?", "WHERE year = ? AND split_id = ? AND team_id = ?")
+                iter_pit_rows = conn.execute(q_pit_team, (season_year, split_id, team_id, min_ip * 3)).fetchall()
+                if not iter_pit_rows:
+                    iter_pit_rows = pit_rows
+            else:
+                iter_pit_rows = conn.execute(q_pit, (season_year, split_id, min_ip * 3)).fetchall()
+        else:
+            iter_pit_rows = pit_rows
+
+        for r in iter_pit_rows:
             d = dict(r)
             pid = safe_int(d["player_id"])
             pinfo = players_lookup.get(pid, {})
             stat_tid = safe_int(d.get("stat_team_id"))
-            tid = stat_tid if (year_age_offset > 0 and stat_tid > 0) else safe_int(pinfo.get("team_id") or stat_tid)
-            if team_id and tid != team_id and stat_tid != team_id:
-                continue
-            if league_id and safe_int(d.get("league_id")) not in (0, league_id) and safe_int(pinfo.get("league_id")) != league_id:
-                continue
+            p_curr_tid = safe_int(pinfo.get("team_id"))
+            if team_id:
+                if year_age_offset > 0:
+                    if stat_tid != team_id and p_curr_tid != team_id:
+                        continue
+                else:
+                    if pid not in active_roster_pids and not (p_curr_tid == team_id and safe_int(d["outs"]) > 0) and not (p_curr_tid == 0 and stat_tid == team_id):
+                        continue
+                tid = team_id
+            else:
+                tid = stat_tid if (year_age_offset > 0 and stat_tid > 0) else safe_int(p_curr_tid or stat_tid)
+                if league_id and safe_int(d.get("league_id")) not in (0, league_id) and safe_int(pinfo.get("league_id")) != league_id:
+                    continue
 
             tinfo = hist_teams_map.get(tid) or teams_map.get(tid) or hist_teams_map.get(stat_tid) or teams_map.get(stat_tid) or {
                 "team_id": tid, "abbr": "FA", "full_name": "Free Agent", "bg_color": "#373839", "text_color": "#dbdbdb",
@@ -1648,6 +1828,157 @@ def get_sabermetric_leaderboards(
                 "contract_years": safe_int(con.get("years"), 1),
                 "is_injured": safe_int(pinfo.get("injury_is_injured"), 0),
             })
+
+    if team_id and year_age_offset == 0 and active_roster_pids:
+        existing_bat_pids = {b["player_id"] for b in batters}
+        existing_pit_pids = {p["player_id"] for p in pitchers}
+        tinfo = teams_map.get(team_id) or {
+            "team_id": team_id, "abbr": "TM", "full_name": f"Team #{team_id}",
+            "bg_color": "#373839", "text_color": "#dbdbdb", "logo_file_name": "",
+            "sub_league_id": 0, "sub_league_name": "", "park": {"avg": 1.0, "hr": 1.0},
+        }
+        for rpid in sorted(active_roster_pids):
+            pinfo = players_lookup.get(rpid)
+            if not pinfo or safe_int(pinfo.get("retired")) != 0:
+                continue
+            pos_num = safe_int(pinfo.get("position"), 10)
+            vr = val_ratings.get(rpid, {})
+            con = contracts.get(rpid, {})
+            oa_val = safe_int(vr.get("oa"), 50)
+            pot_val = safe_int(vr.get("pot"), oa_val)
+            if pos_num != 1 and min_pa == 0 and rpid not in existing_bat_pids:
+                br = bat_ratings.get(rpid, {})
+                fr = fld_ratings.get(rpid, {})
+                fld_st = fielding_by_player.get(rpid, {
+                    "fld_g": 0, "fld_ip": 0.0, "tc": 0, "po": 0, "a": 0, "e": 0, "dp": 0,
+                    "zr": 0.0, "framing": 0.0, "arm": 0.0, "fld_pct": 0.985, "rf9": 0.0
+                })
+                raw_con = safe_int(br.get("batting_ratings_overall_contact"))
+                is_scouted_est = (raw_con == 0)
+                r_con = raw_con if raw_con > 0 else oa_val
+                r_gap = safe_int(br.get("batting_ratings_overall_gap"), oa_val)
+                r_pow = safe_int(br.get("batting_ratings_overall_power"), oa_val)
+                r_eye = safe_int(br.get("batting_ratings_overall_eye"), oa_val)
+                r_k = safe_int(br.get("batting_ratings_overall_strikeouts"), oa_val)
+                r_tcon = safe_int(br.get("batting_ratings_talent_contact"), max(r_con, pot_val))
+                r_tpow = safe_int(br.get("batting_ratings_talent_power"), max(r_pow, pot_val))
+                r_teye = safe_int(br.get("batting_ratings_talent_eye"), max(r_eye, pot_val))
+                batters.append({
+                    "player_id": rpid,
+                    "name": f"{pinfo.get('first_name', '')} {pinfo.get('last_name', '')}".strip() or f"Player #{rpid}",
+                    "age": max(17, safe_int(pinfo.get("age"), 26)),
+                    "bats": BATS_HAND.get(safe_int(pinfo.get("bats"), 1), "R"),
+                    "throws": THROWS_HAND.get(safe_int(pinfo.get("throws"), 1), "R"),
+                    "position_num": pos_num,
+                    "position": POSITIONS.get(pos_num, "UT"),
+                    "uniform_number": safe_int(pinfo.get("uniform_number")),
+                    "team_id": tinfo["team_id"],
+                    "team_abbr": tinfo["abbr"],
+                    "team_name": tinfo["full_name"],
+                    "team_logo": tinfo["logo_file_name"],
+                    "team_color": tinfo["bg_color"],
+                    "sub_league_id": safe_int(tinfo.get("sub_league_id"), 0),
+                    "sub_league_name": tinfo.get("sub_league_name", ""),
+                    "g": 0, "gs": 0, "pa": 0, "ab": 0, "r": 0, "h": 0,
+                    "1b": 0, "2b": 0, "3b": 0, "hr": 0, "xbh": 0, "tb": 0, "tob": 0,
+                    "rbi": 0, "bb": 0, "ibb": 0, "k": 0, "hp": 0, "sh": 0, "sf": 0, "gdp": 0,
+                    "sb": 0, "cs": 0, "sb_pct": 0.0, "pitches_seen": 0, "ppa": 0.0,
+                    "avg": 0.0, "obp": 0.0, "slg": 0.0, "ops": 0.0, "iso": 0.0, "babip": 0.0,
+                    "bb_pct": 0.0, "k_pct": 0.0, "bb_k": 0.0, "sec_a": 0.0,
+                    "woba": 0.0, "xwoba": round(0.280 + (oa_val - 40) * 0.002, 3), "woba_diff": 0.0,
+                    "xba": 0.250, "xslg": 0.400, "wraa": 0.0, "wrc": 0.0,
+                    "wrc_plus": int(100 + (oa_val - 50) * 1.1), "ops_plus": int(100 + (oa_val - 50) * 1.1),
+                    "wpa": 0.0, "ubr": 0.0,
+                    "fld_g": safe_int(fld_st.get("fld_g")), "fld_ip": round(safe_float(fld_st.get("fld_ip")), 1),
+                    "tc": safe_int(fld_st.get("tc")), "po": safe_int(fld_st.get("po")),
+                    "a": safe_int(fld_st.get("a")), "e": safe_int(fld_st.get("e")), "dp": safe_int(fld_st.get("dp")),
+                    "zr": fld_st["zr"], "framing": fld_st["framing"], "arm": safe_float(fld_st.get("arm")),
+                    "fld_pct": fld_st["fld_pct"], "rf9": safe_float(fld_st.get("rf9")),
+                    "war": 0.0,
+                    "bip": 0, "avg_ev": 88.5, "max_ev": 105.0, "avg_la": 12.5, "avg_sprint": 27.0,
+                    "hard_hits": 0, "hard_hit_pct": 35.0, "sweet_spot_pct": 32.0, "barrels": 0, "barrel_pct": 6.5,
+                    "gb_pct": 43.0, "ld_pct": 21.0, "fb_pct": 29.0, "pu_pct": 7.0,
+                    "rtg_contact": r_con, "rtg_gap": r_gap, "rtg_power": r_pow, "rtg_eye": r_eye, "rtg_k": r_k,
+                    "rtg_speed": safe_int(br.get("running_ratings_speed"), 50),
+                    "rtg_steal": safe_int(br.get("running_ratings_stealing"), 50),
+                    "rtg_baserunning": safe_int(br.get("running_ratings_baserunning"), 50),
+                    "rtg_talent_contact": r_tcon, "rtg_talent_power": r_tpow, "rtg_talent_eye": r_teye,
+                    "rtg_infield_range": safe_int(fr.get("fielding_ratings_infield_range"), 50),
+                    "rtg_outfield_range": safe_int(fr.get("fielding_ratings_outfield_range"), 50),
+                    "oa": oa_val, "pot": pot_val,
+                    "overall_value": safe_int(vr.get("overall_value"), 500),
+                    "talent_value": safe_int(vr.get("talent_value"), 500),
+                    "salary": safe_float(con.get("salary0"), 0.0),
+                    "contract_years": safe_int(con.get("years"), 1),
+                    "is_injured": safe_int(pinfo.get("injury_is_injured"), 0),
+                    "is_scouted_est": is_scouted_est,
+                })
+            elif pos_num == 1 and min_ip == 0 and rpid not in existing_pit_pids:
+                pr = pit_ratings.get(rpid, {})
+                raw_stu = safe_int(pr.get("pitching_ratings_overall_stuff"))
+                r_stu = raw_stu if raw_stu > 0 else oa_val
+                r_mov = safe_int(pr.get("pitching_ratings_overall_movement"), oa_val)
+                r_ctl = safe_int(pr.get("pitching_ratings_overall_control"), oa_val)
+                r_tstu = safe_int(pr.get("pitching_ratings_talent_stuff"), max(r_stu, pot_val))
+                r_tmov = safe_int(pr.get("pitching_ratings_talent_movement"), max(r_mov, pot_val))
+                r_tctl = safe_int(pr.get("pitching_ratings_talent_control"), max(r_ctl, pot_val))
+                velo_code = safe_int(pr.get("pitching_ratings_misc_velocity"), 10)
+                role_code = safe_int(pinfo.get("role"), 11)
+                pitches_arsenal = {}
+                for p_key, p_label in [
+                    ("fastball", "4-Seam FB"), ("sinker", "Sinker"), ("cutter", "Cutter"),
+                    ("slider", "Slider"), ("curveball", "Curveball"), ("changeup", "Changeup"),
+                    ("splitter", "Splitter"), ("circlechange", "Circle Chg"), ("knucklecurve", "Knuckle-CB"),
+                    ("forkball", "Forkball"), ("screwball", "Screwball"), ("knuckleball", "Knuckleball"),
+                ]:
+                    val = safe_int(pr.get(f"pitching_ratings_pitches_{p_key}"), 0)
+                    if val > 0:
+                        pitches_arsenal[p_label] = val
+                pitchers.append({
+                    "player_id": rpid,
+                    "name": f"{pinfo.get('first_name', '')} {pinfo.get('last_name', '')}".strip() or f"Pitcher #{rpid}",
+                    "age": max(17, safe_int(pinfo.get("age"), 27)),
+                    "throws": THROWS_HAND.get(safe_int(pinfo.get("throws"), 1), "R"),
+                    "role": ROLE_NAMES.get(role_code, "SP" if role_code == 11 else "RP"),
+                    "position_num": 1,
+                    "position": ROLE_NAMES.get(role_code, "SP" if role_code == 11 else "RP"),
+                    "uniform_number": safe_int(pinfo.get("uniform_number")),
+                    "team_id": tinfo["team_id"],
+                    "team_abbr": tinfo["abbr"],
+                    "team_name": tinfo["full_name"],
+                    "team_logo": tinfo["logo_file_name"],
+                    "team_color": tinfo["bg_color"],
+                    "sub_league_id": safe_int(tinfo.get("sub_league_id"), 0),
+                    "sub_league_name": tinfo.get("sub_league_name", ""),
+                    "g": 0, "gs": 0, "gf": 0, "w": 0, "l": 0, "decisions": 0, "w_pct": 0.0,
+                    "sv": 0, "hld": 0, "sv_hld": 0, "bs": 0, "qs": 0, "cg": 0, "sho": 0,
+                    "outs": 0, "ip": 0.0, "ip_display": "0.0", "bf": 0, "ab": 0, "ha": 0, "baa": 0.0,
+                    "r": 0, "er": 0, "hra": 0, "bb": 0, "iw": 0, "k": 0, "hp": 0, "wp": 0, "bk": 0, "pi": 0,
+                    "era": 0.0, "whip": 0.0, "fip": 4.00, "xfip": 4.00, "siera": 4.00,
+                    "era_plus": 100, "era_minus": 100, "fip_minus": 100,
+                    "k9": 0.0, "bb9": 0.0, "hr9": 0.0, "h9": 0.0, "k_bb": 0.0,
+                    "k_pct": 0.0, "bb_pct": 0.0, "k_minus_bb": 0.0, "babip": 0.0, "lob_pct": 72.0,
+                    "gb_pct": 45.0, "fb_pct": 55.0, "hr_fb": 11.0, "wpa": 0.0, "sd": 0, "md": 0,
+                    "war": 0.0, "ra9war": 0.0,
+                    "bip_against": 0, "avg_ev_against": 88.5, "max_ev_against": 105.0,
+                    "hard_hit_against_pct": 35.0, "barrel_against_pct": 7.0,
+                    "rtg_stuff": r_stu, "rtg_movement": r_mov,
+                    "rtg_hra": safe_int(pr.get("pitching_ratings_overall_hra"), r_mov),
+                    "rtg_pbabip": safe_int(pr.get("pitching_ratings_overall_pbabip"), 50),
+                    "rtg_control": r_ctl,
+                    "rtg_talent_stuff": r_tstu, "rtg_talent_movement": r_tmov, "rtg_talent_control": r_tctl,
+                    "rtg_stamina": safe_int(pr.get("pitching_ratings_misc_stamina"), 50),
+                    "velocity_str": VELOCITY_MAP.get(velo_code, "92-94 mph"),
+                    "velocity_mph": VELOCITY_MPH_MID.get(velo_code, 93.0),
+                    "arm_slot": ARM_SLOTS.get(safe_int(pr.get("pitching_ratings_misc_arm_slot"), 4), "3/4"),
+                    "arsenal": pitches_arsenal,
+                    "oa": oa_val, "pot": pot_val,
+                    "overall_value": safe_int(vr.get("overall_value"), 500),
+                    "talent_value": safe_int(vr.get("talent_value"), 500),
+                    "salary": safe_float(con.get("salary0"), 0.0),
+                    "contract_years": safe_int(con.get("years"), 1),
+                    "is_injured": safe_int(pinfo.get("injury_is_injured"), 0),
+                })
 
     conn.close()
     return {
@@ -3094,18 +3425,29 @@ def get_statsplus_reports(save_slug: str, league_id: int = None, team_id: int = 
     }
 
 
+def _ordinal(n: int) -> str:
+    if 10 <= (n % 100) <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
 def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = None, year: int = None) -> dict:
     """
     Generates a comprehensive Franchise Team Dashboard including:
     1. Graphical Diamond Depth Chart (C, 1B, 2B, 3B, SS, LF, CF, RF, DH + SP Rotation & Bullpen)
        with starter + backups, unit grades, WAR, wRC+, ZR, and league-wide percentiles.
-    2. Positional Strengths & Upgrade Matrix vs. League Averages.
-    3. Multi-Year Franchise Roadmap (5-Year Contract & Age Curve Matrix, Payroll Horizon, Prospect Pipeline, and GM Strategic Brief).
+    2. Positional Strengths & Upgrade Matrix vs. League Averages + League-Wide Team Statistical Rankings.
+    3. Multi-Year Franchise Roadmap (5-Year Projected Starters & Positional Succession Grid, Year-by-Year
+       Potential Gaps & Action Plan, 5-Year Contract & Age Curve Matrix, Payroll Horizon, and Prospect Pipeline).
     """
-    overview = get_save_overview(save_slug, league_id=league_id, year=year)
+    overview = get_save_overview(save_slug, league_id=league_id, team_id=team_id, year=year, include_leaders=False)
     standings = overview.get("standings", [])
     if not standings:
         return {}
+
+    league_id = overview.get("active_league", {}).get("league_id") or league_id
 
     if not team_id:
         human_t = next((t for t in standings if t.get("human_team")), None)
@@ -3119,6 +3461,18 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
     lb = get_sabermetric_leaderboards(save_slug, league_id=league_id, min_pa=0, min_ip=0, limit_top=2500, year=season_year)
     all_batters = lb.get("batters", [])
     all_pitchers = lb.get("pitchers", [])
+
+    # Also fetch team-specific sabermetrics so multi-stint, cross-league, and 0-PA active-roster players are guaranteed present
+    team_lb = get_sabermetric_leaderboards(save_slug, league_id=league_id, team_id=team_id, min_pa=0, min_ip=0, limit_top=300, year=season_year)
+    bat_by_pid = {b["player_id"]: b for b in all_batters}
+    for tb in team_lb.get("batters", []):
+        bat_by_pid[tb["player_id"]] = tb
+    all_batters = list(bat_by_pid.values())
+
+    pit_by_pid = {p["player_id"]: p for p in all_pitchers}
+    for tp in team_lb.get("pitchers", []):
+        pit_by_pid[tp["player_id"]] = tp
+    all_pitchers = list(pit_by_pid.values())
 
     conn = get_save_db_connection(save_slug)
     fld_pos_ratings = {}
@@ -3157,12 +3511,12 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
             placeholders = ",".join("?" for _ in aff_ids)
             q_org_pros = f"""
             SELECT v.player_id, v.team_id, v.position, v.oa, v.pot, v.overall_value, v.talent_value,
-                   p.first_name, p.last_name, p.age, p.bats, p.throws
+                   p.first_name, p.last_name, p.age, p.bats, p.throws, p.role, p.league_id as player_league_id
             FROM players_value v
             JOIN players p ON p.player_id = v.player_id
-            WHERE p.retired = 0 AND p.age <= 27 AND (v.team_id IN ({placeholders}) OR p.team_id IN ({placeholders}))
-            ORDER BY v.talent_value DESC, v.pot DESC
-            LIMIT 25
+            WHERE p.retired = 0 AND p.age <= 26 AND (v.team_id IN ({placeholders}) OR p.team_id IN ({placeholders}))
+            ORDER BY v.pot DESC, v.talent_value DESC
+            LIMIT 45
             """
             for r in conn.execute(q_org_pros, tuple(aff_ids + aff_ids)):
                 org_prospects.append(dict(r))
@@ -3170,11 +3524,12 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
             # If a team has no active stats yet (e.g. Opening Day 0 games played), populate roster players from players table
             if sum(1 for b in all_batters if b["team_id"] == team_id) < 9:
                 q_roster = """
-                SELECT p.player_id, p.team_id, p.position, p.role, p.first_name, p.last_name, p.age, p.bats, p.throws,
+                SELECT p.player_id, p.team_id, p.league_id, p.position, p.role, p.first_name, p.last_name, p.age, p.bats, p.throws,
                        p.injury_is_injured, v.oa, v.pot, v.overall_value, v.talent_value
                 FROM players p
                 LEFT JOIN players_value v ON p.player_id = v.player_id
                 WHERE p.retired = 0 AND p.team_id = ?
+                ORDER BY (p.league_id > 0) DESC, v.oa DESC
                 """
                 existing_bat_ids = {b["player_id"] for b in all_batters}
                 existing_pit_ids = {p["player_id"] for p in all_pitchers}
@@ -3514,7 +3869,141 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
     top_strengths = sorted_by_strength[:3]
     upgrade_targets = list(reversed(sorted_by_strength[-3:]))
 
-    # 3. Build 5-Year Franchise Roadmap & Contract/Age Horizon
+    # 2B. Build League-Wide Team Statistical Rankings (Offense, Pitching, Defense & Efficiency)
+    total_teams_cnt = max(1, len(standings))
+
+    def _compute_team_stat_rank(
+        key: str,
+        label: str,
+        short_label: str,
+        category: str,
+        getter,
+        fmt_fn,
+        higher_is_better: bool = True,
+    ) -> dict:
+        vals_by_tid = {t_obj["team_id"]: float(getter(t_obj)) for t_obj in standings}
+        team_val = vals_by_tid.get(team_id, 0.0)
+        peer_vals = list(vals_by_tid.values())
+        lg_avg_val = float(np.mean(peer_vals)) if peer_vals else 0.0
+        if higher_is_better:
+            better_cnt = sum(1 for v in peer_vals if v > team_val)
+        else:
+            better_cnt = sum(1 for v in peer_vals if v < team_val)
+        rank = 1 + better_cnt
+        pct = int(round(((total_teams_cnt - rank) / max(1, total_teams_cnt - 1)) * 94.0 + 5.0)) if total_teams_cnt > 1 else 75
+        pct = max(5, min(99, pct))
+        if rank <= max(1, int(math.ceil(total_teams_cnt * 0.25))):
+            tier = "Elite"
+            color = "#10b981"
+        elif rank <= max(2, int(math.ceil(total_teams_cnt * 0.50))):
+            tier = "Above Avg"
+            color = "#38bdf8"
+        elif rank <= max(3, int(math.ceil(total_teams_cnt * 0.75))):
+            tier = "Mid-Pack"
+            color = "#f59e0b"
+        else:
+            tier = "Lagging"
+            color = "#f43f5e"
+        diff_raw = team_val - lg_avg_val
+        return {
+            "key": key,
+            "label": label,
+            "short_label": short_label,
+            "category": category,
+            "rank": rank,
+            "rank_str": f"#{rank}",
+            "rank_ordinal": _ordinal(rank),
+            "total_teams": total_teams_cnt,
+            "value": round(team_val, 3),
+            "value_fmt": fmt_fn(team_val),
+            "lg_avg": round(lg_avg_val, 3),
+            "lg_avg_fmt": fmt_fn(lg_avg_val),
+            "diff": round(diff_raw, 3),
+            "percentile": pct,
+            "tier": tier,
+            "color": color,
+            "higher_is_better": higher_is_better,
+        }
+
+    ranking_metrics = [
+        # Offense & Batting
+        _compute_team_stat_rank("rs", "Runs Scored (RS)", "RS", "Offense", lambda t: t.get("rs", 0), lambda v: f"{int(round(v))}", True),
+        _compute_team_stat_rank("wrc_plus", "Team wRC+", "wRC+", "Offense", lambda t: t.get("wrc_plus", 100), lambda v: f"{int(round(v))}", True),
+        _compute_team_stat_rank("woba", "Weighted On-Base (wOBA)", "wOBA", "Offense", lambda t: t.get("woba", 0.320), lambda v: f"{v:.3f}".lstrip("0") if v < 1 else f"{v:.3f}", True),
+        _compute_team_stat_rank("ops", "On-Base + Slugging (OPS)", "OPS", "Offense", lambda t: t.get("ops", 0.730), lambda v: f"{v:.3f}".lstrip("0") if v < 1 else f"{v:.3f}", True),
+        _compute_team_stat_rank("obp", "On-Base Percentage (OBP)", "OBP", "Offense", lambda t: t.get("obp", 0.320), lambda v: f"{v:.3f}".lstrip("0") if v < 1 else f"{v:.3f}", True),
+        _compute_team_stat_rank("slg", "Slugging Percentage (SLG)", "SLG", "Offense", lambda t: t.get("slg", 0.410), lambda v: f"{v:.3f}".lstrip("0") if v < 1 else f"{v:.3f}", True),
+        _compute_team_stat_rank("avg", "Batting Average (AVG)", "AVG", "Offense", lambda t: t.get("avg", 0.255), lambda v: f"{v:.3f}".lstrip("0") if v < 1 else f"{v:.3f}", True),
+        _compute_team_stat_rank("hr", "Home Runs (HR)", "HR", "Offense", lambda t: t.get("hr", 0), lambda v: f"{int(round(v))}", True),
+        _compute_team_stat_rank("sb", "Stolen Bases (SB)", "SB", "Offense", lambda t: t.get("sb", 0), lambda v: f"{int(round(v))}", True),
+        _compute_team_stat_rank("bat_war", "Position Player WAR", "Bat WAR", "Offense", lambda t: t.get("bat_war", 0.0), lambda v: f"{v:.1f}", True),
+        # Pitching & Staff
+        _compute_team_stat_rank("ra", "Runs Allowed (RA)", "RA", "Pitching", lambda t: t.get("ra", 0), lambda v: f"{int(round(v))}", False),
+        _compute_team_stat_rank("era", "Team Earned Run Avg (ERA)", "ERA", "Pitching", lambda t: t.get("era", 4.20), lambda v: f"{v:.2f}", False),
+        _compute_team_stat_rank("fip", "Fielding Indep. Pitching (FIP)", "FIP", "Pitching", lambda t: t.get("fip", 4.20), lambda v: f"{v:.2f}", False),
+        _compute_team_stat_rank("era_plus", "Park-Adjusted ERA+", "ERA+", "Pitching", lambda t: t.get("era_plus", 100), lambda v: f"{int(round(v))}", True),
+        _compute_team_stat_rank("whip", "Walks + Hits / IP (WHIP)", "WHIP", "Pitching", lambda t: t.get("whip", 1.30), lambda v: f"{v:.2f}", False),
+        _compute_team_stat_rank("k_pit", "Pitching Strikeouts (SO)", "SO", "Pitching", lambda t: t.get("k_pit", 0), lambda v: f"{int(round(v))}", True),
+        _compute_team_stat_rank("sv", "Bullpen Saves (SV)", "SV", "Pitching", lambda t: t.get("sv", 0), lambda v: f"{int(round(v))}", True),
+        _compute_team_stat_rank("sp_war", "Starting Rotation WAR", "SP WAR", "Pitching", lambda t: sp_team_wars.get(t["team_id"], 0.0), lambda v: f"{v:.1f}", True),
+        _compute_team_stat_rank("rp_war", "Bullpen Relief WAR", "RP WAR", "Pitching", lambda t: rp_team_wars.get(t["team_id"], 0.0), lambda v: f"{v:.1f}", True),
+        _compute_team_stat_rank("pit_war", "Total Pitching WAR", "Pit WAR", "Pitching", lambda t: t.get("pit_war", 0.0), lambda v: f"{v:.1f}", True),
+        # Defense & Club Value
+        _compute_team_stat_rank("zr", "Defensive Zone Rating (ZR)", "Def ZR", "Defense & Value", lambda t: t.get("zr", 0.0), lambda v: f"{v:+.1f}", True),
+        _compute_team_stat_rank("framing", "Catcher Framing Runs", "Framing", "Defense & Value", lambda t: t.get("framing", 0.0), lambda v: f"{v:+.1f}", True),
+        _compute_team_stat_rank("def_eff", "Defensive Efficiency (DER)", "Def Eff", "Defense & Value", lambda t: t.get("def_eff", 0.690), lambda v: f"{v:.3f}".lstrip("0") if v < 1 else f"{v:.3f}", True),
+        _compute_team_stat_rank("def_pct", "Fielding Percentage (FLD%)", "FLD%", "Defense & Value", lambda t: t.get("def_pct", 0.985), lambda v: f"{v:.3f}".lstrip("0") if v < 1 else f"{v:.3f}", True),
+        _compute_team_stat_rank("run_diff", "Run Differential (R Diff)", "R Diff", "Defense & Value", lambda t: t.get("run_diff", 0), lambda v: f"{int(round(v)):+d}", True),
+        _compute_team_stat_rank("pyth_pct", "Pythagorean Win %", "Pyth%", "Defense & Value", lambda t: t.get("pyth_pct", 0.500), lambda v: f"{v:.3f}".lstrip("0") if v < 1 else f"{v:.3f}", True),
+        _compute_team_stat_rank("total_war", "Total Team WAR", "Tot WAR", "Defense & Value", lambda t: t.get("total_war", 0.0), lambda v: f"{v:.1f}", True),
+    ]
+
+    metrics_by_key = {m["key"]: m for m in ranking_metrics}
+    # Compute composite pillar ranks across all teams in the league
+    off_scores = {
+        t_obj["team_id"]: (
+            t_obj.get("wrc_plus", 100) * 0.4 + t_obj.get("bat_war", 0.0) * 2.5 + t_obj.get("rs", 0) * 0.08
+        )
+        for t_obj in standings
+    }
+    pit_scores = {
+        t_obj["team_id"]: (
+            t_obj.get("era_plus", 100) * 0.4 + t_obj.get("pit_war", 0.0) * 2.5 - t_obj.get("ra", 0) * 0.08
+        )
+        for t_obj in standings
+    }
+    def_scores = {
+        t_obj["team_id"]: (
+            t_obj.get("zr", 0.0) * 2.0 + t_obj.get("framing", 0.0) * 1.5 + (t_obj.get("def_eff", 0.690) - 0.680) * 400.0
+        )
+        for t_obj in standings
+    }
+    offense_rank = 1 + sum(1 for v in off_scores.values() if v > off_scores.get(team_id, 0.0))
+    pitching_rank = 1 + sum(1 for v in pit_scores.values() if v > pit_scores.get(team_id, 0.0))
+    defense_rank = 1 + sum(1 for v in def_scores.values() if v > def_scores.get(team_id, 0.0))
+    total_war_rank = metrics_by_key["total_war"]["rank"]
+
+    team_rankings = {
+        "league_name": overview.get("active_league", {}).get("name", "League"),
+        "league_abbr": overview.get("active_league", {}).get("abbr", "MLB"),
+        "total_teams": total_teams_cnt,
+        "summary": {
+            "offense_rank": offense_rank,
+            "offense_ordinal": _ordinal(offense_rank),
+            "pitching_rank": pitching_rank,
+            "pitching_ordinal": _ordinal(pitching_rank),
+            "defense_rank": defense_rank,
+            "defense_ordinal": _ordinal(defense_rank),
+            "total_war_rank": total_war_rank,
+            "total_war_ordinal": _ordinal(total_war_rank),
+        },
+        "metrics": ranking_metrics,
+        "offense": [m for m in ranking_metrics if m["category"] == "Offense"],
+        "pitching": [m for m in ranking_metrics if m["category"] == "Pitching"],
+        "defense": [m for m in ranking_metrics if m["category"] == "Defense & Value"],
+    }
+
+    # 3. Build Detailed 5-Year Franchise Roadmap, Projected Starters & Positional Gap Engine
     years_header = [season_year + i for i in range(5)]
     budget = active_team.get("budget") or max(120000000.0, active_team.get("payroll", 100000000.0) * 1.15)
     curr_payroll = active_team.get("payroll") or 0.0
@@ -3526,11 +4015,15 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
             "name": b["name"],
             "pos": b["position"],
             "position": b["position"],
+            "position_num": b.get("position_num", 10),
             "is_pitcher": False,
             "age": b["age"],
+            "bats": b.get("bats", "R"),
+            "throws": b.get("throws", "R"),
             "oa": b["oa"],
             "pot": b["pot"],
             "war": b["war"],
+            "pa_or_ip": b.get("pa", 0),
             "metric_str": f"{b['wrc_plus']} wRC+ | {b['hr']} HR",
             "salary": b["salary"],
         })
@@ -3542,17 +4035,22 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
             "name": p["name"],
             "pos": p["role"],
             "position": p["role"],
+            "position_num": 1,
             "is_pitcher": True,
             "age": p["age"],
+            "bats": p.get("throws", "R"),
+            "throws": p.get("throws", "R"),
             "oa": p["oa"],
             "pot": p["pot"],
             "war": p["war"],
+            "gs": p.get("gs", 0),
+            "sv": p.get("sv", 0),
+            "pa_or_ip": p.get("ip", 0.0),
             "metric_str": f"{p['era']:.2f} ERA | {p['fip']:.2f} FIP",
             "salary": p["salary"],
         })
 
     combined_roster.sort(key=lambda x: (x["war"] * 3.0 + x["oa"] * 0.08 + (x["salary"] / 10000000.0)), reverse=True)
-    core_players = combined_roster[:18]
 
     committed_by_year = [0.0] * 5
     signed_cnt_by_year = [0] * 5
@@ -3566,10 +4064,11 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
 
     if committed_by_year[0] == 0 and curr_payroll > 0:
         committed_by_year[0] = curr_payroll
-        signed_cnt_by_year[0] = max(signed_cnt_by_year[0], len(core_players))
+        signed_cnt_by_year[0] = max(signed_cnt_by_year[0], min(26, len(combined_roster)))
 
-    player_matrix = []
-    for pl in core_players:
+    # Project 5-year contract control & age curve for every player on combined_roster
+    full_roster_proj = []
+    for pl in combined_roster:
         pid = pl["player_id"]
         c_row = contracts_full.get(pid, {})
         c_years = max(1, safe_int(c_row.get("years"), 1))
@@ -3578,6 +4077,8 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
         no_trade = bool(safe_int(c_row.get("no_trade")))
 
         age0 = pl["age"]
+        oa0 = pl["oa"]
+        pot0 = max(oa0, pl["pot"])
         if age0 <= 25:
             age_phase = "Ascending Core 📈"
             phase_color = "emerald"
@@ -3591,73 +4092,113 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
             age_phase = "Decline Watch ⚠️"
             phase_color = "rose"
 
-        base_war = round(max(0.2, pl["war"] if pl["war"] > 0 else (pl["oa"] - 38) * 0.11), 1)
+        base_war = round(max(0.3, pl["war"] if pl["war"] > 0.2 else (oa0 - 38) * 0.12), 1)
         year_cells = []
+        fa_year = None
         for y_idx in range(5):
+            yr_val = season_year + y_idx
             age_y = age0 + y_idx
             sal_y = safe_float(c_row.get(f"salary{y_idx}"), 0.0)
             if y_idx == 0 and sal_y <= 0 and pl["salary"] > 0:
                 sal_y = pl["salary"]
 
+            # Project rating & WAR trajectory
             if age_y <= 26:
-                war_mult = 1.0 + (y_idx * 0.08)
+                growth_step = min(pot0 - oa0, int(round((pot0 - oa0) * min(1.0, y_idx * 0.35))))
+                proj_oa_y = min(80, oa0 + max(0, growth_step))
+                war_mult = 1.0 + (y_idx * 0.08) + max(0, (proj_oa_y - oa0) * 0.015)
             elif age_y <= 29:
+                proj_oa_y = oa0
                 war_mult = 1.0
+            elif age_y <= 32:
+                proj_oa_y = max(35, oa0 - (age_y - 29) * 2)
+                war_mult = max(0.55, 1.0 - (age_y - 29) * 0.075)
             else:
-                war_mult = max(0.35, 1.0 - (age_y - 29) * 0.085)
+                proj_oa_y = max(30, oa0 - 6 - (age_y - 32) * 3)
+                war_mult = max(0.30, 0.77 - (age_y - 32) * 0.10)
             proj_war_y = round(base_war * war_mult, 1)
 
-            if age_y <= 29:
-                age_tier = "prime"
+            if age_y <= 25:
+                age_tier = "Ascent"
+            elif age_y <= 29:
+                age_tier = "Prime"
             elif age_y <= 32:
-                age_tier = "vet"
+                age_tier = "Veteran"
             else:
-                age_tier = "decline"
+                age_tier = "Decline"
 
             if sal_y > 0 or y_idx < c_years:
                 if y_idx == c_years - 1 and (has_t_opt or has_p_opt) and y_idx > 0:
                     status = "Option"
+                    status_category = "Option"
                     cell_type = "option_team" if has_t_opt else "option_player"
-                    label_str = f"${sal_y/1e6:.1f}M ({'TO' if has_t_opt else 'PO'})" if sal_y > 0 else "Option"
-                elif sal_y <= 950000 and age_y <= 26:
-                    status = "Pre-Arb"
+                    opt_tag = "Team Opt" if has_t_opt else "Player Opt"
+                    label_str = f"${sal_y/1e6:.1f}M ({'TO' if has_t_opt else 'PO'})" if sal_y > 0 else opt_tag
+                    under_control = True
+                elif sal_y <= 1100000 and age_y <= 26:
+                    status = "Team Control"
+                    status_category = "Pre-Arb"
                     cell_type = "pre_arb"
-                    label_str = f"${sal_y/1e6:.2f}M (Min)" if sal_y > 0 else "Pre-Arb"
+                    label_str = f"${sal_y/1e6:.2f}M (Pre-Arb)" if sal_y > 0 else "Pre-Arb"
+                    under_control = True
                 else:
-                    status = "Signed"
+                    status = "Guaranteed"
+                    status_category = "Signed"
                     cell_type = "signed"
                     label_str = f"${sal_y/1e6:.1f}M" if sal_y > 0 else "Signed"
+                    under_control = True
             else:
-                if age_y <= 27 and y_idx <= 3:
-                    status = "Arb"
+                if age0 <= 24 and age_y <= 26:
+                    status = "Team Control"
+                    status_category = "Pre-Arb"
+                    cell_type = "pre_arb"
+                    sal_y = 800000.0
+                    label_str = "Pre-Arb (~$0.8M)"
+                    under_control = True
+                elif age0 <= 26 and age_y <= 28 and y_idx <= 3:
+                    status = "Team Control"
+                    status_category = "Arb"
                     cell_type = "arb"
-                    est_arb = round(max(1.2, base_war * (1.8 + y_idx * 0.9)), 1)
+                    est_arb = round(max(1.4, base_war * (1.8 + y_idx * 0.9)), 1)
+                    sal_y = est_arb * 1e6
                     label_str = f"Arb (~${est_arb}M)"
+                    under_control = True
                 else:
                     status = "FA"
+                    status_category = "FA"
                     cell_type = "fa"
                     label_str = "UFA"
+                    under_control = False
+                    if fa_year is None:
+                        fa_year = yr_val
 
             year_cells.append({
-                "year": season_year + y_idx,
+                "year": yr_val,
                 "age": age_y,
                 "age_tier": age_tier,
+                "proj_oa": proj_oa_y,
                 "salary": sal_y,
                 "status": status,
+                "status_category": status_category,
+                "under_control": under_control,
                 "label": f"{label_str} · {proj_war_y:.1f}w",
+                "short_label": label_str,
                 "cell_type": cell_type,
                 "proj_war": proj_war_y,
             })
 
-        player_matrix.append({
+        full_roster_proj.append({
             **pl,
             "war": base_war,
             "no_trade": no_trade,
             "age_phase": age_phase,
             "phase_color": phase_color,
+            "fa_year": fa_year,
             "years": year_cells,
             "year_cells": year_cells,
         })
+
+    player_matrix = full_roster_proj[:20]
 
     payroll_horizon = []
     for y_idx in range(5):
@@ -3681,21 +4222,34 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
             "pct_of_budget": round(min(100.0, (tot_proj / max(1.0, budget)) * 100.0), 1),
         })
 
-    # Prospect & Young Core Pipeline with ETA, Upside, Key Tools & Positional Impact
+    # Prospect & Young Core Pipeline with ETA, Upside, Key Tools & Positional Succession
     weak_pos_set = {u["position"] for u in upgrade_targets}
+    entrenched_mlb_pids = {
+        x["player_id"]
+        for x in combined_roster
+        if (x["age"] >= 24 and x.get("pa_or_ip", 0) >= (120 if not x["is_pitcher"] else 40))
+    }
+
     pipeline_list = []
     seen_pros = set()
 
-    # If org_prospects is empty, fall back to youngest players on combined_roster
-    if not org_prospects:
-        for cr in sorted(combined_roster, key=lambda x: (x["age"], -x["pot"]))[:12]:
-            org_prospects.append({
+    filtered_org_prospects = [
+        pr for pr in org_prospects if safe_int(pr["player_id"]) not in entrenched_mlb_pids
+    ]
+    if len(filtered_org_prospects) < 10:
+        for pr in org_prospects:
+            if pr not in filtered_org_prospects:
+                filtered_org_prospects.append(pr)
+    if not filtered_org_prospects:
+        for cr in sorted(combined_roster, key=lambda x: (x["age"], -x["pot"]))[:15]:
+            filtered_org_prospects.append({
                 "player_id": cr["player_id"],
                 "first_name": cr["name"],
                 "last_name": "",
                 "age": cr["age"],
-                "position": 1 if cr["is_pitcher"] else 10,
+                "position": 1 if cr["is_pitcher"] else cr.get("position_num", 10),
                 "pos_override": cr["position"],
+                "role": 11 if cr["position"] == "SP" else 12,
                 "oa": cr["oa"],
                 "pot": cr["pot"],
                 "talent_value": cr["pot"] * 12,
@@ -3703,23 +4257,32 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
                 "throws": 1,
             })
 
-    for pr in org_prospects:
+    for pr in filtered_org_prospects:
         pid = safe_int(pr["player_id"])
         if pid in seen_pros:
             continue
         seen_pros.add(pid)
         p_age = safe_int(pr["age"], 21)
         p_oa = safe_int(pr["oa"], 40)
-        p_pot = safe_int(pr["pot"], 60)
-        pos_str = pr.get("pos_override") or POSITIONS.get(safe_int(pr["position"]), "P")
-        readiness = min(100, max(25, int(round((p_oa / max(1, p_pot)) * 100.0))))
+        p_pot = max(p_oa, safe_int(pr["pot"], 60))
+        raw_pos = safe_int(pr.get("position"), 1)
+        if pr.get("pos_override"):
+            pos_str = pr["pos_override"]
+        elif raw_pos == 1:
+            role_c = safe_int(pr.get("role"), 11)
+            pos_str = "SP" if role_c == 11 else ("CL" if role_c == 13 else "RP")
+        else:
+            pos_str = POSITIONS.get(raw_pos, "UT")
+
+        growth_delta = max(0, p_pot - p_oa)
+        readiness = min(100, max(22, int(round((p_oa / max(1, p_pot)) * 100.0))))
         if p_oa >= 48 or p_age >= 24:
             eta = f"{season_year} (MLB Ready)"
             eta_yr = season_year
         elif p_oa >= 40 or p_age >= 22:
             eta = str(season_year + 1)
             eta_yr = season_year + 1
-        elif p_age >= 20:
+        elif p_age >= 20 or p_oa >= 32:
             eta = str(season_year + 2)
             eta_yr = season_year + 2
         else:
@@ -3731,7 +4294,7 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
         elif p_pot >= 60:
             upside = "All-Star Ceiling"
         elif p_pot >= 50:
-            upside = "Everyday Regular"
+            upside = "Everyday Starter"
         else:
             upside = "Role / Platoon Depth"
 
@@ -3748,7 +4311,24 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
             eye = safe_int(br_rtg.get("batting_ratings_talent_eye") or br_rtg.get("batting_ratings_overall_eye"), p_pot)
             key_tools = f"CON {con} · POW {pow_r} · EYE {eye}"
 
-        fills_need = pos_str in weak_pos_set or (pos_str in ("P", "SP", "RP") and ("SP" in weak_pos_set or "RP" in weak_pos_set))
+        fills_need = pos_str in weak_pos_set or (pos_str in ("P", "SP", "RP", "CL") and ("SP" in weak_pos_set or "RP" in weak_pos_set))
+
+        # Check incumbent at this position
+        if pos_str in depth_chart_nodes and depth_chart_nodes[pos_str].get("starter"):
+            inc = depth_chart_nodes[pos_str]["starter"]
+            inc_name = inc["name"]
+            inc_oa = inc["oa"]
+        elif pos_str in ("SP", "P") and rotation:
+            inc = rotation[-1]
+            inc_name = inc["name"]
+            inc_oa = inc["oa"]
+        elif pos_str in ("RP", "CL") and bullpen:
+            inc = bullpen[0]
+            inc_name = inc["name"]
+            inc_oa = inc["oa"]
+        else:
+            inc_name = "Open Competition"
+            inc_oa = 42
 
         pipeline_list.append({
             "player_id": pid,
@@ -3760,14 +4340,478 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
             "throws": THROWS_HAND.get(safe_int(pr.get("throws"), 1), "R"),
             "oa": p_oa,
             "pot": p_pot,
+            "growth_delta": growth_delta,
             "upside": upside,
             "key_tools": key_tools,
             "talent_value": safe_int(pr.get("talent_value"), 500),
             "readiness_pct": readiness,
             "eta": eta,
             "eta_year": eta_yr,
-            "addresses_need": fills_need,
+            "addresses_need": "High Need" if fills_need else "Depth / Core",
+            "addresses_need_bool": fills_need,
             "fills_need": fills_need,
+            "incumbent_name": inc_name,
+            "incumbent_oa": inc_oa,
+            "projected_role": f"Proj. {eta_yr} {'Starter' if p_pot >= 50 else 'Depth'} ({pos_str})",
+        })
+
+    # 3B. Project 15 Core Starting Roles & Identify Potential Gaps for Each of the 5 Years
+    # Roles: 9 Lineup (C, 1B, 2B, 3B, SS, LF, CF, RF, DH) + 5 Rotation (SP1..SP5) + 1 Closer (CL)
+    proj_by_pid = {p["player_id"]: p for p in full_roster_proj}
+    lineup_role_defs = [
+        ("C", 2, "Catcher"),
+        ("1B", 3, "First Base"),
+        ("2B", 4, "Second Base"),
+        ("3B", 5, "Third Base"),
+        ("SS", 6, "Shortstop"),
+        ("LF", 7, "Left Field"),
+        ("CF", 8, "Center Field"),
+        ("RF", 9, "Right Field"),
+        ("DH", 10, "Designated Hitter"),
+    ]
+    scarcity_pos_order = [
+        ("C", 2, "Catcher"),
+        ("SS", 6, "Shortstop"),
+        ("CF", 8, "Center Field"),
+        ("2B", 4, "Second Base"),
+        ("3B", 5, "Third Base"),
+        ("RF", 9, "Right Field"),
+        ("LF", 7, "Left Field"),
+        ("1B", 3, "First Base"),
+        ("DH", 10, "Designated Hitter"),
+    ]
+    staff_role_defs = [
+        ("SP1", "Ace / #1 Starter"),
+        ("SP2", "#2 Starting Pitcher"),
+        ("SP3", "#3 Starting Pitcher"),
+        ("SP4", "#4 Starting Pitcher"),
+        ("SP5", "#5 Starting Pitcher"),
+        ("CL", "Closer / Relief Anchor"),
+    ]
+
+    # Map Year 0 baseline starters per role
+    year0_role_starter = {}
+    for pos_str, _, _ in lineup_role_defs:
+        st0 = depth_chart_nodes.get(pos_str, {}).get("starter")
+        year0_role_starter[pos_str] = proj_by_pid.get(st0["player_id"]) if st0 else None
+    for idx_sp in range(5):
+        role_k = f"SP{idx_sp + 1}"
+        year0_role_starter[role_k] = proj_by_pid.get(rotation[idx_sp]["player_id"]) if idx_sp < len(rotation) else None
+    year0_role_starter["CL"] = proj_by_pid.get(bullpen[0]["player_id"]) if bullpen else None
+
+    # Best prospect lookup by position
+    best_prospect_by_pos = {}
+    for pr_item in pipeline_list:
+        p_pos = pr_item["position"]
+        if p_pos not in best_prospect_by_pos or pr_item["pot"] > best_prospect_by_pos[p_pos]["pot"]:
+            best_prospect_by_pos[p_pos] = pr_item
+        if p_pos == "P" and "SP" not in best_prospect_by_pos:
+            best_prospect_by_pos["SP"] = pr_item
+
+    yearly_projections = []
+    role_year_cells = {pos_str: [] for pos_str, _, _ in lineup_role_defs}
+    for rk, _ in staff_role_defs:
+        role_year_cells[rk] = []
+
+    prev_year_starters = dict(year0_role_starter)
+
+    for y_idx in range(5):
+        yr_val = season_year + y_idx
+        used_pids_year = set()
+        lineup_assigned = {}
+        staff_assigned = {}
+        year_gaps = []
+
+        # Key UFA departures entering this year (players who were under control in y_idx - 1 and hit FA in y_idx)
+        key_departures = []
+        if y_idx > 0:
+            for pl_item in full_roster_proj:
+                c_prev = pl_item["year_cells"][y_idx - 1]
+                c_curr = pl_item["year_cells"][y_idx]
+                if c_prev["under_control"] and not c_curr["under_control"] and (pl_item["war"] >= 0.8 or pl_item["oa"] >= 45):
+                    key_departures.append({
+                        "player_id": pl_item["player_id"],
+                        "name": pl_item["name"],
+                        "pos": pl_item["position"],
+                        "age": c_curr["age"],
+                        "oa": pl_item["oa"],
+                        "war": pl_item["war"],
+                    })
+
+        arriving_prospects = [
+            {
+                "player_id": pr_i["player_id"],
+                "name": pr_i["name"],
+                "pos": pr_i["position"],
+                "age": pr_i["age"] + y_idx,
+                "oa": pr_i["oa"],
+                "pot": pr_i["pot"],
+                "upside": pr_i["upside"],
+            }
+            for pr_i in pipeline_list
+            if pr_i["eta_year"] == yr_val
+        ]
+
+        # Build candidate pools for Year y_idx
+        # 1) Controlled batters in Year y_idx
+        bat_cands_yr = []
+        for pl_item in full_roster_proj:
+            if pl_item["is_pitcher"]:
+                continue
+            yc = pl_item["year_cells"][y_idx]
+            if yc["under_control"]:
+                bat_cands_yr.append({
+                    "player_id": pl_item["player_id"],
+                    "name": pl_item["name"],
+                    "position": pl_item["position"],
+                    "age": yc["age"],
+                    "age_tier": yc["age_tier"],
+                    "proj_oa": yc["proj_oa"],
+                    "pot": pl_item["pot"],
+                    "proj_war": yc["proj_war"],
+                    "status": yc["status"],
+                    "status_category": yc["status_category"],
+                    "short_label": yc["short_label"],
+                    "salary": yc["salary"],
+                    "source": "Roster",
+                })
+
+        # Add arriving/ready batting prospects in Year y_idx (if y_idx > 0 or roster lacks depth)
+        for pr_i in pipeline_list:
+            if pr_i["position"] in ("P", "SP", "RP", "CL"):
+                continue
+            if pr_i["player_id"] in {b["player_id"] for b in bat_cands_yr}:
+                continue
+            if pr_i["eta_year"] <= yr_val:
+                yrs_post_eta = max(0, yr_val - pr_i["eta_year"])
+                proj_oa_p = min(pr_i["pot"], max(42, pr_i["oa"] + (y_idx * 4) + yrs_post_eta * 3))
+                proj_war_p = round(max(0.5, (proj_oa_p - 38) * 0.115), 1)
+                bat_cands_yr.append({
+                    "player_id": pr_i["player_id"],
+                    "name": pr_i["name"],
+                    "position": pr_i["position"],
+                    "age": pr_i["age"] + y_idx,
+                    "age_tier": "Ascent",
+                    "proj_oa": proj_oa_p,
+                    "pot": pr_i["pot"],
+                    "proj_war": proj_war_p,
+                    "status": "Pipeline Call-Up",
+                    "status_category": "Pipeline",
+                    "short_label": f"ETA {pr_i['eta_year']} 🌱",
+                    "salary": 750000.0,
+                    "source": "Pipeline",
+                })
+
+        # Assign 9 Lineup Starters in Year y_idx
+        for pos_str, pos_num, pos_label in scarcity_pos_order:
+            inc0 = year0_role_starter.get(pos_str)
+            # If Year 0 and we have the actual starter, lock them in first
+            if y_idx == 0 and inc0 and inc0["player_id"] not in used_pids_year:
+                st_cand = next((c for c in bat_cands_yr if c["player_id"] == inc0["player_id"]), None)
+                if st_cand:
+                    used_pids_year.add(st_cand["player_id"])
+                    lineup_assigned[pos_str] = st_cand
+                    continue
+
+            # Otherwise, prefer keeping Year 0 starter if still under control and >= 45 OVR (unless a high-ceiling prospect has surpassed them)
+            elig_primary = [c for c in bat_cands_yr if c["player_id"] not in used_pids_year and c["position"] == pos_str]
+            elig_secondary = []
+            for c in bat_cands_yr:
+                if c["player_id"] in used_pids_year or c["position"] == pos_str:
+                    continue
+                fr = fld_pos_ratings.get(c["player_id"], {})
+                pos_rtg = safe_int(fr.get(f"fielding_ratings_pos{pos_num}"), 0)
+                if (
+                    pos_str == "DH"
+                    or pos_rtg >= 35
+                    or (pos_str in ("LF", "RF") and c["position"] in ("LF", "CF", "RF"))
+                    or (pos_str in ("2B", "3B", "SS") and c["position"] in ("2B", "3B", "SS"))
+                ):
+                    elig_secondary.append(c)
+
+            elig_primary.sort(
+                key=lambda x: (
+                    (2.5 if inc0 and x["player_id"] == inc0["player_id"] else 0.0)
+                    + x["proj_war"] * 2.5
+                    + x["proj_oa"] * 0.08
+                ),
+                reverse=True,
+            )
+            elig_secondary.sort(key=lambda x: (x["proj_war"] * 2.2 + x["proj_oa"] * 0.07), reverse=True)
+
+            chosen = elig_primary[0] if elig_primary else (elig_secondary[0] if elig_secondary else None)
+            if chosen:
+                used_pids_year.add(chosen["player_id"])
+            lineup_assigned[pos_str] = chosen
+
+        # 2) Controlled pitchers + pitching prospects in Year y_idx
+        pit_cands_yr = []
+        for pl_item in full_roster_proj:
+            if not pl_item["is_pitcher"]:
+                continue
+            yc = pl_item["year_cells"][y_idx]
+            if yc["under_control"]:
+                pit_cands_yr.append({
+                    "player_id": pl_item["player_id"],
+                    "name": pl_item["name"],
+                    "position": pl_item["position"],
+                    "gs": pl_item.get("gs", 0),
+                    "sv": pl_item.get("sv", 0),
+                    "age": yc["age"],
+                    "age_tier": yc["age_tier"],
+                    "proj_oa": yc["proj_oa"],
+                    "pot": pl_item["pot"],
+                    "proj_war": yc["proj_war"],
+                    "status": yc["status"],
+                    "status_category": yc["status_category"],
+                    "short_label": yc["short_label"],
+                    "salary": yc["salary"],
+                    "source": "Roster",
+                })
+
+        for pr_i in pipeline_list:
+            if pr_i["position"] not in ("P", "SP", "RP", "CL"):
+                continue
+            if pr_i["player_id"] in {p["player_id"] for p in pit_cands_yr}:
+                continue
+            if pr_i["eta_year"] <= yr_val:
+                yrs_post_eta = max(0, yr_val - pr_i["eta_year"])
+                proj_oa_p = min(pr_i["pot"], max(42, pr_i["oa"] + (y_idx * 4) + yrs_post_eta * 3))
+                proj_war_p = round(max(0.4, (proj_oa_p - 38) * 0.11), 1)
+                pit_cands_yr.append({
+                    "player_id": pr_i["player_id"],
+                    "name": pr_i["name"],
+                    "position": "SP" if pr_i["position"] in ("P", "SP") else pr_i["position"],
+                    "gs": 10 if pr_i["position"] in ("P", "SP") else 0,
+                    "sv": 0,
+                    "age": pr_i["age"] + y_idx,
+                    "age_tier": "Ascent",
+                    "proj_oa": proj_oa_p,
+                    "pot": pr_i["pot"],
+                    "proj_war": proj_war_p,
+                    "status": "Pipeline Call-Up",
+                    "status_category": "Pipeline",
+                    "short_label": f"ETA {pr_i['eta_year']} 🌱",
+                    "salary": 750000.0,
+                    "source": "Pipeline",
+                })
+
+        sp_pool_yr = sorted(
+            [p for p in pit_cands_yr if p["position"] == "SP" or p.get("gs", 0) >= 3],
+            key=lambda x: (x["proj_war"] * 3.0 + x["proj_oa"] * 0.09),
+            reverse=True,
+        )
+        if len(sp_pool_yr) < 5:
+            extra_p = sorted(
+                [p for p in pit_cands_yr if p not in sp_pool_yr],
+                key=lambda x: (x["proj_war"] * 2.5 + x["proj_oa"] * 0.08),
+                reverse=True,
+            )
+            sp_pool_yr.extend(extra_p[: 5 - len(sp_pool_yr)])
+
+        for idx_sp in range(5):
+            rk = f"SP{idx_sp + 1}"
+            chosen_sp = sp_pool_yr[idx_sp] if idx_sp < len(sp_pool_yr) else None
+            if chosen_sp:
+                used_pids_year.add(chosen_sp["player_id"])
+            staff_assigned[rk] = chosen_sp
+
+        rp_pool_yr = sorted(
+            [p for p in pit_cands_yr if p["player_id"] not in used_pids_year],
+            key=lambda x: (x.get("sv", 0) * 0.25 + x["proj_war"] * 3.0 + x["proj_oa"] * 0.08),
+            reverse=True,
+        )
+        staff_assigned["CL"] = rp_pool_yr[0] if rp_pool_yr else None
+
+        # Evaluate gaps & build structured role cells for this year
+        def _evaluate_role_slot(role_key: str, role_label: str, base_pos: str, assigned: dict | None) -> dict:
+            prev_st = prev_year_starters.get(role_key) or year0_role_starter.get(role_key)
+            prev_hit_fa = False
+            if y_idx > 0 and prev_st:
+                prev_pid = prev_st["player_id"]
+                if prev_pid in proj_by_pid:
+                    prev_yc = proj_by_pid[prev_pid]["year_cells"][y_idx]
+                    if not prev_yc["under_control"]:
+                        prev_hit_fa = True
+
+            best_pros = best_prospect_by_pos.get(base_pos) or (best_prospect_by_pos.get("SP") if base_pos == "SP" else None)
+            pros_str = f"{best_pros['name']} ({best_pros['pot']} POT, ETA {best_pros['eta_year']})" if best_pros else "No top-15 org prospect at position"
+
+            has_gap = False
+            gap_type = ""
+            gap_severity = ""
+            gap_note = ""
+            gm_action = ""
+
+            if not assigned:
+                has_gap = True
+                gap_type = "Open Roster Vacancy"
+                gap_severity = "High"
+                prev_w = prev_st.get("war", prev_st.get("proj_war", 0.0)) if prev_st else 0.0
+                inc_desc = f"UFA {prev_st['name']} ({prev_w:.1f} WAR)" if (prev_st and prev_hit_fa) else "Unfilled starting role"
+                gap_note = f"No controlled starter available ({inc_desc})."
+                gm_action = f"Acquire starting {base_pos} via Free Agency or trade prior to {yr_val}."
+            else:
+                if prev_hit_fa and prev_st and assigned["player_id"] != prev_st["player_id"] and assigned["proj_oa"] < 48:
+                    has_gap = True
+                    gap_type = "FA Departure Vacancy"
+                    gap_severity = "High"
+                    gap_note = f"{prev_st['name']} hits UFA; internal fill {assigned['name']} ({assigned['proj_oa']} OVR) is below average."
+                    gm_action = f"Extend {prev_st['name']} before {yr_val} UFA or sign external {base_pos} starter."
+                elif assigned["proj_oa"] < 45 or assigned["proj_war"] < 0.9:
+                    has_gap = True
+                    gap_type = "Sub-Average Starter"
+                    gap_severity = "High" if assigned["proj_oa"] <= 41 else "Medium"
+                    gap_note = f"Projected starter {assigned['name']} projects at {assigned['proj_oa']} OVR ({assigned['proj_war']:.1f} WAR)."
+                    gm_action = (
+                        f"Bridge to {best_pros['name']} (ETA {best_pros['eta_year']})"
+                        if (best_pros and best_pros["pot"] >= 50)
+                        else f"Target external {base_pos} upgrade ({assigned['proj_oa']} OVR deficit)."
+                    )
+                elif assigned["status_category"] == "Option":
+                    has_gap = True
+                    gap_type = "Option Decision Risk"
+                    gap_severity = "Medium"
+                    gap_note = f"{assigned['name']} is on a contract option ({assigned['short_label']}) in {yr_val}."
+                    gm_action = f"Decide on {assigned['name']}'s {yr_val} option; prepare {best_pros['name'] if best_pros else 'FA contingency'}."
+                elif assigned["age"] >= 33:
+                    has_gap = True
+                    gap_type = "Age Regression Watch"
+                    gap_severity = "Medium" if assigned["age"] >= 34 else "Watch"
+                    gap_note = f"{assigned['name']} enters age-{assigned['age']} season ({assigned['proj_oa']} proj OVR)."
+                    gm_action = (
+                        f"Groom {best_pros['name']} (ETA {best_pros['eta_year']}) as successor"
+                        if best_pros
+                        else f"Draft/acquire young {base_pos} heir behind {assigned['name']} (Age {assigned['age']})."
+                    )
+                elif assigned["source"] == "Pipeline":
+                    has_gap = True
+                    gap_type = "Rookie Succession"
+                    gap_severity = "Watch"
+                    gap_note = f"Projected rookie takeover by {assigned['name']} ({assigned['pot']} POT)."
+                    gm_action = f"Monitor {assigned['name']}'s development; carry veteran {base_pos} platoon insurance."
+
+            if has_gap:
+                year_gaps.append({
+                    "year": yr_val,
+                    "pos": role_key,
+                    "base_pos": base_pos,
+                    "role_label": role_label,
+                    "gap_type": gap_type,
+                    "severity": gap_severity,
+                    "incumbent_or_departed": (
+                        f"Replaces UFA {prev_st['name']}"
+                        if (prev_hit_fa and prev_st)
+                        else (f"Incumbent: {prev_st['name']}" if prev_st else "Vacant")
+                    ),
+                    "projected_fill": f"{assigned['name']} ({assigned['proj_oa']} OVR · {assigned['proj_war']:.1f}w)" if assigned else "OPEN VACANCY",
+                    "pipeline_candidate": pros_str,
+                    "note": gap_note,
+                    "gm_action": gm_action,
+                })
+
+            cell_obj = {
+                "year": yr_val,
+                "pos": role_key,
+                "role_label": role_label,
+                "player_id": assigned["player_id"] if assigned else 0,
+                "name": assigned["name"] if assigned else "OPEN VACANCY",
+                "age": assigned["age"] if assigned else 0,
+                "age_tier": assigned["age_tier"] if assigned else "Vacant",
+                "proj_oa": assigned["proj_oa"] if assigned else 0,
+                "pot": assigned["pot"] if assigned else 0,
+                "proj_war": assigned["proj_war"] if assigned else 0.0,
+                "status": assigned["status"] if assigned else "Vacant",
+                "status_category": assigned["status_category"] if assigned else "Vacant",
+                "short_label": assigned["short_label"] if assigned else "Needs Fill",
+                "source": assigned["source"] if assigned else "Vacant",
+                "has_gap": has_gap,
+                "gap_type": gap_type,
+                "gap_severity": gap_severity,
+                "gap_note": gap_note,
+                "gm_action": gm_action,
+            }
+            role_year_cells[role_key].append(cell_obj)
+            return cell_obj
+
+        lineup_Year_list = []
+        for pos_str, _, pos_label in lineup_role_defs:
+            c_obj = _evaluate_role_slot(pos_str, pos_label, pos_str, lineup_assigned.get(pos_str))
+            lineup_Year_list.append(c_obj)
+
+        staff_Year_list = []
+        for rk, rlabel in staff_role_defs:
+            b_pos = "SP" if rk.startswith("SP") else "RP"
+            c_obj = _evaluate_role_slot(rk, rlabel, b_pos, staff_assigned.get(rk))
+            staff_Year_list.append(c_obj)
+
+        # Update prev_year_starters for next year's transition comparison
+        for pos_str, _, _ in lineup_role_defs:
+            if lineup_assigned.get(pos_str):
+                prev_year_starters[pos_str] = lineup_assigned[pos_str]
+        for rk, _ in staff_role_defs:
+            if staff_assigned.get(rk):
+                prev_year_starters[rk] = staff_assigned[rk]
+
+        # Sort gaps by severity (High -> Medium -> Watch)
+        sev_order = {"High": 0, "Medium": 1, "Watch": 2}
+        year_gaps.sort(key=lambda g: sev_order.get(g["severity"], 3))
+
+        starters_war_sum = sum(x["proj_war"] for x in lineup_Year_list) + sum(x["proj_war"] for x in staff_Year_list)
+        bench_bp_war = round(max(2.5, (len(bat_cands_yr) + len(pit_cands_yr) - 15) * 0.25), 1)
+        proj_team_war = round(starters_war_sum + bench_bp_war, 1)
+
+        controlled_cnt = sum(1 for x in (lineup_Year_list + staff_Year_list) if x["player_id"] > 0 and x["source"] == "Roster")
+        pipeline_cnt = sum(1 for x in (lineup_Year_list + staff_Year_list) if x["source"] == "Pipeline")
+        high_gaps_cnt = sum(1 for g in year_gaps if g["severity"] == "High")
+
+        ph_yr = payroll_horizon[y_idx]
+        yearly_projections.append({
+            "year": yr_val,
+            "year_index": y_idx,
+            "year_label": "Current Season" if y_idx == 0 else f"Year +{y_idx} ({yr_val})",
+            "projected_team_war": proj_team_war,
+            "committed_salary": ph_yr["committed_salary"],
+            "projected_space": ph_yr["projected_space"],
+            "pct_committed": ph_yr["pct_committed"],
+            "controlled_starters_count": controlled_cnt,
+            "pipeline_starters_count": pipeline_cnt,
+            "gaps_count": len(year_gaps),
+            "high_severity_gaps_count": high_gaps_cnt,
+            "lineup_starters": lineup_Year_list,
+            "pitching_starters": staff_Year_list,
+            "key_departures": key_departures[:6],
+            "arriving_prospects": arriving_prospects[:6],
+            "gaps": year_gaps,
+        })
+
+    # Assemble 15-Role x 5-Year Succession Grid for visual table
+    position_5yr_grid = []
+    pos_strength_map = {u["position"]: u for u in positional_strengths}
+    for pos_str, _, pos_label in lineup_role_defs:
+        u_info = pos_strength_map.get(pos_str, {})
+        bp_info = best_prospect_by_pos.get(pos_str)
+        position_5yr_grid.append({
+            "pos": pos_str,
+            "label": pos_label,
+            "category": "Lineup",
+            "current_grade": u_info.get("grade", "B"),
+            "current_color": u_info.get("color", "#dbdbdb"),
+            "top_prospect": f"{bp_info['name']} ({bp_info['pot']} POT · {bp_info['eta_year']})" if bp_info else "None in Top 15",
+            "cells": role_year_cells[pos_str],
+        })
+    for rk, rlabel in staff_role_defs:
+        b_pos = "SP" if rk.startswith("SP") else "RP"
+        u_info = pos_strength_map.get(b_pos, {})
+        bp_info = best_prospect_by_pos.get(b_pos)
+        position_5yr_grid.append({
+            "pos": rk,
+            "label": rlabel,
+            "category": "Pitching",
+            "current_grade": u_info.get("grade", "B"),
+            "current_color": u_info.get("color", "#dbdbdb"),
+            "top_prospect": f"{bp_info['name']} ({bp_info['pot']} POT · {bp_info['eta_year']})" if bp_info else "None in Top 15",
+            "cells": role_year_cells[rk],
         })
 
     avg_bat_age = round(float(np.mean([b["age"] for b in team_batters[:13]])), 1) if team_batters else 27.0
@@ -3790,15 +4834,17 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
     top_s_names = ", ".join(f"{u['position']} ({u['grade']})" for u in top_strengths[:2])
     upg_names = ", ".join(f"{u['position']} ({u['grade']})" for u in upgrade_targets[:2])
     yr1_space = payroll_horizon[1]["projected_space"] / 1e6 if len(payroll_horizon) > 1 else 0.0
+    yr1_gaps = yearly_projections[1]["gaps_count"] if len(yearly_projections) > 1 else 0
     gm_brief = (
         f"{active_team['full_name']} ({active_team['record_str']}) enters the {season_year}–{season_year+4} horizon in a {window_label} window "
         f"with a {avg_core_age}-yr core age and ${yr1_space:.1f}M projected cap flexibility for {season_year+1}. "
-        f"Core strengths at {top_s_names} anchor the roster, while addressing {upg_names} offers the highest marginal win gain."
+        f"Core strengths at {top_s_names} anchor the club, while {upg_names} and {yr1_gaps} projected {season_year+1} roster gap(s) represent priority front-office targets."
     )
 
     return {
         "team": active_team,
         "season_year": season_year,
+        "league_id": league_id,
         "graphical_depth_chart": {
             "positions": depth_chart_nodes,
             "rotation": rotation,
@@ -3831,6 +4877,7 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
             "top_strengths": top_strengths,
             "upgrade_targets": upgrade_targets,
         },
+        "team_rankings": team_rankings,
         "roadmap": {
             "base_year": season_year,
             "years": years_header,
@@ -3844,7 +4891,9 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
             "gm_brief": gm_brief,
             "payroll_horizon": payroll_horizon,
             "player_matrix": player_matrix,
-            "prospect_pipeline": pipeline_list[:15],
+            "prospect_pipeline": pipeline_list[:18],
+            "yearly_projections": yearly_projections,
+            "position_5yr_grid": position_5yr_grid,
         },
     }
 
@@ -7159,8 +8208,10 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
     save_meta = next((s for s in all_saves if s["save_slug"] == save_slug), all_saves[0] if all_saves else {})
     leagues, teams_map, parks_map = get_leagues_and_teams_map(conn)
     primary_lg = leagues[0] if leagues else {"league_id": 200, "name": "Major League Baseball", "abbr": "MLB", "season_year": 2026, "level": 1}
-    world_year = int(year) if (year and int(year) > 1800) else primary_lg.get("season_year", 2026)
-    supp = get_save_supplemental_and_years(conn, league_id=primary_lg["league_id"], default_year=world_year)
+    current_season_year = primary_lg.get("season_year", 2026)
+    world_year = int(year) if (year and int(year) > 1800) else current_season_year
+    is_historical_year = (world_year != current_season_year)
+    supp = get_save_supplemental_and_years(conn, league_id=primary_lg["league_id"], default_year=current_season_year)
     avail_years = supp.get("available_years", [world_year])
 
     # Load all team records, batting, pitching, financials
@@ -7168,29 +8219,108 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
     tbat = {}
     tpit = {}
     tfin = {}
-    if table_exists(conn, "team_record"):
-        for r in conn.execute("SELECT * FROM team_record"):
-            d = dict(r)
-            records[safe_int(d.get("team_id"))] = d
-    if table_exists(conn, "team_batting_stats"):
-        for r in conn.execute("SELECT * FROM team_batting_stats WHERE split_id = 1 OR split_id = 0"):
-            d = dict(r)
-            tbat[safe_int(d.get("team_id"))] = d
-    if table_exists(conn, "team_pitching_stats"):
-        for r in conn.execute("SELECT * FROM team_pitching_stats WHERE split_id = 1 OR split_id = 0"):
-            d = dict(r)
-            tpit[safe_int(d.get("team_id"))] = d
-    if table_exists(conn, "team_financials"):
-        for r in conn.execute("SELECT * FROM team_financials"):
-            d = dict(r)
-            tfin[safe_int(d.get("team_id"))] = d
+    if not is_historical_year:
+        if table_exists(conn, "team_record"):
+            for r in conn.execute("SELECT * FROM team_record"):
+                d = dict(r)
+                records[safe_int(d.get("team_id"))] = d
+        if table_exists(conn, "team_batting_stats"):
+            for r in conn.execute("SELECT * FROM team_batting_stats WHERE split_id = 1 OR split_id = 0"):
+                d = dict(r)
+                tbat[safe_int(d.get("team_id"))] = d
+        if table_exists(conn, "team_pitching_stats"):
+            for r in conn.execute("SELECT * FROM team_pitching_stats WHERE split_id = 1 OR split_id = 0"):
+                d = dict(r)
+                tpit[safe_int(d.get("team_id"))] = d
+        if table_exists(conn, "team_financials"):
+            for r in conn.execute("SELECT * FROM team_financials"):
+                d = dict(r)
+                tfin[safe_int(d.get("team_id"))] = d
 
     # Playoff winners map per league
     lp_winners = {}
-    if table_exists(conn, "league_playoffs"):
+    if not is_historical_year and table_exists(conn, "league_playoffs"):
         for r in conn.execute("SELECT league_id, winner, round, max_round FROM league_playoffs"):
             d = dict(r)
-            lp_winners[safe_int(d.get("league_id"))] = safe_int(d.get("winner"))
+            if safe_int(d.get("winner")) > 0:
+                lp_winners[safe_int(d.get("league_id"))] = safe_int(d.get("winner"))
+
+    # Historical year OR offseason/preseason fallback (when 0 games have been played in current_season_year)
+    stats_year = world_year
+    if is_historical_year or sum(safe_int(r.get("g")) for r in records.values()) == 0:
+        if not is_historical_year:
+            # Find the latest completed season in team_history_record or players_career_batting_stats
+            if table_exists(conn, "team_history_record"):
+                row_mx = conn.execute("SELECT MAX(year) FROM team_history_record WHERE g > 0").fetchone()
+                if row_mx and row_mx[0]:
+                    stats_year = safe_int(row_mx[0], world_year)
+            if stats_year == world_year and table_exists(conn, "players_career_batting_stats"):
+                row_mx2 = conn.execute("SELECT MAX(year) FROM players_career_batting_stats WHERE split_id = 1").fetchone()
+                if row_mx2 and row_mx2[0]:
+                    stats_year = safe_int(row_mx2[0], world_year)
+
+        if table_exists(conn, "team_history_record"):
+            hist_rec = {}
+            for r in conn.execute("SELECT * FROM team_history_record WHERE year = ?", (stats_year,)):
+                d = dict(r)
+                hist_rec[safe_int(d.get("team_id"))] = d
+            if hist_rec:
+                records = hist_rec
+
+        if table_exists(conn, "team_history_batting_stats"):
+            hist_bat = {}
+            for r in conn.execute("SELECT * FROM team_history_batting_stats WHERE year = ?", (stats_year,)):
+                d = dict(r)
+                hist_bat[safe_int(d.get("team_id"))] = d
+            if hist_bat:
+                tbat = hist_bat
+
+        if table_exists(conn, "team_history_pitching_stats"):
+            hist_pit = {}
+            for r in conn.execute("SELECT * FROM team_history_pitching_stats WHERE year = ?", (stats_year,)):
+                d = dict(r)
+                hist_pit[safe_int(d.get("team_id"))] = d
+            if hist_pit:
+                tpit = hist_pit
+
+        if table_exists(conn, "team_history_financials"):
+            for r in conn.execute("SELECT * FROM team_history_financials WHERE year = ?", (stats_year,)):
+                d = dict(r)
+                tid = safe_int(d.get("team_id"))
+                d.setdefault("player_payroll", d.get("player_expenses", 0))
+                if is_historical_year or tid not in tfin:
+                    tfin[tid] = d
+                else:
+                    if safe_int(tfin[tid].get("attendance")) == 0:
+                        tfin[tid]["attendance"] = d.get("attendance", 0)
+                    if safe_float(tfin[tid].get("player_payroll")) == 0:
+                        tfin[tid]["player_payroll"] = d.get("player_payroll", 0)
+                    if safe_float(tfin[tid].get("budget")) == 0:
+                        tfin[tid]["budget"] = d.get("budget", 0)
+
+        if not records and table_exists(conn, "dump_team_snapshots"):
+            snap_rows = conn.execute(
+                "SELECT * FROM dump_team_snapshots WHERE snapshot_year = ? ORDER BY CASE WHEN snapshot_type = 'yearly' THEN 0 ELSE 1 END, snapshot_label DESC",
+                (stats_year,),
+            ).fetchall()
+            if snap_rows:
+                chosen_label = snap_rows[0]["snapshot_label"]
+                for r in snap_rows:
+                    if r["snapshot_label"] != chosen_label:
+                        continue
+                    d = dict(r)
+                    tid = safe_int(d.get("team_id"))
+                    records[tid] = {"g": d.get("g"), "w": d.get("w"), "l": d.get("l"), "t": d.get("t"), "pos": d.get("pos"), "pct": d.get("pct"), "gb": d.get("gb")}
+                    tbat[tid] = {"r": d.get("rs"), "h": d.get("h"), "hr": d.get("hr"), "bb": d.get("bb"), "k": d.get("k"), "sb": d.get("sb"), "avg": d.get("avg"), "obp": d.get("obp"), "slg": d.get("slg"), "ops": d.get("ops")}
+                    tpit[tid] = {"r": d.get("ra"), "er": d.get("er"), "ip": d.get("ip"), "ha": d.get("ha"), "hra": d.get("hra"), "bb": d.get("p_bb"), "k": d.get("p_k"), "era": d.get("era"), "whip": d.get("whip")}
+                    if tid not in tfin:
+                        tfin[tid] = {"player_payroll": d.get("player_payroll"), "budget": d.get("budget"), "attendance": d.get("attendance"), "fan_interest": d.get("fan_interest")}
+
+        if table_exists(conn, "team_history"):
+            for r in conn.execute("SELECT league_id, team_id FROM team_history WHERE year = ? AND won_playoffs = 1", (stats_year,)):
+                lid_w = safe_int(r["league_id"])
+                if is_historical_year or lid_w not in lp_winners:
+                    lp_winners[lid_w] = safe_int(r["team_id"])
 
     # Player pool & demographics across the entire world
     total_active_players = 0
@@ -7332,7 +8462,11 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
 
     if table_exists(conn, "players_career_batting_stats"):
         q_wb = "SELECT player_id, team_id, league_id, g, pa, ab, h, hr, rbi, sb, bb, war FROM players_career_batting_stats WHERE year = ? AND split_id = 1"
-        wb_rows = conn.execute(q_wb, (world_year,)).fetchall()
+        wb_rows = conn.execute(q_wb, (stats_year,)).fetchall()
+        if not wb_rows and not is_historical_year:
+            row_fb_yr = conn.execute("SELECT MAX(year) FROM players_career_batting_stats WHERE split_id = 1").fetchone()
+            if row_fb_yr and row_fb_yr[0]:
+                wb_rows = conn.execute(q_wb, (safe_int(row_fb_yr[0]),)).fetchall()
         for r in wb_rows:
             pid = safe_int(r["player_id"])
             tid = safe_int(r["team_id"])
@@ -7371,7 +8505,11 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
 
     if table_exists(conn, "players_career_pitching_stats"):
         q_wp = "SELECT player_id, team_id, league_id, g, gs, w, l, s, ip, er, k, bb, war FROM players_career_pitching_stats WHERE year = ? AND split_id = 1"
-        wp_rows = conn.execute(q_wp, (world_year,)).fetchall()
+        wp_rows = conn.execute(q_wp, (stats_year,)).fetchall()
+        if not wp_rows and not is_historical_year:
+            row_fb_pyr = conn.execute("SELECT MAX(year) FROM players_career_pitching_stats WHERE split_id = 1").fetchone()
+            if row_fb_pyr and row_fb_pyr[0]:
+                wp_rows = conn.execute(q_wp, (safe_int(row_fb_pyr[0]),)).fetchall()
         for r in wp_rows:
             pid = safe_int(r["player_id"])
             tid = safe_int(r["team_id"])

@@ -887,10 +887,27 @@ def ingest_save_to_sqlite(save_slug: str, force: bool = False, source_label: str
             discovered_tables.append(tname)
             known_set.add(tname)
 
+    SEASON_GAME_TABLES = {
+        "players_at_bat_batting_stats",
+        "players_game_batting",
+        "players_game_pitching_stats",
+        "players_individual_batting_stats",
+        "game_logs",
+        "games_score",
+    }
+
     for table_name in discovered_tables:
         csv_file = csv_dir / f"{table_name}.csv"
         if not csv_file.exists():
             continue
+        # Offseason/preseason dump fallback: if per-season Statcast/game-log CSV is header-only (< 600 bytes),
+        # fall back to the most recent completed-season dump that has populated rows.
+        if table_name in SEASON_GAME_TABLES and csv_file.stat().st_size < 600:
+            for sinfo in reversed(sources_info):
+                cand_f = sinfo["csv_dir"] / f"{table_name}.csv"
+                if cand_f.exists() and cand_f.stat().st_size >= 1024:
+                    csv_file = cand_f
+                    break
         try:
             fsize_mb = csv_file.stat().st_size / (1024 * 1024)
             # For huge historical career/player tables (>20 MB), stream in chunks
@@ -907,6 +924,18 @@ def ingest_save_to_sqlite(save_slug: str, force: bool = False, source_label: str
                         at_bats_count += len(chunk)
             else:
                 df = pd.read_csv(csv_file, low_memory=False, on_bad_lines="skip")
+                # If games.csv in an offseason dump has 0 played games, include played games from the latest completed dump
+                if table_name == "games" and (df.empty or ("played" in df.columns and (df["played"] == 1).sum() == 0)):
+                    for sinfo in reversed(sources_info):
+                        cand_gf = sinfo["csv_dir"] / "games.csv"
+                        if cand_gf.exists() and cand_gf != csv_file and cand_gf.stat().st_size >= 2048:
+                            try:
+                                prev_gdf = pd.read_csv(cand_gf, low_memory=False, on_bad_lines="skip")
+                                if "played" in prev_gdf.columns and (prev_gdf["played"] == 1).sum() > 0:
+                                    df = prev_gdf
+                                    break
+                            except Exception:
+                                pass
                 # Enrich messages table with full text from messages/message_<id>.txt if available
                 if table_name == "messages" and not df.empty and "message_id" in df.columns:
                     msg_dir = lg_path / "messages"

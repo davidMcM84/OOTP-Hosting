@@ -46,7 +46,10 @@ async def index_page(request):
     index_file = TEMPLATES_DIR / "index.html"
     if not index_file.exists():
         return HTMLResponse("<h1>OOTP 27 Analytics Suite Loading...</h1>")
-    return HTMLResponse(index_file.read_text(encoding="utf-8"))
+    return HTMLResponse(
+        index_file.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
 
 
 async def api_saves(request):
@@ -398,4 +401,32 @@ routes = [
     Mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static"),
 ]
 
-app = Starlette(debug=False, routes=routes)
+_starlette_app = Starlette(debug=False, routes=routes)
+
+
+class NoCacheMiddleware:
+    def __init__(self, app_inner):
+        self.app = app_inner
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = [
+                    (k, v)
+                    for (k, v) in message.get("headers", [])
+                    if k.lower() not in (b"cache-control", b"pragma", b"expires")
+                ]
+                headers.append((b"cache-control", b"no-store, no-cache, must-revalidate, max-age=0"))
+                headers.append((b"pragma", b"no-cache"))
+                headers.append((b"expires", b"0"))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
+app = NoCacheMiddleware(_starlette_app)

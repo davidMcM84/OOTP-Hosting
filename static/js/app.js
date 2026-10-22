@@ -515,10 +515,23 @@ function onTeamPerspectiveChanged(teamIdStr) {
   switchTab(AppState.activeTab);
 }
 
-window.switchTeamAndGo = function(teamId) {
-  AppState.activeTeamId = Number(teamId);
+window.switchTeamAndGo = async function(teamId) {
+  const tid = Number(teamId);
+  AppState.activeTeamId = tid;
+  const ov = AppState.overview || {};
+  const inCurrentLeague = (ov.teams || []).some(t => t.team_id === tid);
+  if (!inCurrentLeague && (ov.all_teams || []).length) {
+    const matchAny = ov.all_teams.find(t => t.team_id === tid);
+    if (matchAny && matchAny.league_id && matchAny.league_id !== AppState.activeLeagueId) {
+      AppState.activeLeagueId = matchAny.league_id;
+      const yrParam = AppState.activeYear ? `&year=${AppState.activeYear}` : "";
+      AppState.overview = await fetchJSON(`/api/overview?save=${AppState.activeSave}&league_id=${AppState.activeLeagueId}${yrParam}`);
+      AppState.sabermetrics = null;
+      renderHeaderControls();
+    }
+  }
   const ts = document.getElementById("team-selector");
-  if (ts) ts.value = String(teamId);
+  if (ts) ts.value = String(tid);
   applyTeamTheme();
   switchTab("teamhub");
 };
@@ -885,28 +898,57 @@ function renderOverviewTab(container) {
  * 2. TEAM FRANCHISE HUB (SELECTABLE FOR ALL TEAMS)
  * ============================================================================ */
 async function renderTeamHubTab(container) {
-  const ov = AppState.overview;
-  const teams = ov.teams || [];
+  let ov = AppState.overview || {};
+  let teams = ov.teams || [];
   if (!teams.length) return;
-  const team = teams.find(t => t.team_id === AppState.activeTeamId) || teams[0];
+  let team = teams.find(t => t.team_id === AppState.activeTeamId);
+  if (!team && (ov.all_teams || []).length) {
+    const crossLeagueTeam = ov.all_teams.find(t => t.team_id === AppState.activeTeamId);
+    if (crossLeagueTeam && crossLeagueTeam.league_id) {
+      AppState.activeLeagueId = crossLeagueTeam.league_id;
+      const yrParam0 = AppState.activeYear ? `&year=${AppState.activeYear}` : "";
+      AppState.overview = await fetchJSON(`/api/overview?save=${AppState.activeSave}&league_id=${AppState.activeLeagueId}${yrParam0}`);
+      ov = AppState.overview;
+      teams = ov.teams || [];
+      renderHeaderControls();
+      team = teams.find(t => t.team_id === AppState.activeTeamId);
+    }
+  }
+  if (!team) team = teams[0];
   AppState.activeTeamId = team.team_id;
 
-  showLoading(`Loading ${team.full_name} Graphical Depth Chart, Positional Strengths & Franchise Roadmap...`);
-  let teamLb, teamSpray, teamDash;
+  showLoading(`Loading ${team.full_name} Graphical Depth Chart, Statistical Rankings & Franchise Roadmap...`);
+  let teamLb, teamDash;
   try {
     const yrParam = AppState.activeYear ? `&year=${AppState.activeYear}` : "";
-    [teamLb, teamSpray, teamDash] = await Promise.all([
-      fetchJSON(`/api/sabermetrics?save=${AppState.activeSave}&team_id=${team.team_id}${yrParam}`),
-      fetchJSON(`/api/spray?save=${AppState.activeSave}&team_id=${team.team_id}&limit=450`),
-      fetchJSON(`/api/team_dashboard?save=${AppState.activeSave}&team_id=${team.team_id}`),
+    const lgParam = `&league_id=${team.league_id || AppState.activeLeagueId || ""}`;
+    [teamLb, teamDash] = await Promise.all([
+      fetchJSON(`/api/sabermetrics?save=${AppState.activeSave}&team_id=${team.team_id}${lgParam}${yrParam}`),
+      fetchJSON(`/api/team_dashboard?save=${AppState.activeSave}&team_id=${team.team_id}${lgParam}${yrParam}`),
     ]);
-    AppState.teamDashboard = { teamId: team.team_id, lb: teamLb, spray: teamSpray, dash: teamDash };
+    AppState.teamDashboard = { teamId: team.team_id, lb: teamLb, dash: teamDash };
   } finally {
     hideLoading();
   }
 
   renderTeamHubSubView(container);
 }
+
+window.setTeamRankingsCategory = function(cat) {
+  AppState.teamRankingsCategory = cat;
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.teamDashboard) {
+    renderTeamHubSubView(container);
+  }
+};
+
+window.selectRoadmapYear = function(yrVal) {
+  AppState.selectedRoadmapYear = yrVal;
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.teamDashboard) {
+    renderTeamHubSubView(container);
+  }
+};
 
 window.switchTeamHubSubTab = function(subTab) {
   AppState.teamHubSubTab = subTab;
@@ -992,17 +1034,31 @@ function buildDepthUnitInspectorHtml(depthData, pos) {
 function renderTeamHubSubView(container) {
   const ov = AppState.overview;
   const teams = ov.teams || [];
-  const team = teams.find(t => t.team_id === AppState.activeTeamId) || teams[0];
-  const { lb: teamLb, spray: teamSpray, dash: teamDash } = AppState.teamDashboard;
-  const batters = teamLb.batters || [];
-  const pitchers = teamLb.pitchers || [];
+  const { lb: teamLb, dash: teamDash } = AppState.teamDashboard;
+  const team = (teamDash && teamDash.team) || teams.find(t => t.team_id === AppState.activeTeamId) || teams[0];
+  const batters = (teamLb && teamLb.batters) || [];
+  const pitchers = (teamLb && teamLb.pitchers) || [];
   const depthChart = (teamDash && teamDash.graphical_depth_chart) || { positions: {}, rotation: [], bullpen: [] };
   const strengths = (teamDash && teamDash.positional_strengths) || { units: [], top_strengths: [], upgrade_targets: [] };
-  const roadmap = (teamDash && teamDash.roadmap) || { years_header: [], payroll_horizon: [], player_matrix: [], prospect_pipeline: [] };
+  const rankings = (teamDash && teamDash.team_rankings) || { summary: {}, metrics: [], offense: [], pitching: [], defense: [], total_teams: teams.length || 1 };
+  const roadmap = (teamDash && teamDash.roadmap) || { years_header: [], payroll_horizon: [], player_matrix: [], prospect_pipeline: [], yearly_projections: [], position_5yr_grid: [] };
   const subTab = AppState.teamHubSubTab || "depth";
   const selPos = AppState.selectedDepthPos || "SS";
   const rotation = depthChart.rotation || [];
   const bullpen = depthChart.bullpen || [];
+  const rkCat = AppState.teamRankingsCategory || "All";
+  const rkMetrics = rkCat === "All"
+    ? (rankings.metrics || [])
+    : (rankings.metrics || []).filter(m => m.category === rkCat);
+  const rkSum = rankings.summary || {};
+  const rkTotal = rankings.total_teams || teams.length || 1;
+
+  const rankBadgeStyle = (r, tot) => {
+    if (r <= Math.ceil(tot * 0.25)) return "bg-emerald-500/20 text-emerald-300 border-emerald-500/40";
+    if (r <= Math.ceil(tot * 0.50)) return "bg-sky-500/20 text-sky-300 border-sky-500/40";
+    if (r <= Math.ceil(tot * 0.75)) return "bg-amber-500/20 text-amber-300 border-amber-500/40";
+    return "bg-rose-500/20 text-rose-300 border-rose-500/40";
+  };
 
   const renderDepthAndSprayPanorama = () => `
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
@@ -1074,33 +1130,78 @@ function renderTeamHubSubView(container) {
         </div>
       </div>
 
-      <!-- Column 3: Home Ballpark Spray Chart & Team Statcast Telemetry -->
-      <div class="glass-card p-4 lg:col-span-12 uw:col-span-4 space-y-3">
-        <div>
-          <h3 class="text-sm font-extrabold uppercase tracking-wider text-white flex items-center gap-2">
-            <i class="bi bi-bullseye text-pink-400"></i> ${team.full_name} — Spray Chart at ${team.park.name}
-          </h3>
-          <p class="text-xs text-slate-400">Hover or click any batted ball dot for Statcast Exit Velo, Launch Angle & At-Bat context</p>
+      <!-- Column 3: Team Statistical Rankings (League-Wide Leaderboard Standing) -->
+      <div class="glass-card p-4 lg:col-span-12 uw:col-span-4 space-y-3.5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 class="text-sm font-extrabold uppercase tracking-wider text-white flex items-center gap-2">
+              <i class="bi bi-trophy-fill text-amber-400"></i> ${team.full_name} — Team Statistical Rankings
+            </h3>
+            <p class="text-xs text-slate-400">League-wide rank &amp; percentile across ${rkTotal} ${rankings.league_abbr || 'League'} clubs</p>
+          </div>
+          <div class="flex flex-wrap gap-1">
+            ${[
+              ["All", "All (27)"],
+              ["Offense", "Offense"],
+              ["Pitching", "Pitching"],
+              ["Defense & Value", "Defense & WAR"],
+            ].map(([catKey, catLbl]) => `
+              <button onclick="setTeamRankingsCategory('${catKey}')" class="px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border transition ${rkCat === catKey ? 'bg-sky-500 text-slate-950 border-sky-300' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}">${catLbl}</button>
+            `).join("")}
+          </div>
         </div>
-        <div id="team-hub-spray-svg"></div>
-        <div id="team-hub-spray-inspector" class="bg-slate-900/90 border border-slate-700/80 rounded-xl p-3 text-xs"></div>
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs font-mono">
-          <div class="bg-slate-900/80 p-2 rounded-lg border border-slate-800">
-            <div class="text-[10px] text-slate-400">Team Avg EV</div>
-            <div class="text-sm font-extrabold text-white">${teamSpray.summary.avg_ev} mph</div>
+
+        <!-- 4 Headline Pillar Rank Cards -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center font-mono">
+          <div class="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
+            <div class="text-[10px] text-slate-400 uppercase">Offense Rank</div>
+            <div class="text-base font-black text-emerald-400 mt-0.5">${rkSum.offense_ordinal || '#' + (rkSum.offense_rank || 1)}</div>
+            <div class="text-[10px] text-slate-500">of ${rkTotal} Teams</div>
           </div>
-          <div class="bg-slate-900/80 p-2 rounded-lg border border-slate-800">
-            <div class="text-[10px] text-slate-400">Team Barrel %</div>
-            <div class="text-sm font-extrabold text-amber-300">${teamSpray.summary.barrel_pct}%</div>
+          <div class="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
+            <div class="text-[10px] text-slate-400 uppercase">Pitching Rank</div>
+            <div class="text-base font-black text-amber-300 mt-0.5">${rkSum.pitching_ordinal || '#' + (rkSum.pitching_rank || 1)}</div>
+            <div class="text-[10px] text-slate-500">of ${rkTotal} Teams</div>
           </div>
-          <div class="bg-slate-900/80 p-2 rounded-lg border border-slate-800">
-            <div class="text-[10px] text-slate-400">Hard-Hit %</div>
-            <div class="text-sm font-extrabold text-pink-400">${teamSpray.summary.hard_hit_pct}%</div>
+          <div class="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
+            <div class="text-[10px] text-slate-400 uppercase">Defense Rank</div>
+            <div class="text-base font-black text-sky-300 mt-0.5">${rkSum.defense_ordinal || '#' + (rkSum.defense_rank || 1)}</div>
+            <div class="text-[10px] text-slate-500">of ${rkTotal} Teams</div>
           </div>
-          <div class="bg-slate-900/80 p-2 rounded-lg border border-slate-800">
-            <div class="text-[10px] text-slate-400">Max Exit Velo</div>
-            <div class="text-sm font-extrabold text-sky-300">${teamSpray.summary.max_ev} mph</div>
+          <div class="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
+            <div class="text-[10px] text-slate-400 uppercase">Total WAR Rank</div>
+            <div class="text-base font-black text-white mt-0.5">${rkSum.total_war_ordinal || '#' + (rkSum.total_war_rank || 1)}</div>
+            <div class="text-[10px] text-slate-500">${Number(team.total_war || 0).toFixed(1)} WAR</div>
           </div>
+        </div>
+
+        <!-- Statistical Ranking Rows -->
+        <div class="max-h-[540px] overflow-y-auto pr-1 space-y-1.5">
+          ${rkMetrics.map(m => `
+            <div class="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-900/80 hover:bg-slate-800/85 border border-slate-800/90 transition text-xs">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-1.5">
+                  <span class="font-bold text-slate-100 truncate">${m.label}</span>
+                  <span class="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">${m.category}</span>
+                </div>
+                <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mt-1.5">
+                  <div class="h-full rounded-full" style="width:${m.percentile}%;background:${m.color}"></div>
+                </div>
+              </div>
+              <div class="flex items-center gap-3 shrink-0 font-mono">
+                <div class="text-right">
+                  <div class="font-extrabold text-white text-sm">${m.value_fmt}</div>
+                  <div class="text-[10px] text-slate-400">Lg: ${m.lg_avg_fmt}</div>
+                </div>
+                <div class="w-16 text-center">
+                  <span class="inline-block w-full px-2 py-1 rounded-lg border text-xs font-black ${rankBadgeStyle(m.rank, m.total_teams)}">
+                    ${m.rank_ordinal}
+                  </span>
+                  <div class="text-[9px] text-slate-500 mt-0.5">${m.percentile}th pct</div>
+                </div>
+              </div>
+            </div>
+          `).join("")}
         </div>
       </div>
     </div>
@@ -1229,49 +1330,225 @@ function renderTeamHubSubView(container) {
   const renderRoadmapPanorama = () => {
     const yrs = roadmap.years_header || [];
     const baseYearLabel = yrs[0] || (teamDash && teamDash.season_year) || (ov.environment && ov.environment.season_year) || "Season";
+    const yearlyProjs = roadmap.yearly_projections || [];
+    const posGrid = roadmap.position_5yr_grid || [];
+    const selYr = AppState.selectedRoadmapYear || "ALL";
+    const activeYearProjs = selYr === "ALL"
+      ? yearlyProjs
+      : yearlyProjs.filter(yp => String(yp.year) === String(selYr));
+
+    const gapBadgeStyle = (sev) => {
+      if (sev === "High") return "bg-rose-500/20 text-rose-300 border-rose-500/40";
+      if (sev === "Medium") return "bg-amber-500/20 text-amber-300 border-amber-500/40";
+      return "bg-sky-500/20 text-sky-300 border-sky-500/40";
+    };
+
     return `
-      <!-- 5-Year Payroll Horizon & Competitive Window Summary -->
+      <!-- 1. 5-Year Executive Horizon, Payroll, Projected WAR & Gap Summary Cards -->
       <div class="glass-card p-5">
-        <div class="flex flex-wrap items-center justify-between gap-4 mb-3">
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-3.5">
           <div>
             <span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">${roadmap.window_label || 'Franchise Window'}</span>
-            <h3 class="text-lg font-black text-white mt-1"><i class="bi bi-calendar-range text-sky-400 mr-1.5"></i> 5-Year Payroll Commitments & Budget Cap Space Horizon (${yrs[0] || ''}–${yrs[yrs.length - 1] || ''})</h3>
+            <h3 class="text-lg font-black text-white mt-1"><i class="bi bi-calendar-range text-sky-400 mr-1.5"></i> 5-Year Franchise Roadmap, Projected Starters &amp; Gap Horizon (${yrs[0] || ''}–${yrs[yrs.length - 1] || ''})</h3>
             ${roadmap.gm_brief ? `<p class="text-xs text-slate-300 mt-1">${roadmap.gm_brief}</p>` : ""}
           </div>
           <div class="text-right text-xs font-mono text-slate-300">
-            Core Avg Age: <b class="text-sky-400">${roadmap.avg_core_age || '-'}</b> • Total Budget: <b class="text-emerald-400">${fmtMoney(roadmap.budget)}</b>
+            Core Avg Age: <b class="text-sky-400">${roadmap.avg_core_age || '-'}</b> (Bat: ${roadmap.avg_batter_age || '-'} / Pit: ${roadmap.avg_pitcher_age || '-'}) • Budget: <b class="text-emerald-400">${fmtMoney(roadmap.budget)}</b>
           </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-5 gap-3">
-          ${(roadmap.payroll_horizon || []).map(ph => `
-            <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5">
-              <div class="flex justify-between items-center text-xs font-mono text-slate-400 mb-1">
-                <span class="font-extrabold text-white text-sm">${ph.year}</span>
-                <span>${ph.committed_players} Players</span>
+          ${(roadmap.payroll_horizon || []).map((ph, idx) => {
+            const yp = yearlyProjs[idx] || {};
+            const isSel = String(selYr) === String(ph.year);
+            return `
+              <div onclick="selectRoadmapYear('${ isSel ? 'ALL' : ph.year }')" class="bg-slate-900/90 border ${isSel ? 'border-sky-400 ring-1 ring-sky-400/40' : 'border-slate-800 hover:border-slate-600'} rounded-xl p-3.5 cursor-pointer transition">
+                <div class="flex justify-between items-center text-xs font-mono text-slate-400 mb-1">
+                  <span class="font-extrabold text-white text-sm">${ph.year} ${idx === 0 ? '<span class="text-[9px] text-sky-400">(NOW)</span>' : `<span class="text-[9px] text-slate-500">(+${idx}Y)</span>`}</span>
+                  <span class="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 font-bold text-[10px]">${Number(yp.projected_team_war || 0).toFixed(1)} WAR</span>
+                </div>
+                <div class="text-base font-black text-amber-300 font-mono">${fmtMoney(ph.committed_salary)}</div>
+                <div class="text-[11px] font-mono text-emerald-400 mt-0.5">Cap Space: ${fmtMoney(ph.projected_space)}</div>
+                <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden mt-2">
+                  <div class="h-full ${ph.pct_committed > 85 ? 'bg-rose-500' : (ph.pct_committed > 65 ? 'bg-amber-400' : 'bg-sky-400')}" style="width:${Math.min(100, ph.pct_committed)}%"></div>
+                </div>
+                <div class="flex items-center justify-between text-[10px] font-mono mt-2 pt-1.5 border-t border-slate-800/80">
+                  <span class="text-slate-300" title="Controlled MLB Starters + Pipeline Promotions">${yp.controlled_starters_count || 0}/15 Ctrl ${yp.pipeline_starters_count ? `• <b class="text-emerald-400">+${yp.pipeline_starters_count}🌱</b>` : ''}</span>
+                  <span class="px-1.5 py-0.5 rounded font-bold ${(yp.high_severity_gaps_count || 0) > 0 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : ((yp.gaps_count || 0) > 0 ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300')}">
+                    ${yp.gaps_count || 0} ${yp.gaps_count === 1 ? 'Gap' : 'Gaps'}
+                  </span>
+                </div>
               </div>
-              <div class="text-base font-black text-amber-300 font-mono">${fmtMoney(ph.committed_salary)}</div>
-              <div class="text-[11px] font-mono text-emerald-400 mt-0.5">Est Space: ${fmtMoney(ph.projected_space)}</div>
-              <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden mt-2">
-                <div class="h-full ${ph.pct_committed > 85 ? 'bg-rose-500' : (ph.pct_committed > 65 ? 'bg-amber-400' : 'bg-sky-400')}" style="width:${Math.min(100, ph.pct_committed)}%"></div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+
+      <!-- 2. 5-Year Projected Starters & Positional Succession Grid (15 Starting Roles x 5 Years) -->
+      <div class="glass-card overflow-hidden">
+        <div class="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex flex-wrap justify-between items-center gap-2">
+          <div>
+            <h3 class="font-extrabold text-sm uppercase tracking-wider text-white">
+              <i class="bi bi-grid-3x3-gap-fill text-emerald-400 mr-1.5"></i> 5-Year Projected Starters, Pipeline Succession &amp; Gap Matrix (15 Core Roles)
+            </h3>
+            <p class="text-xs text-slate-400">Projected starting lineup (C–DH), rotation (SP1–SP5) &amp; closer across ${yrs[0] || ''}–${yrs[yrs.length - 1] || ''}, modeling contract control, aging curves &amp; prospect call-ups</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 text-[10px] font-mono">
+            <span class="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/40">Signed / Guaranteed</span>
+            <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">Pre-Arb / Arb Control</span>
+            <span class="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40">🌱 Pipeline Call-Up</span>
+            <span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">⚠️ Option / Age / Deficit</span>
+            <span class="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40">🚨 FA Vacancy / High Gap</span>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="saber-table">
+            <thead>
+              <tr>
+                <th class="text-left">Role</th>
+                <th class="text-center">Curr Grade</th>
+                ${yrs.map((y, idx) => `<th class="text-left">${y} Projected Starter ${idx === 0 ? '(Current)' : `(+${idx}Y)`}</th>`).join("")}
+                <th class="text-left">Top Pipeline Heir</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${posGrid.map(row => `
+                <tr>
+                  <td class="font-mono font-extrabold text-sky-300 whitespace-nowrap">
+                    ${row.pos} <span class="text-[10px] text-slate-400 font-normal block">${row.label}</span>
+                  </td>
+                  <td class="text-center">
+                    <span class="px-2 py-0.5 rounded font-mono text-xs font-extrabold" style="background:${row.current_color}22;color:${row.current_color};border:1px solid ${row.current_color}55">${row.current_grade}</span>
+                  </td>
+                  ${(row.cells || []).map(c => {
+                    let boxCls = "bg-slate-900/75 border-slate-800";
+                    if (c.has_gap && c.gap_severity === "High") boxCls = "bg-rose-500/15 border-rose-500/50";
+                    else if (c.has_gap && c.gap_severity === "Medium") boxCls = "bg-amber-500/15 border-amber-500/45";
+                    else if (c.source === "Pipeline") boxCls = "bg-purple-500/15 border-purple-500/45";
+                    else if (c.status === "Guaranteed") boxCls = "bg-sky-500/10 border-sky-500/35";
+                    else if (c.status === "Team Control") boxCls = "bg-emerald-500/10 border-emerald-500/35";
+
+                    return `
+                      <td class="p-1.5 align-top min-w-[185px]">
+                        <div ${c.player_id ? `onclick="openPlayerModal(${c.player_id})"` : ""} class="p-2 rounded-xl border ${boxCls} ${c.player_id ? 'cursor-pointer hover:border-sky-400' : ''} transition text-xs">
+                          <div class="flex items-center justify-between gap-1">
+                            <span class="font-extrabold ${c.player_id ? 'text-white' : 'text-rose-400'} truncate">${c.source === 'Pipeline' ? '🌱 ' : ''}${c.name}</span>
+                            ${c.player_id ? `<span class="font-mono font-bold text-sky-300 shrink-0">${Number(c.proj_war || 0).toFixed(1)}W</span>` : `<span class="text-[10px] font-mono font-bold text-rose-400">VACANT</span>`}
+                          </div>
+                          ${c.player_id ? `
+                            <div class="flex items-center justify-between text-[10px] font-mono text-slate-300 mt-1">
+                              <span>Age ${c.age} • OVR ${c.proj_oa}</span>
+                              <span class="text-slate-400">${c.short_label}</span>
+                            </div>
+                          ` : ""}
+                          ${c.has_gap ? `
+                            <div class="mt-1.5 pt-1 border-t border-white/10 flex items-center justify-between gap-1 text-[10px] font-mono">
+                              <span class="font-bold ${c.gap_severity === 'High' ? 'text-rose-300' : (c.gap_severity === 'Medium' ? 'text-amber-300' : 'text-sky-300')}">
+                                ${c.gap_severity === 'High' ? '🚨' : (c.gap_severity === 'Medium' ? '⚠️' : '🌱')} ${c.gap_type}
+                              </span>
+                            </div>
+                          ` : ""}
+                        </div>
+                      </td>
+                    `;
+                  }).join("")}
+                  <td class="font-mono text-xs text-emerald-300 whitespace-nowrap">${row.top_prospect}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 3. Year-by-Year Potential Gaps, UFA Departures & Front Office Action Plan -->
+      <div class="glass-card p-5 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div>
+            <h3 class="font-extrabold text-sm uppercase tracking-wider text-white flex items-center gap-2">
+              <i class="bi bi-exclamation-octagon-fill text-rose-400"></i> Year-by-Year Potential Gaps, Roster Vulnerabilities &amp; Succession Plan
+            </h3>
+            <p class="text-xs text-slate-400">Identifies every projected free-agent vacancy, talent deficit, option decision, and aging cliff across each of the next 5 seasons</p>
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            <button onclick="selectRoadmapYear('ALL')" class="px-3 py-1 rounded-lg text-xs font-mono font-bold border transition ${selYr === 'ALL' ? 'bg-sky-500 text-slate-950 border-sky-300' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}">All 5 Years</button>
+            ${yrs.map(y => `
+              <button onclick="selectRoadmapYear('${y}')" class="px-3 py-1 rounded-lg text-xs font-mono font-bold border transition ${String(selYr) === String(y) ? 'bg-sky-500 text-slate-950 border-sky-300' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}">${y}</button>
+            `).join("")}
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
+          ${activeYearProjs.map(yp => `
+            <div class="bg-slate-900/85 border border-slate-800 rounded-2xl p-3.5 flex flex-col justify-between space-y-3 ${selYr !== 'ALL' ? 'lg:col-span-5' : ''}">
+              <div class="space-y-2.5">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div>
+                    <span class="text-sm font-black font-mono text-white">${yp.year}</span>
+                    <span class="text-[10px] font-mono text-slate-400 ml-1">${yp.year_label}</span>
+                  </div>
+                  <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold ${(yp.high_severity_gaps_count || 0) > 0 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-amber-500/20 text-amber-300'}">
+                    ${(yp.gaps || []).length} Identified Gaps
+                  </span>
+                </div>
+
+                ${(yp.key_departures && yp.key_departures.length) ? `
+                  <div class="p-2 rounded-xl bg-rose-950/30 border border-rose-500/30 text-[11px]">
+                    <div class="font-extrabold text-rose-300 uppercase tracking-wider text-[10px] mb-1"><i class="bi bi-box-arrow-right mr-1"></i>Key UFA Departures</div>
+                    <div class="flex flex-wrap gap-1">
+                      ${yp.key_departures.map(d => `
+                        <span onclick="openPlayerModal(${d.player_id})" class="px-1.5 py-0.5 rounded bg-slate-900/90 text-slate-200 font-mono text-[10px] border border-rose-500/30 cursor-pointer hover:border-rose-400">${d.pos} ${d.name} (${d.war}W)</span>
+                      `).join("")}
+                    </div>
+                  </div>
+                ` : ""}
+
+                ${(yp.arriving_prospects && yp.arriving_prospects.length) ? `
+                  <div class="p-2 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-[11px]">
+                    <div class="font-extrabold text-emerald-300 uppercase tracking-wider text-[10px] mb-1"><i class="bi bi-sprout mr-1"></i>Arriving Pipeline Wave (ETA ${yp.year})</div>
+                    <div class="flex flex-wrap gap-1">
+                      ${yp.arriving_prospects.map(ap => `
+                        <span onclick="openPlayerModal(${ap.player_id})" class="px-1.5 py-0.5 rounded bg-slate-900/90 text-emerald-200 font-mono text-[10px] border border-emerald-500/30 cursor-pointer hover:border-emerald-400">🌱 ${ap.pos} ${ap.name} (${ap.pot} POT)</span>
+                      `).join("")}
+                    </div>
+                  </div>
+                ` : ""}
+
+                <div class="space-y-2">
+                  ${(yp.gaps && yp.gaps.length) ? yp.gaps.map(g => `
+                    <div class="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/90 text-xs space-y-1">
+                      <div class="flex items-center justify-between gap-1">
+                        <span class="font-mono font-extrabold text-white">${g.pos} <span class="text-slate-400 font-normal">(${g.role_label})</span></span>
+                        <span class="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border ${gapBadgeStyle(g.severity)}">${g.severity.toUpperCase()} • ${g.gap_type}</span>
+                      </div>
+                      <div class="text-[11px] text-slate-300">${g.note}</div>
+                      <div class="text-[10px] font-mono text-slate-400">Proj Fill: <b class="text-slate-200">${g.projected_fill}</b></div>
+                      <div class="text-[10px] font-mono text-emerald-300">Pipeline: ${g.pipeline_candidate}</div>
+                      <div class="text-[10px] font-semibold text-sky-300 pt-1 border-t border-slate-800/80"><i class="bi bi-Compass mr-1"></i>GM Action: ${g.gm_action}</div>
+                    </div>
+                  `).join("") : `
+                    <div class="p-3 rounded-xl bg-emerald-950/20 border border-emerald-500/30 text-xs text-emerald-300 font-mono">
+                      ✓ All 15 core starting roles projected at above-average levels under team control.
+                    </div>
+                  `}
+                </div>
               </div>
-              <div class="text-[10px] font-mono text-slate-400 mt-1 text-right">${ph.pct_committed}% of Budget</div>
             </div>
           `).join("")}
         </div>
       </div>
 
-      <!-- Ultrawide Side-by-Side: Multi-Year Roster Control Matrix + Prospect Pipeline -->
+      <!-- 4. Ultrawide Side-by-Side: Multi-Year Roster Control Matrix + Prospect Pipeline -->
       <div class="grid grid-cols-1 uw:grid-cols-12 gap-5 items-start">
         <div class="glass-card overflow-hidden uw:col-span-7">
           <div class="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex flex-wrap justify-between items-center gap-2">
             <div>
-              <h3 class="font-extrabold text-sm uppercase tracking-wider text-white"><i class="bi bi-kanban-fill text-sky-400 mr-1.5"></i> Multi-Year Roster Control, Contract & Age-Curve Matrix (${(roadmap.player_matrix || []).length} Core Players)</h3>
-              <p class="text-xs text-slate-400">Color-coded by contract status (Guaranteed vs. Arb/Pre-Arb vs. Free Agency) and player aging curve</p>
+              <h3 class="font-extrabold text-sm uppercase tracking-wider text-white"><i class="bi bi-kanban-fill text-sky-400 mr-1.5"></i> Multi-Year Roster Control, Contract &amp; Age-Curve Matrix (${(roadmap.player_matrix || []).length} Core Players)</h3>
+              <p class="text-xs text-slate-400">Color-coded by contract status (Guaranteed vs. Arb/Pre-Arb vs. Option vs. Free Agency) and player aging curve</p>
             </div>
-            <div class="flex items-center gap-2 text-[10px] font-mono">
+            <div class="flex flex-wrap items-center gap-2 text-[10px] font-mono">
               <span class="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/40">Guaranteed $</span>
               <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">Team Control / Arb</span>
-              <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">Free Agent (FA)</span>
+              <span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">Option Year</span>
+              <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">Free Agent (UFA)</span>
             </div>
           </div>
           <div class="overflow-x-auto">
@@ -1296,13 +1573,15 @@ function renderTeamHubSubView(container) {
                     <td class="text-right font-mono font-extrabold text-sky-400">${Number(p.war || 0).toFixed(1)}</td>
                     ${(p.years || []).map(cell => {
                       let cls = "bg-slate-900/60 text-slate-500 border-slate-800";
-                      if (cell.status === "Guaranteed") cls = "bg-sky-500/15 text-sky-200 border-sky-500/40";
-                      else if (cell.status === "Team Control") cls = "bg-emerald-500/15 text-emerald-300 border-emerald-500/40";
-                      const tierDot = cell.age_tier === "Prime" ? "🟢" : (cell.age_tier === "Ascent" ? "🔵" : (cell.age_tier === "Veteran" ? "🟡" : "🔴"));
+                      if (cell.status === "Guaranteed" || cell.status === "Signed") cls = "bg-sky-500/15 text-sky-200 border-sky-500/40";
+                      else if (cell.status === "Team Control" || cell.status === "Pre-Arb" || cell.status === "Arb") cls = "bg-emerald-500/15 text-emerald-300 border-emerald-500/40";
+                      else if (cell.status === "Option") cls = "bg-amber-500/15 text-amber-300 border-amber-500/40";
+                      const tierNorm = String(cell.age_tier || "").toLowerCase();
+                      const tierDot = tierNorm === "prime" ? "🟢" : (tierNorm === "ascent" ? "🔵" : (tierNorm === "veteran" || tierNorm === "vet" ? "🟡" : "🔴"));
                       return `
                         <td class="text-center p-1.5">
                           <div class="px-2 py-1 rounded-lg border text-xs font-mono ${cls}">
-                            <div class="font-bold">${cell.status === 'Guaranteed' ? fmtMoney(cell.salary) : cell.label}</div>
+                            <div class="font-bold">${cell.label}</div>
                             <div class="text-[9px] opacity-80">${tierDot} Age ${cell.age} (${cell.age_tier})</div>
                           </div>
                         </td>
@@ -1317,22 +1596,21 @@ function renderTeamHubSubView(container) {
 
         <div class="glass-card overflow-hidden uw:col-span-5">
           <div class="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex justify-between items-center">
-            <h3 class="font-extrabold text-sm uppercase tracking-wider text-white"><i class="bi bi-stars text-amber-400 mr-1.5"></i> High-Ceiling Prospect & Young Core Pipeline (Age &le; 25)</h3>
+            <h3 class="font-extrabold text-sm uppercase tracking-wider text-white"><i class="bi bi-stars text-amber-400 mr-1.5"></i> Organizational Prospect &amp; Succession Pipeline (Age &le; 26)</h3>
             <span class="text-xs text-slate-400">Sorted by Potential Ceiling</span>
           </div>
           <div class="overflow-x-auto">
             <table class="saber-table">
               <thead>
                 <tr>
-                  <th class="text-left">Player</th>
+                  <th class="text-left">Prospect</th>
                   <th>Pos</th>
                   <th>Age</th>
-                  <th class="text-center">Current OVR</th>
-                  <th class="text-center">Ceiling POT</th>
-                  <th class="text-center">Growth Upside</th>
+                  <th class="text-center">OVR / POT</th>
+                  <th class="text-left">Ceiling &amp; Growth</th>
                   <th class="text-center">Projected ETA</th>
                   <th class="text-left">Key Scouting Tools (20-80)</th>
-                  <th class="text-left">Positional Need Impact</th>
+                  <th class="text-left">Succession / Need</th>
                 </tr>
               </thead>
               <tbody>
@@ -1341,12 +1619,17 @@ function renderTeamHubSubView(container) {
                     <td class="font-bold text-white hover:text-sky-400">${pr.name}</td>
                     <td class="text-center font-mono text-xs text-sky-300">${pr.pos}</td>
                     <td class="text-center font-mono">${pr.age}</td>
-                    <td class="text-center">${rtgBadge(pr.oa)}</td>
-                    <td class="text-center">${rtgBadge(pr.pot)}</td>
-                    <td class="text-center font-mono font-bold text-emerald-400">+${pr.upside}</td>
+                    <td class="text-center">${rtgBadge(pr.oa, pr.pot)}</td>
+                    <td class="font-mono text-xs">
+                      <span class="font-bold text-emerald-400">+${pr.growth_delta !== undefined ? pr.growth_delta : Math.max(0, (pr.pot || 0) - (pr.oa || 0))}</span>
+                      <span class="text-[10px] text-slate-300 block">${pr.upside || ''}</span>
+                    </td>
                     <td class="text-center"><span class="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 font-mono text-xs font-bold">${pr.eta}</span></td>
                     <td class="font-mono text-xs text-slate-300">${pr.key_tools}</td>
-                    <td><span class="px-2 py-0.5 rounded text-xs font-bold ${pr.addresses_need === 'High Need' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-slate-800 text-slate-300'}">${pr.addresses_need}</span></td>
+                    <td>
+                      <span class="px-2 py-0.5 rounded text-[10px] font-bold ${pr.addresses_need === 'High Need' || pr.addresses_need === true ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-slate-800 text-slate-300'}">${pr.addresses_need === true ? 'High Need' : (pr.addresses_need || 'Depth / Core')}</span>
+                      ${pr.projected_role ? `<div class="text-[10px] font-mono text-slate-400 mt-0.5">${pr.projected_role}</div>` : ""}
+                    </td>
                   </tr>
                 `).join("")}
               </tbody>
@@ -1535,8 +1818,19 @@ function renderTeamHubSubView(container) {
     <div class="animate-view space-y-4">
       <!-- All-Teams Quick Pill Selector -->
       <div class="glass-card p-3.5">
-        <div class="flex items-center justify-between mb-2">
-          <div class="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Select Franchise Perspective (${teams.length} Teams):</div>
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Select Franchise Perspective (${teams.length} Teams):</span>
+            ${(ov.leagues || []).length > 1 ? `
+              <div class="flex flex-wrap items-center gap-1 ml-1">
+                ${(ov.leagues || []).map(lg => `
+                  <button onclick="onLeagueChanged(${lg.league_id})" class="px-2.5 py-0.5 rounded-lg text-[10px] font-mono font-bold border transition ${Number(lg.league_id) === Number((ov.active_league && ov.active_league.league_id) || AppState.activeLeagueId) ? 'bg-amber-400 text-slate-950 border-amber-300' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}">
+                    ${lg.abbr || lg.name}
+                  </button>
+                `).join("")}
+              </div>
+            ` : ""}
+          </div>
           <div class="text-[11px] font-mono text-slate-400">Active: <b class="text-white">${team.full_name} (${team.abbr})</b></div>
         </div>
         <div class="flex flex-wrap gap-2">
@@ -1620,16 +1914,16 @@ function renderTeamHubSubView(container) {
       <!-- Team Dashboard Sub-Navigation Bar -->
       <div class="flex flex-wrap gap-2 border-b border-slate-800 pb-3">
         <button onclick="switchTeamHubSubTab('depth')" class="px-4 py-2 rounded-xl text-xs font-extrabold uppercase tracking-wider transition flex items-center gap-2 ${subTab === 'depth' ? 'bg-sky-500 text-slate-950 shadow-lg shadow-sky-500/20' : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-600'}">
-          <i class="bi bi-diagram-3-fill"></i> Graphical Depth Chart & Field Map
+          <i class="bi bi-diagram-3-fill"></i> Depth Chart &amp; Team Rankings
         </button>
         <button onclick="switchTeamHubSubTab('strengths')" class="px-4 py-2 rounded-xl text-xs font-extrabold uppercase tracking-wider transition flex items-center gap-2 ${subTab === 'strengths' ? 'bg-sky-500 text-slate-950 shadow-lg shadow-sky-500/20' : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-600'}">
-          <i class="bi bi-bar-chart-steps"></i> Positional Strengths & Upgrade Matrix
+          <i class="bi bi-bar-chart-steps"></i> Positional Strengths &amp; Upgrade Matrix
         </button>
         <button onclick="switchTeamHubSubTab('roadmap')" class="px-4 py-2 rounded-xl text-xs font-extrabold uppercase tracking-wider transition flex items-center gap-2 ${subTab === 'roadmap' ? 'bg-sky-500 text-slate-950 shadow-lg shadow-sky-500/20' : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-600'}">
-          <i class="bi bi-calendar-range"></i> 5-Year Franchise Roadmap & Pipeline
+          <i class="bi bi-calendar-range"></i> 5-Year Franchise Roadmap &amp; Pipeline
         </button>
         <button onclick="switchTeamHubSubTab('roster')" class="px-4 py-2 rounded-xl text-xs font-extrabold uppercase tracking-wider transition flex items-center gap-2 ${subTab === 'roster' ? 'bg-sky-500 text-slate-950 shadow-lg shadow-sky-500/20' : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-600'}">
-          <i class="bi bi-table"></i> Full Scouting & Sabermetric Roster (${batters.length + pitchers.length})
+          <i class="bi bi-table"></i> Full Scouting &amp; Sabermetric Roster (${batters.length + pitchers.length})
         </button>
         <button onclick="switchTeamHubSubTab('command')" class="px-4 py-2 rounded-xl text-xs font-extrabold uppercase tracking-wider transition flex items-center gap-2 ${subTab === 'command' ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20' : 'bg-slate-900 text-emerald-300 border border-emerald-500/40 hover:border-emerald-400'}">
           <i class="bi bi-aspect-ratio-fill"></i> Ultrawide All-in-One Panorama
@@ -1642,7 +1936,6 @@ function renderTeamHubSubView(container) {
 
   if (subTab === "depth" || subTab === "command") {
     renderGraphicalDepthChartDiamond("team-depth-diamond-svg", depthChart, selPos);
-    renderBallparkSpraySVG("team-hub-spray-svg", teamSpray, { inspectorId: "team-hub-spray-inspector" });
   }
   if (subTab === "strengths" || subTab === "command") {
     renderPositionalStrengthsChart("team-pos-strengths-canvas", strengths.units || []);
@@ -2890,7 +3183,7 @@ function initEvolutionUIState(evo) {
 
   if (!AppState.evoWorkshop || AppState.evoWorkshop.saveKey !== saveKey) {
     const defWeights = rm.weights || { pop: 30, econ: 20, geo: 20, gap: 15, irl: 15 };
-    const defFilters = rm.filters || { scope: "all", irl_filter: "all", rivalry_mode: "balanced", search: "" };
+    const defFilters = rm.filters || { scope: "all", irl_filter: "all", service_filter: "all", rivalry_mode: "balanced", search: "" };
     const defSelected = Array.isArray(rm.selected_market_ids) && rm.selected_market_ids.length
       ? [...rm.selected_market_ids]
       : (ws.default_selected_city_ids || []);
@@ -2898,7 +3191,7 @@ function initEvolutionUIState(evo) {
     AppState.evoWorkshop = {
       saveKey,
       weights: { ...defWeights },
-      filters: { search: "", ...defFilters },
+      filters: { search: "", service_filter: "all", ...defFilters },
       selectedMarketIds: defSelected.map(Number),
       customIdentities: { ...(rm.custom_identities || {}) },
       roadmapTitle: rm.title || `${(evo.active_league && evo.active_league.abbr) || 'League'} 5-Year Expansion & Realignment Roadmap`,
@@ -2926,6 +3219,21 @@ function irlBadgeStyle(level) {
   if (lvl === "High-A" || lvl === "Single-A" || lvl === "Historic Single-A") return "bg-purple-500/20 text-purple-300 border-purple-400/50";
   if (lvl.includes("Partner") || lvl.includes("Draft") || lvl.includes("International")) return "bg-teal-500/20 text-teal-300 border-teal-400/50";
   return "bg-slate-800/90 text-slate-400 border-slate-700";
+}
+
+function marketServiceBadgeStyle(tier) {
+  const t = String(tier || "unserved");
+  if (t === "in_city") return "bg-indigo-500/25 text-indigo-300 border-indigo-400/50";
+  if (t === "metro") return "bg-purple-500/20 text-purple-300 border-purple-400/50";
+  if (t === "regional") return "bg-sky-500/20 text-sky-300 border-sky-400/50";
+  return "bg-emerald-500/20 text-emerald-300 border-emerald-400/50";
+}
+
+function marketCapacityBadgeStyle(tier) {
+  const t = String(tier || "open");
+  if (t === "saturated") return "bg-amber-500/20 text-amber-300 border-amber-400/50";
+  if (t === "room") return "bg-sky-500/20 text-sky-300 border-sky-400/50";
+  return "bg-emerald-500/20 text-emerald-300 border-emerald-400/50";
 }
 
 function computeConfiguredCandidateMarkets(evo) {
@@ -2968,6 +3276,15 @@ function computeConfiguredCandidateMarkets(evo) {
     if (flt.scope === "domestic" && Number(m.nation_id || 206) !== 206) return false;
     if (flt.scope === "international" && Number(m.nation_id || 206) === 206) return false;
 
+    const svcTier = String(m.market_service_tier || "unserved");
+    const openSlots = Number(m.available_team_slots !== undefined ? m.available_team_slots : 1);
+    const maxCap = Number(m.supported_teams_max || 1);
+    if (flt.service_filter === "unserved" && svcTier !== "unserved") return false;
+    if (flt.service_filter === "has_open_slots" && openSlots <= 0) return false;
+    if (flt.service_filter === "multi_team" && maxCap < 2) return false;
+    if (flt.service_filter === "served" && svcTier !== "in_city" && svcTier !== "metro") return false;
+    if (flt.service_filter === "regional_reach" && svcTier !== "regional") return false;
+
     const lvl = String(m.irl_primary_level || "");
     if (flt.irl_filter === "any_irl" && !m.has_irl_counterpart) return false;
     if (flt.irl_filter === "mlb_hist" && lvl !== "MLB" && lvl !== "Historic MLB") return false;
@@ -2978,7 +3295,7 @@ function computeConfiguredCandidateMarkets(evo) {
 
     if (flt.search && flt.search.trim()) {
       const q = flt.search.trim().toLowerCase();
-      const hay = `${m.city} ${m.state} ${m.suggested_nickname} ${m.irl_summary_badge} ${m.irl_detail_line}`.toLowerCase();
+      const hay = `${m.city} ${m.state} ${m.suggested_nickname} ${m.irl_summary_badge} ${m.irl_detail_line} ${m.serving_teams_tag || ''} ${m.serving_teams_detail || ''} ${m.supported_teams_display || ''} ${m.capacity_status_tag || ''}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -3210,7 +3527,8 @@ window.exportEvolutionRoadmapBrief = function () {
       const nick = cust.nickname || m.suggested_nickname;
       const abbr = cust.abbr || m.suggested_abbr;
       const park = cust.park || m.suggested_park;
-      return `  ${i + 1}. **${m.city}, ${m.state} — ${m.city} ${nick} (${abbr})** @ ${park} | IRL Counterpart: ${m.irl_summary_badge} | Nearest Rival: ${m.nearest_team_abbr} (${m.nearest_team_miles} mi)`;
+      const revM = (Number(m.projected_revenue || 0) / 1e6).toFixed(1);
+      return `  ${i + 1}. **${m.city}, ${m.state} — ${m.city} ${nick} (${abbr})** @ ${park} | Current Market Service: ${m.serving_teams_tag || 'Unserved'} | Market Capacity: ${m.supported_teams_display || '1 Team'} (${m.capacity_status_tag || 'Open'}) | Potential Rev: $${revM}M/yr (${m.market_share_label || '100% Local'}) | IRL Counterpart: ${m.irl_summary_badge} | Nearest Rival: ${m.nearest_team_abbr} (${m.nearest_team_miles} mi)`;
     }),
     `\n## Strategic Goals & KPIs`,
     ...st.goals.map(g => `- **[${g.status}] ${g.title}** (${g.category} • Target ${g.target_year}: ${g.target_metric})`),
@@ -3500,8 +3818,8 @@ async function renderEvolutionTab(container) {
               `).join("")}
             </div>
 
-            <!-- Filter Bar (Geographic Scope, Real-Life Counterpart Level, Rivalry Mode, Search) -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 uw:grid-cols-1 gap-3 text-xs">
+            <!-- Filter Bar (Geographic Scope, Market Service & Capacity, Real-Life Counterpart Level, Rivalry Mode, Search) -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 uw:grid-cols-1 gap-3 text-xs">
               <div>
                 <label class="block text-[10px] font-mono uppercase text-slate-400 mb-1">Geographic Scope Filter</label>
                 <select onchange="updateRecommenderFilter('scope', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs">
@@ -3511,6 +3829,17 @@ async function renderEvolutionTab(container) {
                   <option value="regional" ${flt.scope === 'regional' ? 'selected' : ''}>Primary + Adjacent Regional Border States</option>
                   <option value="domestic" ${flt.scope === 'domestic' ? 'selected' : ''}>Domestic US Markets Only</option>
                   <option value="international" ${flt.scope === 'international' ? 'selected' : ''}>International Markets (CAN / MEX / CAR)</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-mono uppercase text-slate-400 mb-1">Market Service & Team Capacity</label>
+                <select onchange="updateRecommenderFilter('service_filter', this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs">
+                  <option value="all" ${(flt.service_filter || 'all') === 'all' ? 'selected' : ''}>All Market Service & Capacity Tiers</option>
+                  <option value="unserved" ${flt.service_filter === 'unserved' ? 'selected' : ''}>Unserved Territory Only (No Club ≤ 85 mi)</option>
+                  <option value="has_open_slots" ${flt.service_filter === 'has_open_slots' ? 'selected' : ''}>Available Team Capacity (≥ 1 Open Slot)</option>
+                  <option value="multi_team" ${flt.service_filter === 'multi_team' ? 'selected' : ''}>Multi-Team Capable Metros (Supports 2+ Clubs)</option>
+                  <option value="served" ${flt.service_filter === 'served' ? 'selected' : ''}>Currently Served Markets (In-City / Metro)</option>
+                  <option value="regional_reach" ${flt.service_filter === 'regional_reach' ? 'selected' : ''}>Regional Catchment Markets (38–85 mi)</option>
                 </select>
               </div>
               <div>
@@ -3534,8 +3863,8 @@ async function renderEvolutionTab(container) {
                 </select>
               </div>
               <div>
-                <label class="block text-[10px] font-mono uppercase text-slate-400 mb-1">Search City, Affiliate or Ballpark</label>
-                <input type="text" value="${flt.search || ''}" placeholder="e.g. Los Angeles, San Francisco, Allentown, AAA..."
+                <label class="block text-[10px] font-mono uppercase text-slate-400 mb-1">Search City, Serving Team or Affiliate</label>
+                <input type="text" value="${flt.search || ''}" placeholder="e.g. Los Angeles, PHI, Unserved, 2 Teams..."
                    oninput="AppState.evoWorkshop.filters.search = this.value; renderEvolutionTab(document.getElementById('main-view-container'))"
                   class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs" />
               </div>
@@ -3548,10 +3877,11 @@ async function renderEvolutionTab(container) {
                 <tr>
                   <th class="text-center">Workshop</th>
                   <th class="text-center">Rk</th>
-                  <th class="text-left">Candidate City & Scope</th>
+                  <th class="text-left">Candidate City & Current Market Service</th>
                   <th class="text-left">Real-Life Major / Minor League Counterpart(s)</th>
                   <th class="text-left">Suggested Identity & Ballpark</th>
-                  <th class="text-right">Metro Population</th>
+                  <th class="text-center">Teams Supported & Capacity</th>
+                  <th class="text-right">Potential Revenue & Market Share</th>
                   <th class="text-center">Nearest Active Rival</th>
                   <th class="text-center">Factor Breakdown (P/E/G/R/B)</th>
                   <th class="text-right">Weighted Score</th>
@@ -3562,6 +3892,19 @@ async function renderEvolutionTab(container) {
                   const isSel = selectedSet.has(Number(m.city_id));
                   const cList = m.irl_counterparts || [];
                   const badgeCls = irlBadgeStyle(m.irl_primary_level);
+                  const svcBadgeCls = marketServiceBadgeStyle(m.market_service_tier);
+                  const capBadgeCls = marketCapacityBadgeStyle(m.capacity_status_tier);
+                  const svcIcon = m.market_service_tier === "in_city"
+                    ? "bi-building-fill-check"
+                    : (m.market_service_tier === "metro"
+                        ? "bi-broadcast-pin"
+                        : (m.market_service_tier === "regional" ? "bi-radar" : "bi-compass"));
+                  const sisterClubs = m.in_save_sister_teams || [];
+                  const projRevM = (Number(m.projected_revenue || m.potential_revenue || m.projected_budget || 0) / 1e6).toFixed(1);
+                  const poolRevM = (Number(m.total_market_revenue_potential || m.projected_revenue || 0) / 1e6).toFixed(1);
+                  const budM = (Number(m.projected_budget || 0) / 1e6).toFixed(1);
+                  const locShare = Number(m.local_market_share_pct !== undefined ? m.local_market_share_pct : 100).toFixed(0);
+                  const lgShare = Number(m.league_market_share_pct || 0).toFixed(1);
                   return `
                     <tr class="${isSel ? 'bg-emerald-950/30' : ''}">
                       <td class="text-center">
@@ -3573,14 +3916,20 @@ async function renderEvolutionTab(container) {
                       <td>
                         <div class="flex items-center gap-1.5 flex-wrap">
                           <span class="font-bold text-white text-sm">${m.city}, <span class="text-slate-300 font-mono">${m.state}</span></span>
-                          ${m.is_active_league_city ? `<span class="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-400/40 text-[9px] font-mono">Active: ${(m.active_team_abbrs || []).join(', ') || '1+'} • 2nd-Club Metro</span>` : ''}
+                          <span class="px-1.5 py-0.5 rounded border text-[9.5px] font-mono font-extrabold ${svcBadgeCls}" title="${(m.serving_teams_detail || m.serving_teams_tag || '').replace(/"/g, '&quot;')}">
+                            <i class="bi ${svcIcon} mr-0.5"></i>${m.serving_teams_tag || (m.is_active_league_city ? `Served by: ${(m.active_team_abbrs || []).join(', ')}` : 'Unserved Market')}
+                          </span>
+                          ${sisterClubs.length ? `<span class="px-1.5 py-0.5 rounded bg-teal-500/15 text-teal-300 border border-teal-400/30 text-[9px] font-mono" title="In-Save Minor/Sister League Tenant">Save MiLB: ${sisterClubs.slice(0, 2).join(', ')}</span>` : ''}
                         </div>
-                        <div class="text-[10px] font-mono text-slate-400">${m.region_bucket} • ${m.financial_tier}</div>
+                        <div class="text-[10px] font-mono text-slate-400 mt-0.5">${m.region_bucket} • ${m.financial_tier}</div>
                       </td>
                       <td class="max-w-md">
                         <div class="flex flex-wrap items-center gap-1.5 mb-1">
                           <span class="px-2 py-0.5 rounded text-[10px] font-mono font-extrabold border ${badgeCls}">
                             ${m.has_irl_counterpart ? `⚾ ${m.irl_summary_badge}` : '🌱 Untapped Market (No Current MLB/MiLB Club)'}
+                          </span>
+                          <span class="px-1.5 py-0.5 rounded text-[9.5px] font-mono border ${svcBadgeCls}" title="${(m.serving_teams_detail || '').replace(/"/g, '&quot;')}">
+                            ${m.serving_teams_tag || 'Unserved Market'}
                           </span>
                         </div>
                         ${cList.length ? `
@@ -3599,9 +3948,22 @@ async function renderEvolutionTab(container) {
                         <div class="font-extrabold text-sky-300 text-xs">${m.city} ${m.suggested_nickname} <span class="font-mono text-[10px] text-slate-400">(${m.suggested_abbr})</span></div>
                         <div class="text-[10.5px] font-mono text-slate-400">${m.suggested_park} • Est. Mkt Size ${m.projected_market_size}/10</div>
                       </td>
-                      <td class="text-right font-mono">
-                        <div class="font-bold text-white">${Number(m.effective_metro_pop || m.population || 0).toLocaleString()}</div>
-                        ${isAshes && m.nation_id === 206 ? `<div class="text-[10px] text-amber-300/90">In-Save: ${Number(m.population || 0).toLocaleString()}</div>` : `<div class="text-[10px] text-slate-400">Econ ${m.economy}/200</div>`}
+                      <td class="text-center font-mono">
+                        <div class="font-extrabold text-white text-xs">Supports ${m.supported_teams_display || `${m.supported_teams_max || 1} Team`}</div>
+                        <div class="mt-0.5">
+                          <span class="px-1.5 py-0.5 rounded border text-[9.5px] font-bold ${capBadgeCls}" title="${m.capacity_tier_label || ''}">
+                            ${m.capacity_status_tag || 'Open Capacity'}
+                          </span>
+                        </div>
+                        <div class="text-[9.5px] text-slate-400 mt-0.5">
+                          Metro Pop: ${Number(m.effective_metro_pop || m.population || 0).toLocaleString()}
+                          ${isAshes && m.nation_id === 206 ? ` <span class="text-amber-300/90">(Save: ${Number(m.population || 0).toLocaleString()})</span>` : ''}
+                        </div>
+                      </td>
+                      <td class="text-right font-mono" title="Gate: $${(Number(m.projected_gate_revenue || 0) / 1e6).toFixed(1)}M • Media: $${(Number(m.projected_media_revenue || 0) / 1e6).toFixed(1)}M • Merch: $${(Number(m.projected_merch_revenue || 0) / 1e6).toFixed(1)}M">
+                        <div class="font-extrabold text-emerald-300 text-xs">$${projRevM}M <span class="text-[9.5px] font-normal text-slate-400">/ yr</span></div>
+                        <div class="text-[10px] text-sky-300 font-bold">${locShare}% Local • ${lgShare}% Lg Share</div>
+                        <div class="text-[9.5px] text-slate-400">Metro Pool: $${poolRevM}M • Bud: $${budM}M</div>
                       </td>
                       <td class="text-center font-mono text-xs">
                         <div class="font-bold text-white">${m.nearest_team_abbr} <span class="text-emerald-300">(${m.nearest_team_miles} mi)</span></div>
@@ -4486,6 +4848,8 @@ async function renderEvolutionTab(container) {
       : 0;
     const estFeePerClub = Number((health.financial_impacts && health.financial_impacts.expansion_simulator && health.financial_impacts.expansion_simulator.estimated_fee_per_team) || 25000000);
     const windfallPerExisting = Math.round((estFeePerClub * addedCount) / curTeams);
+    const totalProjectedClassRev = selCands.reduce((s, m) => s + Number(m.projected_revenue || m.potential_revenue || m.projected_budget || 0), 0);
+    const totalProjectedClassShare = selCands.reduce((s, m) => s + Number(m.league_market_share_pct || 0), 0);
 
     // Auto-cluster combined clubs (Active + Selected Expansion) into balanced geographic pods
     const combinedNodes = [
@@ -4627,14 +4991,25 @@ async function renderEvolutionTab(container) {
                 const abbr = cust.abbr !== undefined ? cust.abbr : m.suggested_abbr;
                 const park = cust.park !== undefined ? cust.park : m.suggested_park;
                 const badgeCls = irlBadgeStyle(m.irl_primary_level);
+                const svcBadgeCls = marketServiceBadgeStyle(m.market_service_tier);
+                const capBadgeCls = marketCapacityBadgeStyle(m.capacity_status_tier);
+                const projRevM = (Number(m.projected_revenue || m.potential_revenue || m.projected_budget || 0) / 1e6).toFixed(1);
                 return `
                   <div class="p-3 rounded-xl bg-slate-950/90 border border-emerald-500/35 space-y-2">
                     <div class="flex items-start justify-between gap-2">
                       <div>
                         <div class="text-sm font-black text-white">${m.city}, ${m.state} <span class="text-xs font-mono text-emerald-400 ml-1">Score ${m.market_score}</span></div>
-                        <span class="inline-block mt-0.5 px-1.5 py-0.5 rounded text-[9.5px] font-mono font-bold border ${badgeCls}">
-                          ⚾ ${m.irl_summary_badge}
-                        </span>
+                        <div class="flex flex-wrap items-center gap-1 mt-0.5">
+                          <span class="px-1.5 py-0.5 rounded text-[9.5px] font-mono font-bold border ${badgeCls}">
+                            ⚾ ${m.irl_summary_badge}
+                          </span>
+                          <span class="px-1.5 py-0.5 rounded text-[9.5px] font-mono font-bold border ${svcBadgeCls}">
+                            ${m.serving_teams_tag || 'Unserved Market'}
+                          </span>
+                          <span class="px-1.5 py-0.5 rounded text-[9.5px] font-mono font-bold border ${capBadgeCls}">
+                            Supports ${m.supported_teams_display || '1 Team'} (${m.capacity_status_tag || 'Open'})
+                          </span>
+                        </div>
                       </div>
                       <button onclick="toggleWorkshopExpansionCity(${m.city_id})" class="text-xs text-slate-400 hover:text-rose-400 font-mono">✕ Remove</button>
                     </div>
@@ -4655,9 +5030,9 @@ async function renderEvolutionTab(container) {
                           class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white text-xs" />
                       </div>
                     </div>
-                    <div class="flex justify-between text-[10px] font-mono text-slate-400">
-                      <span>Nearest Rival: <b class="text-white">${m.nearest_team_abbr} (${m.nearest_team_miles} mi)</b></span>
-                      <span>Est. Budget: <b class="text-emerald-300">$${(Number(m.projected_budget || 0) / 1e6).toFixed(1)}M</b> (Mkt ${m.projected_market_size}/10)</span>
+                    <div class="flex flex-wrap justify-between gap-1 text-[10px] font-mono text-slate-400">
+                      <span>Pot. Rev: <b class="text-emerald-300">$${projRevM}M/yr</b> (<b class="text-sky-300">${m.market_share_label || '100% Local'}</b>)</span>
+                      <span>Rival: <b class="text-white">${m.nearest_team_abbr} (${m.nearest_team_miles} mi)</b></span>
                     </div>
                   </div>
                 `;
@@ -4681,16 +5056,16 @@ async function renderEvolutionTab(container) {
                 <b class="text-white">+${newActiveSpots} MLB / +${newOrgSpots} Org</b>
               </div>
               <div class="bg-slate-900 p-2 rounded border border-slate-800">
-                <span class="text-[10px] text-slate-400 block">Avg Rivalry Spacing</span>
-                <b class="text-emerald-300">${avgRivalMiles} mi (${avgExpScore} Avg Score)</b>
+                <span class="text-[10px] text-slate-400 block">Class Potential Revenue</span>
+                <b class="text-emerald-300">+$${(totalProjectedClassRev / 1e6).toFixed(1)}M (${totalProjectedClassShare.toFixed(1)}% Lg)</b>
               </div>
               <div class="bg-slate-900 p-2 rounded border border-slate-800">
                 <span class="text-[10px] text-slate-400 block">Windfall / Existing Club</span>
                 <b class="text-amber-300">+$${(windfallPerExisting / 1e6).toFixed(2)}M</b>
               </div>
               <div class="bg-slate-900 p-2 rounded border border-slate-800">
-                <span class="text-[10px] text-slate-400 block">Projected OVR Dilution</span>
-                <b class="${addedCount <= 2 ? 'text-emerald-300' : 'text-amber-300'}">${addedCount === 0 ? '0.0 OVR' : `-${(addedCount * 0.42).toFixed(1)} OVR`}</b>
+                <span class="text-[10px] text-slate-400 block">Avg Rivalry & Dilution</span>
+                <b class="${addedCount <= 2 ? 'text-emerald-300' : 'text-amber-300'}">${avgRivalMiles} mi • ${addedCount === 0 ? '0.0 OVR' : `-${(addedCount * 0.42).toFixed(1)} OVR`}</b>
               </div>
             </div>
             <div class="space-y-1 pt-1">
