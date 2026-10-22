@@ -487,6 +487,7 @@ async function onYearChanged(newYear) {
   AppState.frontPageData = null;
   AppState.stretchData = null;
   AppState.worldData = null;
+  AppState.teamDashboard = null;
   AppState.sabermetrics = null;
   AppState.projections = null;
   AppState.evolutionData = null;
@@ -510,6 +511,7 @@ function onTeamPerspectiveChanged(teamIdStr) {
   const tid = Number(teamIdStr) || null;
   if (tid) {
     AppState.activeTeamId = tid;
+    AppState.teamDashboard = null;
     applyTeamTheme();
   }
   switchTab(AppState.activeTab);
@@ -518,6 +520,7 @@ function onTeamPerspectiveChanged(teamIdStr) {
 window.switchTeamAndGo = async function(teamId) {
   const tid = Number(teamId);
   AppState.activeTeamId = tid;
+  AppState.teamDashboard = null;
   const ov = AppState.overview || {};
   const inCurrentLeague = (ov.teams || []).some(t => t.team_id === tid);
   if (!inCurrentLeague && (ov.all_teams || []).length) {
@@ -950,6 +953,58 @@ window.selectRoadmapYear = function(yrVal) {
   }
 };
 
+window.setRoadmapLens = function(lens) {
+  AppState.roadmapLens = lens;
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.teamDashboard) {
+    renderTeamHubSubView(container);
+  }
+};
+
+window.setRoadmapUnitFilter = function(unitFilter) {
+  AppState.roadmapUnitFilter = unitFilter;
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.teamDashboard) {
+    renderTeamHubSubView(container);
+  }
+};
+
+window.selectRoadmapRole = function(posKey, yrVal) {
+  AppState.selectedRoadmapRole = posKey;
+  if (yrVal !== undefined && yrVal !== null) {
+    AppState.selectedRoadmapCellYear = yrVal;
+  }
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.teamDashboard) {
+    renderTeamHubSubView(container);
+  }
+};
+
+window.toggleRoadmapSandboxAction = function(actionId) {
+  AppState.roadmapSandboxActive = AppState.roadmapSandboxActive || {};
+  AppState.roadmapSandboxActive[actionId] = !AppState.roadmapSandboxActive[actionId];
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.teamDashboard) {
+    renderTeamHubSubView(container);
+  }
+};
+
+window.resetRoadmapSandbox = function() {
+  AppState.roadmapSandboxActive = {};
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.teamDashboard) {
+    renderTeamHubSubView(container);
+  }
+};
+
+window.setRoadmapPipelineFilter = function(flt) {
+  AppState.roadmapPipelineFilter = flt;
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.teamDashboard) {
+    renderTeamHubSubView(container);
+  }
+};
+
 window.switchTeamHubSubTab = function(subTab) {
   AppState.teamHubSubTab = subTab;
   const container = document.getElementById("main-view-container");
@@ -1327,206 +1382,723 @@ function renderTeamHubSubView(container) {
     </div>
   `;
 
+  // Compute live sandbox-adjusted Roadmap state so GM What-If moves recalculate Payroll, WAR & Matrix in <50ms
+  let activeSandboxHorizon = [];
+  let activeSandboxYearlyProjs = [];
   const renderRoadmapPanorama = () => {
     const yrs = roadmap.years_header || [];
     const baseYearLabel = yrs[0] || (teamDash && teamDash.season_year) || (ov.environment && ov.environment.season_year) || "Season";
-    const yearlyProjs = roadmap.yearly_projections || [];
-    const posGrid = roadmap.position_5yr_grid || [];
+    const rawYearlyProjs = roadmap.yearly_projections || [];
+    const rawPosGrid = roadmap.position_5yr_grid || [];
+    const rawPayrollHorizon = roadmap.payroll_horizon || [];
+    const sandboxActions = roadmap.sandbox_actions || [];
+    const strategicMoves = roadmap.strategic_moves || {};
+    const dataTrust = roadmap.data_trust || {};
+    const mktPerWar = roadmap.market_dollar_per_war || 8000000;
+
     const selYr = AppState.selectedRoadmapYear || "ALL";
+    const lens = AppState.roadmapLens || "succession"; // succession | process | surplus
+    const unitFilter = AppState.roadmapUnitFilter || "ALL"; // ALL | Battery & IF | OF & DH | Rotation | Bullpen
+    const pipeFilter = AppState.roadmapPipelineFilter || "ALL"; // ALL | Ready | HighNeed | Blocked | LowRisk
+    const sbMap = AppState.roadmapSandboxActive || {};
+    const activeSbActions = sandboxActions.filter(a => sbMap[a.action_id]);
+
+    // Apply active GM What-If Sandbox moves to cell overrides, WAR & payroll horizon
+    const cellOverrideMap = {};
+    const warDeltaByYr = [0, 0, 0, 0, 0];
+    const salDeltaByYr = [0, 0, 0, 0, 0];
+    activeSbActions.forEach(act => {
+      (act.war_delta_by_year || []).forEach((w, i) => { if (i < 5) warDeltaByYr[i] += Number(w || 0); });
+      (act.salary_delta_by_year || []).forEach((s, i) => { if (i < 5) salDeltaByYr[i] += Number(s || 0); });
+      (act.cell_overrides || []).forEach(ovCell => {
+        cellOverrideMap[`${ovCell.pos}_${ovCell.year_index}`] = { ...ovCell, action_title: act.title };
+      });
+    });
+
+    const posGrid = rawPosGrid.map(row => {
+      const cells = (row.cells || []).map((c, yIdx) => {
+        const ovC = cellOverrideMap[`${row.pos}_${yIdx}`];
+        return ovC ? { ...c, ...ovC, is_sandbox_override: true } : c;
+      });
+      return { ...row, cells };
+    });
+
+    const filteredPosGrid = unitFilter === "ALL"
+      ? posGrid
+      : posGrid.filter(r => r.unit_group === unitFilter || r.category === unitFilter);
+
+    const payrollHorizon = rawPayrollHorizon.map((ph, idx) => {
+      const sDelta = salDeltaByYr[idx] || 0;
+      const comm = Math.max(0, (ph.committed_salary || 0) + sDelta);
+      const bgt = ph.budget || roadmap.budget || 150000000;
+      const space = Math.max(0, bgt - comm);
+      const pctComm = Number(Math.min(100, (comm / Math.max(1, bgt)) * 100).toFixed(1));
+      return {
+        ...ph,
+        committed_salary: comm,
+        projected_space: space,
+        pct_committed: pctComm,
+        sandbox_salary_delta: sDelta,
+      };
+    });
+
+    const yearlyProjs = rawYearlyProjs.map((yp, idx) => {
+      const wDelta = warDeltaByYr[idx] || 0;
+      const newWar = Number(Math.max(10, (yp.projected_team_war || 0) + wDelta).toFixed(1));
+      const newWins = Math.max(50, Math.min(114, Math.round(47.5 + newWar)));
+      const resolvedGaps = (yp.gaps || []).filter(g => !cellOverrideMap[`${g.pos}_${idx}`]);
+      const highGapsCnt = resolvedGaps.filter(g => g.severity === "High").length;
+      const surpDeltaM = Number(((wDelta * mktPerWar - (salDeltaByYr[idx] || 0)) / 1e6).toFixed(1));
+      return {
+        ...yp,
+        projected_team_war: newWar,
+        projected_wins: newWins,
+        war_sandbox_delta: Number(wDelta.toFixed(1)),
+        team_surplus_millions: Number(((yp.team_surplus_millions || 0) + surpDeltaM).toFixed(1)),
+        gaps: resolvedGaps,
+        gaps_count: resolvedGaps.length,
+        high_severity_gaps_count: highGapsCnt,
+      };
+    });
+
+    activeSandboxHorizon = payrollHorizon;
+    activeSandboxYearlyProjs = yearlyProjs;
+
     const activeYearProjs = selYr === "ALL"
       ? yearlyProjs
       : yearlyProjs.filter(yp => String(yp.year) === String(selYr));
 
+    const selRoleKey = AppState.selectedRoadmapRole || (posGrid[0] && posGrid[0].pos) || "C";
+    const selRoleRow = posGrid.find(r => r.pos === selRoleKey) || posGrid[0] || {};
+    const selRoleActions = sandboxActions.filter(a => a.pos === selRoleRow.pos);
+
+    const allProspects = roadmap.prospect_pipeline || [];
+    const filteredProspects = allProspects.filter(pr => {
+      if (pipeFilter === "Ready") return (pr.readiness_pct || 0) >= 72 || String(pr.eta).includes("Ready");
+      if (pipeFilter === "HighNeed") return pr.fills_need || pr.addresses_need === "High Need";
+      if (pipeFilter === "Blocked") return pr.is_blocked || String(pr.blocking_status || "").includes("Blocked");
+      if (pipeFilter === "LowRisk") return pr.risk_tier === "Low";
+      return true;
+    });
+
     const gapBadgeStyle = (sev) => {
-      if (sev === "High") return "bg-rose-500/20 text-rose-300 border-rose-500/40";
-      if (sev === "Medium") return "bg-amber-500/20 text-amber-300 border-amber-500/40";
-      return "bg-sky-500/20 text-sky-300 border-sky-500/40";
+      if (sev === "High") return "bg-rose-500/20 text-rose-300 border-rose-500/50";
+      if (sev === "Medium") return "bg-amber-500/20 text-amber-300 border-amber-500/45";
+      return "bg-slate-800 text-slate-300 border-slate-700";
     };
 
+    const riskBadgeHtml = (tier) => {
+      if (tier === "Low") return `<span class="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/35">LOW VAR</span>`;
+      if (tier === "Medium") return `<span class="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-500/15 text-amber-300 border border-amber-500/35">MED VAR</span>`;
+      return `<span class="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-rose-500/15 text-rose-300 border border-rose-500/35">HIGH VAR</span>`;
+    };
+
+    const totalSbWarY1 = warDeltaByYr[1] || warDeltaByYr[0] || 0;
+    const totalSbSalY1 = salDeltaByYr[1] || salDeltaByYr[0] || 0;
+
     return `
-      <!-- 1. 5-Year Executive Horizon, Payroll, Projected WAR & Gap Summary Cards -->
-      <div class="glass-card p-5">
-        <div class="flex flex-wrap items-center justify-between gap-4 mb-3.5">
-          <div>
-            <span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">${roadmap.window_label || 'Franchise Window'}</span>
-            <h3 class="text-lg font-black text-white mt-1"><i class="bi bi-calendar-range text-sky-400 mr-1.5"></i> 5-Year Franchise Roadmap, Projected Starters &amp; Gap Horizon (${yrs[0] || ''}–${yrs[yrs.length - 1] || ''})</h3>
-            ${roadmap.gm_brief ? `<p class="text-xs text-slate-300 mt-1">${roadmap.gm_brief}</p>` : ""}
+      <!-- =========================================================================
+           LAYER 1: URGENT STATUS, DATA TRUST SIGNALS & GM WHAT-IF ARCHITECT SANDBOX
+           ========================================================================= -->
+      <div class="vance-trust-strip p-4 space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex flex-wrap items-center gap-2.5">
+            <span class="px-2.5 py-0.5 rounded text-[10px] font-mono font-black uppercase tracking-widest bg-white text-slate-950">${roadmap.window_label || 'Franchise Window'}</span>
+            <h3 class="text-sm sm:text-base font-black text-white uppercase tracking-tight">
+              <i class="bi bi-cpu-fill text-slate-300 mr-1"></i> 5-Year Roster Construction &amp; Pipeline Succession Architect (${yrs[0] || ''}–${yrs[yrs.length - 1] || ''})
+            </h3>
           </div>
-          <div class="text-right text-xs font-mono text-slate-300">
-            Core Avg Age: <b class="text-sky-400">${roadmap.avg_core_age || '-'}</b> (Bat: ${roadmap.avg_batter_age || '-'} / Pit: ${roadmap.avg_pitcher_age || '-'}) • Budget: <b class="text-emerald-400">${fmtMoney(roadmap.budget)}</b>
+          <!-- Data Trust & Stabilization Horizon Signals -->
+          <div class="flex flex-wrap items-center gap-2 text-[10px] font-mono">
+            <span class="px-2 py-0.5 rounded bg-slate-900 text-slate-300 border border-slate-700" title="Sample Stabilization Gate for Position Players">
+              <i class="bi bi-shield-check text-emerald-400 mr-1"></i>${dataTrust.bat_stabilized_ratio || 'Hitters ≥150 PA Gate'}
+            </span>
+            <span class="px-2 py-0.5 rounded bg-slate-900 text-slate-300 border border-slate-700" title="Stuff+ stabilizes at 80 pitches; Location+ requires 400+ pitches">
+              <i class="bi bi-speedometer2 text-sky-400 mr-1"></i>${dataTrust.pit_stabilized_ratio || 'Pitchers ≥80p Stuff+ Gate'}
+            </span>
+            <span class="px-2 py-0.5 rounded bg-slate-900 text-slate-300 border border-slate-700" title="Surplus Value = (Projected WAR × Market $/WAR) − Salary">
+              Val Basis: <b class="text-white">${dataTrust.market_valuation_basis || '$8.0M / WAR'}</b>
+            </span>
+            <span class="px-2 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-800">
+              Core Age: <b class="text-white">${roadmap.avg_core_age || '-'}</b> (Bat ${roadmap.avg_batter_age || '-'} / Pit ${roadmap.avg_pitcher_age || '-'})
+            </span>
           </div>
         </div>
-        <div class="grid grid-cols-1 sm:grid-cols-5 gap-3">
-          ${(roadmap.payroll_horizon || []).map((ph, idx) => {
-            const yp = yearlyProjs[idx] || {};
-            const isSel = String(selYr) === String(ph.year);
-            return `
-              <div onclick="selectRoadmapYear('${ isSel ? 'ALL' : ph.year }')" class="bg-slate-900/90 border ${isSel ? 'border-sky-400 ring-1 ring-sky-400/40' : 'border-slate-800 hover:border-slate-600'} rounded-xl p-3.5 cursor-pointer transition">
-                <div class="flex justify-between items-center text-xs font-mono text-slate-400 mb-1">
-                  <span class="font-extrabold text-white text-sm">${ph.year} ${idx === 0 ? '<span class="text-[9px] text-sky-400">(NOW)</span>' : `<span class="text-[9px] text-slate-500">(+${idx}Y)</span>`}</span>
-                  <span class="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 font-bold text-[10px]">${Number(yp.projected_team_war || 0).toFixed(1)} WAR</span>
-                </div>
-                <div class="text-base font-black text-amber-300 font-mono">${fmtMoney(ph.committed_salary)}</div>
-                <div class="text-[11px] font-mono text-emerald-400 mt-0.5">Cap Space: ${fmtMoney(ph.projected_space)}</div>
-                <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden mt-2">
-                  <div class="h-full ${ph.pct_committed > 85 ? 'bg-rose-500' : (ph.pct_committed > 65 ? 'bg-amber-400' : 'bg-sky-400')}" style="width:${Math.min(100, ph.pct_committed)}%"></div>
-                </div>
-                <div class="flex items-center justify-between text-[10px] font-mono mt-2 pt-1.5 border-t border-slate-800/80">
-                  <span class="text-slate-300" title="Controlled MLB Starters + Pipeline Promotions">${yp.controlled_starters_count || 0}/15 Ctrl ${yp.pipeline_starters_count ? `• <b class="text-emerald-400">+${yp.pipeline_starters_count}🌱</b>` : ''}</span>
-                  <span class="px-1.5 py-0.5 rounded font-bold ${(yp.high_severity_gaps_count || 0) > 0 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : ((yp.gaps_count || 0) > 0 ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300')}">
-                    ${yp.gaps_count || 0} ${yp.gaps_count === 1 ? 'Gap' : 'Gaps'}
-                  </span>
-                </div>
+
+        ${roadmap.gm_brief ? `<p class="text-xs text-slate-300 leading-relaxed border-t border-slate-800/80 pt-2">${roadmap.gm_brief}</p>` : ""}
+
+        <!-- Interactive GM "What-If" Roster Move Simulator Strip -->
+        ${sandboxActions.length ? `
+          <div class="pt-2 border-t border-slate-800/90">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] font-mono font-extrabold uppercase tracking-wider text-emerald-400">
+                  <i class="bi bi-sliders2-vertical mr-1"></i>GM "What-If" Move Sandbox (${activeSbActions.length} Active)
+                </span>
+                <span class="text-[11px] text-slate-400">Toggle forward-looking extensions, option/non-tender cuts, call-ups, or FA targets to stress-test 5-year payroll &amp; WAR:</span>
               </div>
-            `;
-          }).join("")}
+              ${activeSbActions.length ? `
+                <div class="flex items-center gap-2 font-mono text-[11px]">
+                  <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold">
+                    Yr+1 Net Impact: ${totalSbWarY1 >= 0 ? '+' : ''}${totalSbWarY1.toFixed(1)} WAR · ${totalSbSalY1 >= 0 ? '+' : '-'}${fmtMoney(Math.abs(totalSbSalY1))} Payroll
+                  </span>
+                  <button onclick="resetRoadmapSandbox()" class="px-2.5 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 font-bold transition">
+                    <i class="bi bi-arrow-counterclockwise mr-1"></i>Reset Sandbox
+                  </button>
+                </div>
+              ` : ""}
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              ${sandboxActions.map(act => {
+                const isOn = Boolean(sbMap[act.action_id]);
+                return `
+                  <button onclick="toggleRoadmapSandboxAction('${act.action_id}')" title="${act.subtitle || ''}" class="px-2.5 py-1 rounded-lg text-[11px] font-mono font-semibold border transition flex items-center gap-1.5 ${isOn ? 'bg-emerald-500 text-slate-950 border-emerald-300 font-extrabold shadow-md shadow-emerald-500/20' : 'bg-slate-900/90 text-slate-300 border-slate-700/80 hover:border-slate-500'}">
+                    <i class="bi ${isOn ? 'bi-check-square-fill' : 'bi-square'}"></i>
+                    <span class="uppercase text-[9px] px-1 rounded ${isOn ? 'bg-slate-950/25 text-slate-950' : 'bg-slate-800 text-slate-400'}">${act.category}</span>
+                    <span>${act.title}</span>
+                  </button>
+                `;
+              }).join("")}
+            </div>
+          </div>
+        ` : ""}
+      </div>
+
+      <!-- =========================================================================
+           LAYER 2: 5-YEAR CONTENTION WINDOW, CAPITAL ALLOCATION & SURPLUS HORIZON
+           Z-Pattern Executive Layout: 5 Horizon Cards (Left) + Dual-Axis Chart (Right)
+           ========================================================================= -->
+      <div class="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch">
+        <!-- 5-Year Horizon Cards (7 Cols) -->
+        <div class="xl:col-span-7 vance-panel p-4 flex flex-col justify-between">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div>
+              <h4 class="text-xs font-extrabold uppercase tracking-wider text-white flex items-center gap-1.5">
+                <i class="bi bi-bar-chart-line-fill text-slate-300"></i> 5-Year Contention Window &amp; Capital Allocation Horizon
+              </h4>
+              <p class="text-[11px] text-slate-400">Click any season card to filter downstream vulnerability logs • Target contention line: 42.0 WAR (~90 Wins)</p>
+            </div>
+            <div class="text-[11px] font-mono text-slate-300">
+              Club Budget: <b class="text-white">${fmtMoney(roadmap.budget)}</b>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-5 gap-2.5">
+            ${payrollHorizon.map((ph, idx) => {
+              const yp = yearlyProjs[idx] || {};
+              const isSel = String(selYr) === String(ph.year);
+              const warVal = Number(yp.projected_team_war || 0);
+              const warPct = Math.max(5, Math.min(99, Math.round(50 + (warVal - 36.0) * 3.2)));
+              const surpM = Number(yp.team_surplus_millions || 0);
+              const guarPct = Math.min(100, Math.round(((ph.guaranteed_salary || 0) / Math.max(1, ph.budget || 1)) * 100));
+              const optPct = Math.min(100 - guarPct, Math.round(((ph.option_salary || 0) / Math.max(1, ph.budget || 1)) * 100));
+              const arbPct = Math.min(100 - guarPct - optPct, Math.round(((ph.arb_salary || 0) / Math.max(1, ph.budget || 1)) * 100));
+
+              return `
+                <div onclick="selectRoadmapYear('${isSel ? 'ALL' : ph.year}')" class="vance-horizon-card ${isSel ? 'is-selected' : ''} p-3 cursor-pointer flex flex-col justify-between">
+                  <div>
+                    <div class="flex items-center justify-between gap-1 mb-1.5">
+                      <span class="font-mono font-black text-white text-sm">${ph.year} <span class="text-[9px] font-normal text-slate-400">${idx === 0 ? 'NOW' : `+${idx}Y`}</span></span>
+                      ${vancePctBadge(warPct, `${warVal.toFixed(1)}W`)}
+                    </div>
+                    <div class="flex items-baseline justify-between font-mono text-[10px] text-slate-400 mb-2">
+                      <span>Proj Wins: <b class="text-slate-200">${yp.projected_wins || Math.round(47.5 + warVal)}W</b></span>
+                      ${yp.war_sandbox_delta ? `<span class="text-emerald-400 font-bold">${yp.war_sandbox_delta > 0 ? '+' : ''}${yp.war_sandbox_delta}W</span>` : ""}
+                    </div>
+
+                    <div class="border-t border-slate-800/90 pt-2">
+                      <div class="text-[10px] font-mono text-slate-400 uppercase">Committed</div>
+                      <div class="text-sm font-black font-mono text-white">${fmtMoney(ph.committed_salary)}</div>
+                      <div class="text-[10px] font-mono ${ph.projected_space > (ph.budget * 0.2) ? 'text-emerald-400' : 'text-amber-300'} mt-0.5">
+                        Space: ${fmtMoney(ph.projected_space)}
+                      </div>
+                    </div>
+
+                    <!-- Stacked Capital Bar (Guaranteed / Option / Arb) -->
+                    <div class="w-full h-2 bg-slate-900 rounded overflow-hidden flex mt-2 border border-slate-800" title="Gray: Guaranteed | Amber: Options | Blue: Arb Est">
+                      <div style="width:${guarPct}%;background:#64748b"></div>
+                      <div style="width:${optPct}%;background:#f59e0b"></div>
+                      <div style="width:${arbPct}%;background:#1d4ed8"></div>
+                    </div>
+                  </div>
+
+                  <div class="mt-2.5 pt-2 border-t border-slate-800/80 space-y-1 font-mono text-[10px]">
+                    <div class="flex items-center justify-between">
+                      <span class="text-slate-400">Net Surplus:</span>
+                      <span class="font-bold ${surpM >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${surpM >= 0 ? '+' : '-'}$${Math.abs(surpM).toFixed(1)}M</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                      <span class="text-slate-300">${yp.controlled_starters_count || 0}/15 Ctrl ${yp.pipeline_starters_count ? `<b class="text-emerald-400">+${yp.pipeline_starters_count}P</b>` : ''}</span>
+                      <span class="px-1.5 py-0.2 rounded font-bold ${(yp.high_severity_gaps_count || 0) > 0 ? 'bg-rose-500/25 text-rose-300 border border-rose-500/50' : ((yp.gaps_count || 0) > 0 ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800 text-slate-300')}">
+                        ${yp.gaps_count || 0} ${yp.gaps_count === 1 ? 'Gap' : 'Gaps'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        </div>
+
+        <!-- Dual-Axis Capital vs. Contention Trajectory Chart (5 Cols) -->
+        <div class="xl:col-span-5 vance-panel p-4 flex flex-col justify-between">
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <div>
+              <h4 class="text-xs font-extrabold uppercase tracking-wider text-white flex items-center gap-1.5">
+                <i class="bi bi-graph-up-arrow text-rose-400"></i> Capital Commitment vs. Projected WAR Curve
+              </h4>
+              <p class="text-[11px] text-slate-400">Stacked payroll tiers (left axis) vs. projected team WAR &amp; 90W contention threshold (right axis)</p>
+            </div>
+          </div>
+          <div class="h-52 sm:h-56">
+            <canvas id="roadmap-horizon-canvas"></canvas>
+          </div>
         </div>
       </div>
 
-      <!-- 2. 5-Year Projected Starters & Positional Succession Grid (15 Starting Roles x 5 Years) -->
-      <div class="glass-card overflow-hidden">
-        <div class="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex flex-wrap justify-between items-center gap-2">
-          <div>
-            <h3 class="font-extrabold text-sm uppercase tracking-wider text-white">
-              <i class="bi bi-grid-3x3-gap-fill text-emerald-400 mr-1.5"></i> 5-Year Projected Starters, Pipeline Succession &amp; Gap Matrix (15 Core Roles)
-            </h3>
-            <p class="text-xs text-slate-400">Projected starting lineup (C–DH), rotation (SP1–SP5) &amp; closer across ${yrs[0] || ''}–${yrs[yrs.length - 1] || ''}, modeling contract control, aging curves &amp; prospect call-ups</p>
-          </div>
-          <div class="flex flex-wrap items-center gap-2 text-[10px] font-mono">
-            <span class="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/40">Signed / Guaranteed</span>
-            <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">Pre-Arb / Arb Control</span>
-            <span class="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40">🌱 Pipeline Call-Up</span>
-            <span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">⚠️ Option / Age / Deficit</span>
-            <span class="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40">🚨 FA Vacancy / High Gap</span>
-          </div>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="saber-table">
-            <thead>
-              <tr>
-                <th class="text-left">Role</th>
-                <th class="text-center">Curr Grade</th>
-                ${yrs.map((y, idx) => `<th class="text-left">${y} Projected Starter ${idx === 0 ? '(Current)' : `(+${idx}Y)`}</th>`).join("")}
-                <th class="text-left">Top Pipeline Heir</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${posGrid.map(row => `
-                <tr>
-                  <td class="font-mono font-extrabold text-sky-300 whitespace-nowrap">
-                    ${row.pos} <span class="text-[10px] text-slate-400 font-normal block">${row.label}</span>
-                  </td>
-                  <td class="text-center">
-                    <span class="px-2 py-0.5 rounded font-mono text-xs font-extrabold" style="background:${row.current_color}22;color:${row.current_color};border:1px solid ${row.current_color}55">${row.current_grade}</span>
-                  </td>
-                  ${(row.cells || []).map(c => {
-                    let boxCls = "bg-slate-900/75 border-slate-800";
-                    if (c.has_gap && c.gap_severity === "High") boxCls = "bg-rose-500/15 border-rose-500/50";
-                    else if (c.has_gap && c.gap_severity === "Medium") boxCls = "bg-amber-500/15 border-amber-500/45";
-                    else if (c.source === "Pipeline") boxCls = "bg-purple-500/15 border-purple-500/45";
-                    else if (c.status === "Guaranteed") boxCls = "bg-sky-500/10 border-sky-500/35";
-                    else if (c.status === "Team Control") boxCls = "bg-emerald-500/10 border-emerald-500/35";
+      <!-- =========================================================================
+           LAYER 3: 15-ROLE x 5-YEAR SUCCESSION MATRIX + POSITIONAL ARCHITECT INSPECTOR
+           Grayscale-First Foundation + 3 Cognitive Lenses + Interactive Role Drawer
+           ========================================================================= -->
+      <div class="grid grid-cols-1 uw:grid-cols-12 gap-4 items-start">
+        <!-- Left 8 Cols (on Ultrawide) / Full Width: 15-Role x 5-Year Matrix -->
+        <div class="uw:col-span-8 vance-panel overflow-hidden">
+          <div class="px-4 py-3 bg-slate-950/90 border-b border-slate-800/90 space-y-2.5">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 class="font-extrabold text-sm uppercase tracking-wider text-white flex items-center gap-2">
+                  <i class="bi bi-grid-3x3-gap-fill text-slate-300"></i> 15-Role × 5-Year Succession &amp; Value Matrix
+                </h3>
+                <p class="text-[11px] text-slate-400">Click any role or cell to open the <b class="text-white">Positional Succession &amp; Move Architect</b> • Double-click or click player icon for full Scouting Dossier</p>
+              </div>
 
-                    return `
-                      <td class="p-1.5 align-top min-w-[185px]">
-                        <div ${c.player_id ? `onclick="openPlayerModal(${c.player_id})"` : ""} class="p-2 rounded-xl border ${boxCls} ${c.player_id ? 'cursor-pointer hover:border-sky-400' : ''} transition text-xs">
-                          <div class="flex items-center justify-between gap-1">
-                            <span class="font-extrabold ${c.player_id ? 'text-white' : 'text-rose-400'} truncate">${c.source === 'Pipeline' ? '🌱 ' : ''}${c.name}</span>
-                            ${c.player_id ? `<span class="font-mono font-bold text-sky-300 shrink-0">${Number(c.proj_war || 0).toFixed(1)}W</span>` : `<span class="text-[10px] font-mono font-bold text-rose-400">VACANT</span>`}
-                          </div>
-                          ${c.player_id ? `
+              <!-- Cognitive Lens Switcher (Enforcing 5-Second & <200ms Rules) -->
+              <div class="flex flex-wrap items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
+                <span class="text-[10px] font-mono uppercase text-slate-400 px-1.5">Lens:</span>
+                ${[
+                  ["succession", "1. Contract & Succession"],
+                  ["process", "2. Sabermetric Process (Stuff+ / xwOBA)"],
+                  ["surplus", "3. Surplus Value ($/WAR) Heatmap"],
+                ].map(([lKey, lLbl]) => `
+                  <button onclick="setRoadmapLens('${lKey}')" class="px-2.5 py-1 rounded text-[10px] font-mono font-bold transition ${lens === lKey ? 'bg-white text-slate-950 font-extrabold shadow' : 'text-slate-300 hover:text-white'}">${lLbl}</button>
+                `).join("")}
+              </div>
+            </div>
+
+            <!-- Unit Filter & Legend Bar -->
+            <div class="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/70">
+              <div class="flex flex-wrap items-center gap-1">
+                ${[
+                  ["ALL", "All 15 Roles"],
+                  ["Battery & IF", "Battery & Infield (5)"],
+                  ["OF & DH", "Outfield & DH (4)"],
+                  ["Rotation", "Starting Rotation (5)"],
+                  ["Bullpen", "Closer / Relief (1)"],
+                ].map(([uKey, uLbl]) => `
+                  <button onclick="setRoadmapUnitFilter('${uKey}')" class="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold border transition ${unitFilter === uKey ? 'bg-slate-200 text-slate-950 border-white' : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-600'}">${uLbl}</button>
+                `).join("")}
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2 text-[10px] font-mono text-slate-400">
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-slate-400 inline-block"></span>Guaranteed</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-sky-400 inline-block"></span>Pre-Arb/Arb</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-emerald-400 inline-block"></span>Pipeline Heir</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-amber-400 inline-block"></span>Option/Age Watch</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-rose-600 inline-block"></span>Critical Gap/UFA</span>
+                <span class="border-l border-slate-700 pl-2 flex items-center gap-1">
+                  Scale: <span class="px-1 rounded text-[9px] text-sky-200" style="background:#002244">10p Cold</span> → <span class="px-1 rounded text-[9px] text-rose-100" style="background:#D32F2F">90p Elite</span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="saber-table">
+              <thead>
+                <tr>
+                  <th class="text-left">Role</th>
+                  <th class="text-center">Unit Pct</th>
+                  ${yrs.map((y, idx) => `<th class="text-left">${y} ${idx === 0 ? '(Baseline)' : `(+${idx}Y)`}</th>`).join("")}
+                  <th class="text-left">Primary Pipeline Heir</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filteredPosGrid.map(row => {
+                  const isRowSel = row.pos === selRoleRow.pos;
+                  return `
+                    <tr onclick="selectRoadmapRole('${row.pos}')" class="cursor-pointer ${isRowSel ? 'bg-slate-800/45' : ''}">
+                      <td class="font-mono whitespace-nowrap">
+                        <div class="flex items-center gap-1.5">
+                          <span class="font-black text-xs ${isRowSel ? 'text-white underline decoration-sky-400' : 'text-slate-200'}">${row.pos}</span>
+                          <span class="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold" style="background:${row.current_color}20;color:${row.current_color};border:1px solid ${row.current_color}50">${row.current_grade}</span>
+                        </div>
+                        <span class="text-[10px] text-slate-400 font-normal block">${row.label}</span>
+                      </td>
+                      <td class="text-center font-mono">
+                        ${vancePctBadge(row.percentile || 50, `${row.percentile || 50}p`)}
+                        <div class="text-[9px] ${row.war_diff >= 0 ? 'text-emerald-400' : 'text-rose-400'} mt-0.5">${row.war_diff >= 0 ? '+' : ''}${Number(row.war_diff || 0).toFixed(1)}W</div>
+                      </td>
+                      ${(row.cells || []).map(c => {
+                        let edgeCls = "edge-signed";
+                        if (c.is_sandbox_override) edgeCls = "edge-sandbox";
+                        else if (c.has_gap && c.gap_severity === "High") edgeCls = "edge-gap-high";
+                        else if (c.has_gap && c.gap_severity === "Medium") edgeCls = "edge-gap-med";
+                        else if (c.source === "Pipeline") edgeCls = "edge-pipeline";
+                        else if (c.status === "Option") edgeCls = "edge-option";
+                        else if (c.status === "Team Control") edgeCls = "edge-control";
+
+                        // Pre-attentive heatmap background when in Surplus or Process Lens
+                        let cellInlineStyle = "";
+                        if (lens === "surplus" && c.player_id) {
+                          const st = vanceDivergingStyle(c.surplus_pct || 50);
+                          cellInlineStyle = `background:${st.bg};border-color:${st.border};`;
+                        } else if (lens === "process" && c.player_id) {
+                          const st = vanceDivergingStyle(c.process_pct || 50);
+                          cellInlineStyle = `background:${st.bg};border-color:${st.border};`;
+                        }
+
+                        // Determine primary badge & secondary line by active Cognitive Lens
+                        let rightPillHtml = "";
+                        let subLineHtml = "";
+                        if (!c.player_id && !c.is_sandbox_override) {
+                          rightPillHtml = `<span class="px-1.5 py-0.5 rounded bg-rose-500/25 text-rose-300 border border-rose-500/50 text-[9px] font-mono font-black">VACANT</span>`;
+                          subLineHtml = `<div class="text-[10px] font-mono text-rose-300 mt-1">${c.gap_type || 'OpenFA Need'}</div>`;
+                        } else if (lens === "process") {
+                          rightPillHtml = vancePctBadge(c.process_pct || 50, `${c.process_pct || 50}p`);
+                          subLineHtml = `
+                            <div class="flex items-center justify-between text-[10px] font-mono text-slate-200 mt-1">
+                              <span class="font-bold truncate">${c.process_label || ''}</span>
+                              ${!c.sample_confident ? `<span class="text-[9px] text-amber-300 ml-1" title="${c.sample_badge || 'Low Sample — Scouting Prior Active'}">⚠️Gate</span>` : ""}
+                            </div>
+                          `;
+                        } else if (lens === "surplus") {
+                          rightPillHtml = vancePctBadge(c.surplus_pct || 50, c.surplus_label || '$0M');
+                          subLineHtml = `
+                            <div class="flex items-center justify-between text-[10px] font-mono text-slate-200 mt-1">
+                              <span>${c.short_label}</span>
+                              <span class="font-bold">${Number(c.proj_war || 0).toFixed(1)} WAR</span>
+                            </div>
+                          `;
+                        } else {
+                          const wPct = Math.max(5, Math.min(99, Math.round(35 + Number(c.proj_war || 0) * 14)));
+                          rightPillHtml = vancePctBadge(wPct, `${Number(c.proj_war || 0).toFixed(1)}W`);
+                          subLineHtml = `
                             <div class="flex items-center justify-between text-[10px] font-mono text-slate-300 mt-1">
-                              <span>Age ${c.age} • OVR ${c.proj_oa}</span>
+                              <span>Age ${c.age} · ${c.proj_oa} OVR</span>
                               <span class="text-slate-400">${c.short_label}</span>
                             </div>
-                          ` : ""}
-                          ${c.has_gap ? `
-                            <div class="mt-1.5 pt-1 border-t border-white/10 flex items-center justify-between gap-1 text-[10px] font-mono">
-                              <span class="font-bold ${c.gap_severity === 'High' ? 'text-rose-300' : (c.gap_severity === 'Medium' ? 'text-amber-300' : 'text-sky-300')}">
-                                ${c.gap_severity === 'High' ? '🚨' : (c.gap_severity === 'Medium' ? '⚠️' : '🌱')} ${c.gap_type}
-                              </span>
+                          `;
+                        }
+
+                        return `
+                          <td class="p-1 align-top min-w-[178px]">
+                            <div onclick="event.stopPropagation(); selectRoadmapRole('${row.pos}', '${c.year}')" style="${cellInlineStyle}" class="vance-matrix-cell ${edgeCls} ${isRowSel && String(AppState.selectedRoadmapCellYear) === String(c.year) ? 'cell-selected' : ''} text-xs">
+                              <div class="flex items-center justify-between gap-1">
+                                <div class="flex items-center gap-1 min-w-0">
+                                  ${c.source === 'Pipeline' ? `<span class="text-[9px] font-mono px-1 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" title="Pipeline Promotion">HEIR</span>` : ""}
+                                  ${c.is_sandbox_override ? `<span class="text-[9px] font-mono px-1 rounded bg-emerald-500 text-slate-950 font-black">SIM</span>` : ""}
+                                  <span class="font-extrabold ${c.player_id || c.is_sandbox_override ? 'text-white' : 'text-rose-400'} truncate">${c.name}</span>
+                                </div>
+                                <div class="flex items-center gap-1 shrink-0">
+                                  ${rightPillHtml}
+                                  ${c.player_id ? `<button onclick="event.stopPropagation(); openPlayerModal(${c.player_id})" class="text-slate-400 hover:text-white px-0.5" title="Open Player Analytical Dossier"><i class="bi bi-box-arrow-up-right text-[10px]"></i></button>` : ""}
+                                </div>
+                              </div>
+                              ${subLineHtml}
+                              ${c.has_gap ? `
+                                <div class="mt-1 pt-1 border-t border-white/10 flex items-center justify-between text-[9px] font-mono">
+                                  <span class="font-bold ${c.gap_severity === 'High' ? 'text-rose-300' : 'text-amber-300'} uppercase tracking-tight">
+                                    ${c.gap_severity === 'High' ? 'ALERT:' : 'WATCH:'} ${c.gap_type}
+                                  </span>
+                                </div>
+                              ` : ""}
                             </div>
-                          ` : ""}
-                        </div>
+                          </td>
+                        `;
+                      }).join("")}
+                      <td class="font-mono text-xs whitespace-nowrap">
+                        ${row.top_prospect_obj ? `
+                          <div onclick="event.stopPropagation(); openPlayerModal(${row.top_prospect_obj.player_id})" class="hover:text-sky-300 cursor-pointer">
+                            <div class="font-bold text-emerald-300">${row.top_prospect_obj.name}</div>
+                            <div class="text-[10px] text-slate-400">${row.top_prospect_obj.oa}/${row.top_prospect_obj.pot} POT · ETA ${row.top_prospect_obj.eta_year}</div>
+                          </div>
+                        ` : `<span class="text-[11px] text-slate-500">No Top-15 Heir</span>`}
                       </td>
-                    `;
-                  }).join("")}
-                  <td class="font-mono text-xs text-emerald-300 whitespace-nowrap">${row.top_prospect}</td>
-                </tr>
-              `).join("")}
-            </tbody>
-          </table>
+                    </tr>
+                  `;
+                }).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Right 4 Cols (on Ultrawide) / Full Width: Interactive Positional Succession & Move Architect Inspector -->
+        <div class="uw:col-span-4 vance-panel p-4 space-y-3.5 sticky top-4">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5">
+            <div>
+              <div class="flex items-center gap-1.5">
+                <span class="px-2 py-0.5 rounded text-[10px] font-mono font-black bg-white text-slate-950">${selRoleRow.pos || 'ROLE'} ARCHITECT</span>
+                <span class="text-[10px] font-mono text-slate-400">Grade ${selRoleRow.current_grade || 'B'} (${selRoleRow.percentile || 50}th pct)</span>
+              </div>
+              <h4 class="text-sm font-black text-white mt-1">${selRoleRow.label || selRoleRow.pos} — 5-Year Succession Plan</h4>
+            </div>
+            <div class="text-right font-mono">
+              <div class="text-[10px] text-slate-400">Net vs Lg Avg</div>
+              <div class="text-base font-black ${(selRoleRow.war_diff || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${(selRoleRow.war_diff || 0) >= 0 ? '+' : ''}${Number(selRoleRow.war_diff || 0).toFixed(1)} WAR</div>
+            </div>
+          </div>
+
+          <!-- Quick Role Switcher Pills -->
+          <div class="flex flex-wrap gap-1">
+            ${posGrid.map(r => `
+              <button onclick="selectRoadmapRole('${r.pos}')" class="px-2 py-0.5 rounded text-[10px] font-mono font-bold border transition ${r.pos === selRoleRow.pos ? 'bg-white text-slate-950 border-white font-black' : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-600'}">${r.pos}</button>
+            `).join("")}
+          </div>
+
+          <!-- 5-Year Role Timeline Strip -->
+          <div class="space-y-1.5">
+            <div class="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-bold">5-Year Projected Holder &amp; Surplus Trajectory</div>
+            ${(selRoleRow.cells || []).map(c => `
+              <div class="flex items-center justify-between p-2 rounded-lg bg-slate-900/90 border ${c.has_gap && c.gap_severity === 'High' ? 'border-rose-500/50' : 'border-slate-800'} text-xs font-mono">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="font-bold text-slate-400 w-10">${c.year}</span>
+                  <div class="min-w-0">
+                    <div class="font-bold text-white truncate">${c.name} ${c.age ? `<span class="text-[10px] text-slate-400">(Age ${c.age})</span>` : ""}</div>
+                    <div class="text-[10px] text-slate-400">${c.process_label || ''} ${c.sample_badge ? `· ${c.sample_badge}` : ''}</div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <span class="text-[10px] text-slate-300">${c.short_label}</span>
+                  ${vancePctBadge(c.surplus_pct || 50, `${Number(c.proj_war || 0).toFixed(1)}W / ${c.surplus_label || '$0M'}`)}
+                </div>
+              </div>
+            `).join("")}
+          </div>
+
+          <!-- Organizational Pipeline Heirs & Defensive Spectrum Fit -->
+          <div class="border-t border-slate-800 pt-3">
+            <div class="text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-bold mb-2">
+              <i class="bi bi-diagram-2-fill mr-1"></i>Organizational Heirs &amp; Defensive Spectrum Fit
+            </div>
+            ${(selRoleRow.pipeline_heirs && selRoleRow.pipeline_heirs.length) ? `
+              <div class="space-y-2">
+                ${selRoleRow.pipeline_heirs.map(h => `
+                  <div onclick="openPlayerModal(${h.player_id})" class="p-2.5 rounded-lg bg-slate-900/90 hover:bg-slate-800/80 border border-slate-800 cursor-pointer transition text-xs">
+                    <div class="flex items-center justify-between gap-1">
+                      <span class="font-extrabold text-white">${h.name} <span class="font-mono text-[10px] text-slate-400">(${h.pos} · Age ${h.age})</span></span>
+                      <div class="flex items-center gap-1">
+                        ${rtgBadge(h.oa, h.pot)}
+                        ${riskBadgeHtml(h.risk_tier)}
+                      </div>
+                    </div>
+                    <div class="flex items-center justify-between text-[10px] font-mono text-slate-300 mt-1">
+                      <span>${h.proj_process_label}</span>
+                      <span class="text-emerald-300 font-bold">ETA ${h.eta_year} (${h.readiness_pct}% Ready)</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[10px] font-mono text-slate-400 mt-1 pt-1 border-t border-slate-800/80">
+                      <span>Def Spectrum: <b class="text-slate-200">${h.def_spectrum_str}</b></span>
+                      <span class="text-sky-300">${h.blocking_status}</span>
+                    </div>
+                  </div>
+                `).join("")}
+              </div>
+            ` : `<div class="text-xs text-slate-500 italic bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">No organizational top-15 prospect projected at ${selRoleRow.pos}. External FA/Trade acquisition required when incumbent departs.</div>`}
+          </div>
+
+          <!-- Front Office Action Directive & 1-Click Sandbox Triggers -->
+          <div class="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+            <div class="text-[10px] font-mono uppercase tracking-wider text-sky-400 font-extrabold">
+              <i class="bi bi-compass-fill mr-1"></i>Front Office Decision Trigger (${selRoleRow.pos})
+            </div>
+            <p class="text-xs text-slate-200">${selRoleRow.primary_gm_action || 'Core unit locked under team control.'}</p>
+            ${selRoleActions.length ? `
+              <div class="pt-1.5 space-y-1.5">
+                ${selRoleActions.map(act => {
+                  const isOn = Boolean(sbMap[act.action_id]);
+                  return `
+                    <button onclick="toggleRoadmapSandboxAction('${act.action_id}')" class="w-full py-1.5 px-3 rounded-lg text-xs font-mono font-bold border transition flex items-center justify-between ${isOn ? 'bg-emerald-500 text-slate-950 border-emerald-300' : 'bg-slate-900 hover:bg-slate-800 text-emerald-300 border-emerald-500/40'}">
+                      <span><i class="bi ${isOn ? 'bi-check-circle-fill' : 'bi-play-circle-fill'} mr-1.5"></i>${act.title}</span>
+                      <span class="text-[10px] uppercase">${isOn ? 'Simulated' : 'Simulate'}</span>
+                    </button>
+                  `;
+                }).join("")}
+              </div>
+            ` : ""}
+          </div>
         </div>
       </div>
 
-      <!-- 3. Year-by-Year Potential Gaps, UFA Departures & Front Office Action Plan -->
-      <div class="glass-card p-5 space-y-4">
-        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
-          <div>
-            <h3 class="font-extrabold text-sm uppercase tracking-wider text-white flex items-center gap-2">
-              <i class="bi bi-exclamation-octagon-fill text-rose-400"></i> Year-by-Year Potential Gaps, Roster Vulnerabilities &amp; Succession Plan
-            </h3>
-            <p class="text-xs text-slate-400">Identifies every projected free-agent vacancy, talent deficit, option decision, and aging cliff across each of the next 5 seasons</p>
+      <!-- =========================================================================
+           LAYER 4A: FRONT OFFICE STRATEGIC ROSTER MOVE ACTION BOARD (4 DECISION PILLARS)
+           ========================================================================= -->
+      <div class="grid grid-cols-1 md:grid-cols-2 uw:grid-cols-4 gap-4">
+        <!-- Pillar 1: Walk-Year Extension Locks -->
+        <div class="vance-panel p-4 space-y-2.5 border-t-2 border-t-sky-400">
+          <div class="flex items-center justify-between">
+            <h4 class="text-xs font-extrabold uppercase tracking-wider text-white"><i class="bi bi-file-earmark-lock2-fill text-sky-400 mr-1"></i> 1. Walk-Year Extension Targets</h4>
+            <span class="text-[10px] font-mono text-slate-400">${(strategicMoves.extension_targets || []).length} Core</span>
           </div>
-          <div class="flex flex-wrap gap-1.5">
-            <button onclick="selectRoadmapYear('ALL')" class="px-3 py-1 rounded-lg text-xs font-mono font-bold border transition ${selYr === 'ALL' ? 'bg-sky-500 text-slate-950 border-sky-300' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}">All 5 Years</button>
+          <p class="text-[11px] text-slate-400">Prime core starters hitting UFA within 24 months</p>
+          <div class="space-y-2">
+            ${(strategicMoves.extension_targets || []).length ? strategicMoves.extension_targets.map(ext => `
+              <div class="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 text-xs space-y-1">
+                <div class="flex items-center justify-between">
+                  <span onclick="openPlayerModal(${ext.player_id})" class="font-bold text-white hover:text-sky-300 cursor-pointer">${ext.pos} ${ext.name} <span class="text-[10px] font-mono text-slate-400">(Age ${ext.age})</span></span>
+                  <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40">UFA ${ext.fa_year}</span>
+                </div>
+                <div class="text-[10px] font-mono text-slate-300">${ext.process_headline} · <b class="text-sky-300">${ext.war} WAR</b></div>
+                <div class="flex items-center justify-between pt-1 border-t border-slate-800/80 font-mono text-[10px]">
+                  <span class="text-emerald-300 font-bold">Est: ${ext.suggested_deal}</span>
+                  ${ext.sandbox_action_id ? `<button onclick="toggleRoadmapSandboxAction('${ext.sandbox_action_id}')" class="px-2 py-0.5 rounded border ${sbMap[ext.sandbox_action_id] ? 'bg-emerald-500 text-slate-950 border-emerald-300 font-bold' : 'bg-slate-800 text-slate-200 border-slate-700 hover:border-slate-500'}">${sbMap[ext.sandbox_action_id] ? 'Extended ✓' : 'Test Ext'}</button>` : ""}
+                </div>
+              </div>
+            `).join("") : `<div class="text-xs text-slate-500 italic p-2">No immediate walk-year core UFA departures in Y+1/Y+2.</div>`}
+          </div>
+        </div>
+
+        <!-- Pillar 2: Contract Efficiency, Option & Non-Tender Alerts -->
+        <div class="vance-panel p-4 space-y-2.5 border-t-2 border-t-amber-400">
+          <div class="flex items-center justify-between">
+            <h4 class="text-xs font-extrabold uppercase tracking-wider text-white"><i class="bi bi-scissors text-amber-400 mr-1"></i> 2. Option &amp; Surplus Efficiency Alerts</h4>
+            <span class="text-[10px] font-mono text-slate-400">${(strategicMoves.contract_efficiency_alerts || []).length} Flags</span>
+          </div>
+          <p class="text-[11px] text-slate-400">Option decisions, arb non-tenders &amp; negative-surplus deals</p>
+          <div class="space-y-2">
+            ${(strategicMoves.contract_efficiency_alerts || []).length ? strategicMoves.contract_efficiency_alerts.map(ce => `
+              <div class="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 text-xs space-y-1">
+                <div class="flex items-center justify-between">
+                  <span onclick="openPlayerModal(${ce.player_id})" class="font-bold text-white hover:text-sky-300 cursor-pointer">${ce.pos} ${ce.name} (${ce.year})</span>
+                  <span class="text-[10px] font-mono px-1.5 py-0.5 rounded ${ce.surplus_millions < 0 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-emerald-500/20 text-emerald-300'}">${ce.surplus_label} Surp</span>
+                </div>
+                <div class="text-[10px] text-slate-300">${ce.rationale}</div>
+                <div class="flex items-center justify-between pt-1 border-t border-slate-800/80 font-mono text-[10px]">
+                  <span class="text-amber-300 font-bold">${ce.action_tag}</span>
+                  ${ce.sandbox_action_id ? `<button onclick="toggleRoadmapSandboxAction('${ce.sandbox_action_id}')" class="px-2 py-0.5 rounded border ${sbMap[ce.sandbox_action_id] ? 'bg-emerald-500 text-slate-950 border-emerald-300 font-bold' : 'bg-slate-800 text-slate-200 border-slate-700 hover:border-slate-500'}">${sbMap[ce.sandbox_action_id] ? 'Cleared ✓' : 'Test Cut'}</button>` : ""}
+                </div>
+              </div>
+            `).join("") : `<div class="text-xs text-slate-500 italic p-2">No negative-surplus option or arbitration traps flagged.</div>`}
+          </div>
+        </div>
+
+        <!-- Pillar 3: Positional Cliff & External FA/Trade Targets -->
+        <div class="vance-panel p-4 space-y-2.5 border-t-2 border-t-rose-500">
+          <div class="flex items-center justify-between">
+            <h4 class="text-xs font-extrabold uppercase tracking-wider text-white"><i class="bi bi-bullseye text-rose-400 mr-1"></i> 3. External Acquisition &amp; Bridge Needs</h4>
+            <span class="text-[10px] font-mono text-slate-400">${(strategicMoves.positional_acquisition_targets || []).length} Roles</span>
+          </div>
+          <p class="text-[11px] text-slate-400">Distinguishes 1-Yr Prospect Bridges vs. Multi-Yr FA Anchors</p>
+          <div class="space-y-2">
+            ${(strategicMoves.positional_acquisition_targets || []).length ? strategicMoves.positional_acquisition_targets.map(pa => `
+              <div class="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 text-xs space-y-1">
+                <div class="flex items-center justify-between">
+                  <span onclick="selectRoadmapRole('${pa.pos}')" class="font-bold text-white hover:text-sky-300 cursor-pointer">${pa.pos} — ${pa.label}</span>
+                  <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40">${pa.target_year} Need</span>
+                </div>
+                <div class="text-[10px] font-mono text-sky-300 font-bold">${pa.strategy_type}</div>
+                <div class="text-[10px] text-slate-400">${pa.rationale}</div>
+                <div class="flex items-center justify-between pt-1 border-t border-slate-800/80 font-mono text-[10px]">
+                  <span class="text-slate-300">Mkt: ${pa.est_cost}</span>
+                  ${pa.sandbox_action_id ? `<button onclick="toggleRoadmapSandboxAction('${pa.sandbox_action_id}')" class="px-2 py-0.5 rounded border ${sbMap[pa.sandbox_action_id] ? 'bg-emerald-500 text-slate-950 border-emerald-300 font-bold' : 'bg-slate-800 text-slate-200 border-slate-700 hover:border-slate-500'}">${sbMap[pa.sandbox_action_id] ? 'Signed ✓' : 'Test Sign'}</button>` : ""}
+                </div>
+              </div>
+            `).join("") : `<div class="text-xs text-slate-500 italic p-2">All 15 starting roles project above replacement threshold.</div>`}
+          </div>
+        </div>
+
+        <!-- Pillar 4: Pipeline Bottlenecks, Defensive Shifts & Call-Ups -->
+        <div class="vance-panel p-4 space-y-2.5 border-t-2 border-t-emerald-400">
+          <div class="flex items-center justify-between">
+            <h4 class="text-xs font-extrabold uppercase tracking-wider text-white"><i class="bi bi-arrows-move text-emerald-400 mr-1"></i> 4. Pipeline Promotions &amp; Position Shifts</h4>
+            <span class="text-[10px] font-mono text-slate-400">${(strategicMoves.pipeline_bottlenecks || []).length} Prospects</span>
+          </div>
+          <p class="text-[11px] text-slate-400">High-ceiling heirs, defensive spectrum shifts &amp; trade chips</p>
+          <div class="space-y-2">
+            ${(strategicMoves.pipeline_bottlenecks || []).length ? strategicMoves.pipeline_bottlenecks.map(pb => `
+              <div class="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 text-xs space-y-1">
+                <div class="flex items-center justify-between">
+                  <span onclick="openPlayerModal(${pb.player_id})" class="font-bold text-white hover:text-sky-300 cursor-pointer">${pb.pos} ${pb.name} <span class="text-[10px] font-mono text-emerald-400">(${pb.oa}/${pb.pot} POT)</span></span>
+                  ${riskBadgeHtml(pb.risk_tier)}
+                </div>
+                <div class="text-[10px] font-mono text-slate-300">Spectrum: <b class="text-white">${pb.def_spectrum_str}</b> · ETA ${pb.eta_year}</div>
+                <div class="text-[10px] text-sky-300">${pb.recommendation}</div>
+                <div class="flex items-center justify-between pt-1 border-t border-slate-800/80 font-mono text-[10px]">
+                  <span class="text-slate-400">${pb.blocking_status}</span>
+                  ${pb.sandbox_action_id ? `<button onclick="toggleRoadmapSandboxAction('${pb.sandbox_action_id}')" class="px-2 py-0.5 rounded border ${sbMap[pb.sandbox_action_id] ? 'bg-emerald-500 text-slate-950 border-emerald-300 font-bold' : 'bg-slate-800 text-slate-200 border-slate-700 hover:border-slate-500'}">${sbMap[pb.sandbox_action_id] ? 'Promoted ✓' : 'Test Call-Up'}</button>` : ""}
+                </div>
+              </div>
+            `).join("") : `<div class="text-xs text-slate-500 italic p-2">No blocked prospects or immediate promotions flagged.</div>`}
+          </div>
+        </div>
+      </div>
+
+      <!-- =========================================================================
+           LAYER 4B: YEAR-BY-YEAR POTENTIAL GAPS, UFA DEPARTURES & SUCCESSION LOG
+           ========================================================================= -->
+      <div class="vance-panel p-4 space-y-3.5">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-2.5">
+          <div>
+            <h3 class="font-extrabold text-xs uppercase tracking-wider text-white flex items-center gap-2">
+              <i class="bi bi-exclamation-octagon-fill text-rose-400"></i> Year-by-Year Roster Vulnerabilities, UFA Departures &amp; Arriving Pipeline Waves
+            </h3>
+            <p class="text-[11px] text-slate-400">Chronological breakdown of free-agent exits, prospect arrivals, and unresolved positional gaps</p>
+          </div>
+          <div class="flex flex-wrap gap-1">
+            <button onclick="selectRoadmapYear('ALL')" class="px-2.5 py-1 rounded text-[10px] font-mono font-bold border transition ${selYr === 'ALL' ? 'bg-white text-slate-950 border-white' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}">All 5 Years</button>
             ${yrs.map(y => `
-              <button onclick="selectRoadmapYear('${y}')" class="px-3 py-1 rounded-lg text-xs font-mono font-bold border transition ${String(selYr) === String(y) ? 'bg-sky-500 text-slate-950 border-sky-300' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}">${y}</button>
+              <button onclick="selectRoadmapYear('${y}')" class="px-2.5 py-1 rounded text-[10px] font-mono font-bold border transition ${String(selYr) === String(y) ? 'bg-white text-slate-950 border-white' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'}">${y}</button>
             `).join("")}
           </div>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        <div class="grid grid-cols-1 lg:grid-cols-5 gap-3">
           ${activeYearProjs.map(yp => `
-            <div class="bg-slate-900/85 border border-slate-800 rounded-2xl p-3.5 flex flex-col justify-between space-y-3 ${selYr !== 'ALL' ? 'lg:col-span-5' : ''}">
-              <div class="space-y-2.5">
-                <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+            <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex flex-col justify-between space-y-2.5 ${selYr !== 'ALL' ? 'lg:col-span-5' : ''}">
+              <div class="space-y-2">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
                   <div>
                     <span class="text-sm font-black font-mono text-white">${yp.year}</span>
                     <span class="text-[10px] font-mono text-slate-400 ml-1">${yp.year_label}</span>
                   </div>
-                  <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold ${(yp.high_severity_gaps_count || 0) > 0 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-amber-500/20 text-amber-300'}">
-                    ${(yp.gaps || []).length} Identified Gaps
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${(yp.high_severity_gaps_count || 0) > 0 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-slate-800 text-slate-300'}">
+                    ${(yp.gaps || []).length} Gaps
                   </span>
                 </div>
 
                 ${(yp.key_departures && yp.key_departures.length) ? `
-                  <div class="p-2 rounded-xl bg-rose-950/30 border border-rose-500/30 text-[11px]">
-                    <div class="font-extrabold text-rose-300 uppercase tracking-wider text-[10px] mb-1"><i class="bi bi-box-arrow-right mr-1"></i>Key UFA Departures</div>
+                  <div class="p-2 rounded-lg bg-rose-950/25 border border-rose-500/30 text-[11px]">
+                    <div class="font-extrabold text-rose-300 uppercase tracking-wider text-[9px] mb-1">UFA Exits Entering ${yp.year}</div>
                     <div class="flex flex-wrap gap-1">
                       ${yp.key_departures.map(d => `
-                        <span onclick="openPlayerModal(${d.player_id})" class="px-1.5 py-0.5 rounded bg-slate-900/90 text-slate-200 font-mono text-[10px] border border-rose-500/30 cursor-pointer hover:border-rose-400">${d.pos} ${d.name} (${d.war}W)</span>
+                        <span onclick="openPlayerModal(${d.player_id})" class="px-1.5 py-0.5 rounded bg-slate-900 text-slate-200 font-mono text-[10px] border border-rose-500/30 cursor-pointer hover:border-rose-400">${d.pos} ${d.name} (${d.war}W)</span>
                       `).join("")}
                     </div>
                   </div>
                 ` : ""}
 
                 ${(yp.arriving_prospects && yp.arriving_prospects.length) ? `
-                  <div class="p-2 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-[11px]">
-                    <div class="font-extrabold text-emerald-300 uppercase tracking-wider text-[10px] mb-1"><i class="bi bi-sprout mr-1"></i>Arriving Pipeline Wave (ETA ${yp.year})</div>
+                  <div class="p-2 rounded-lg bg-emerald-950/25 border border-emerald-500/30 text-[11px]">
+                    <div class="font-extrabold text-emerald-300 uppercase tracking-wider text-[9px] mb-1">Arriving Pipeline Wave (ETA ${yp.year})</div>
                     <div class="flex flex-wrap gap-1">
                       ${yp.arriving_prospects.map(ap => `
-                        <span onclick="openPlayerModal(${ap.player_id})" class="px-1.5 py-0.5 rounded bg-slate-900/90 text-emerald-200 font-mono text-[10px] border border-emerald-500/30 cursor-pointer hover:border-emerald-400">🌱 ${ap.pos} ${ap.name} (${ap.pot} POT)</span>
+                        <span onclick="openPlayerModal(${ap.player_id})" class="px-1.5 py-0.5 rounded bg-slate-900 text-emerald-200 font-mono text-[10px] border border-emerald-500/30 cursor-pointer hover:border-emerald-400">${ap.pos} ${ap.name} (${ap.pot} POT)</span>
                       `).join("")}
                     </div>
                   </div>
                 ` : ""}
 
-                <div class="space-y-2">
+                <div class="space-y-1.5">
                   ${(yp.gaps && yp.gaps.length) ? yp.gaps.map(g => `
-                    <div class="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/90 text-xs space-y-1">
+                    <div onclick="selectRoadmapRole('${g.pos}', '${yp.year}')" class="p-2 rounded-lg bg-slate-950/90 hover:bg-slate-900 border border-slate-800/90 cursor-pointer transition text-xs space-y-1">
                       <div class="flex items-center justify-between gap-1">
                         <span class="font-mono font-extrabold text-white">${g.pos} <span class="text-slate-400 font-normal">(${g.role_label})</span></span>
-                        <span class="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border ${gapBadgeStyle(g.severity)}">${g.severity.toUpperCase()} • ${g.gap_type}</span>
+                        <span class="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold border ${gapBadgeStyle(g.severity)}">${g.severity.toUpperCase()}</span>
                       </div>
                       <div class="text-[11px] text-slate-300">${g.note}</div>
-                      <div class="text-[10px] font-mono text-slate-400">Proj Fill: <b class="text-slate-200">${g.projected_fill}</b></div>
-                      <div class="text-[10px] font-mono text-emerald-300">Pipeline: ${g.pipeline_candidate}</div>
-                      <div class="text-[10px] font-semibold text-sky-300 pt-1 border-t border-slate-800/80"><i class="bi bi-Compass mr-1"></i>GM Action: ${g.gm_action}</div>
+                      <div class="text-[10px] font-mono text-sky-300 pt-1 border-t border-slate-800/80">Action: ${g.gm_action}</div>
                     </div>
                   `).join("") : `
-                    <div class="p-3 rounded-xl bg-emerald-950/20 border border-emerald-500/30 text-xs text-emerald-300 font-mono">
-                      ✓ All 15 core starting roles projected at above-average levels under team control.
+                    <div class="p-2.5 rounded-lg bg-emerald-950/20 border border-emerald-500/30 text-[11px] text-emerald-300 font-mono">
+                      ✓ All 15 starting roles projected above threshold.
                     </div>
                   `}
                 </div>
@@ -1536,22 +2108,21 @@ function renderTeamHubSubView(container) {
         </div>
       </div>
 
-      <!-- 4. Ultrawide Side-by-Side: Multi-Year Roster Control Matrix + Prospect Pipeline -->
-      <div class="grid grid-cols-1 uw:grid-cols-12 gap-5 items-start">
-        <div class="glass-card overflow-hidden uw:col-span-7">
-          <div class="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex flex-wrap justify-between items-center gap-2">
+      <!-- =========================================================================
+           LAYER 4C & 4D: F-PATTERN MULTI-YEAR CONTRACT/SURPLUS LEDGER + SABERMETRIC PIPELINE
+           ========================================================================= -->
+      <div class="grid grid-cols-1 uw:grid-cols-12 gap-4 items-start">
+        <!-- 4C. Multi-Year Contract, Process KPI & Surplus Value Matrix (7 Cols) -->
+        <div class="vance-panel overflow-hidden uw:col-span-7">
+          <div class="px-4 py-3 bg-slate-950/90 border-b border-slate-800 flex flex-wrap justify-between items-center gap-2">
             <div>
-              <h3 class="font-extrabold text-sm uppercase tracking-wider text-white"><i class="bi bi-kanban-fill text-sky-400 mr-1.5"></i> Multi-Year Roster Control, Contract &amp; Age-Curve Matrix (${(roadmap.player_matrix || []).length} Core Players)</h3>
-              <p class="text-xs text-slate-400">Color-coded by contract status (Guaranteed vs. Arb/Pre-Arb vs. Option vs. Free Agency) and player aging curve</p>
-            </div>
-            <div class="flex flex-wrap items-center gap-2 text-[10px] font-mono">
-              <span class="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/40">Guaranteed $</span>
-              <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">Team Control / Arb</span>
-              <span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">Option Year</span>
-              <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">Free Agent (UFA)</span>
+              <h3 class="font-extrabold text-xs uppercase tracking-wider text-white">
+                <i class="bi bi-kanban-fill text-slate-300 mr-1.5"></i> Multi-Year Roster Control, Process KPI &amp; Surplus Ledger (${(roadmap.player_matrix || []).length} Core Players)
+              </h3>
+              <p class="text-[11px] text-slate-400">F-Pattern tabular audit: Leading process metrics (Stuff+ / xwOBA), stabilization gates, surplus value, and 5-year control</p>
             </div>
           </div>
-          <div class="overflow-x-auto">
+          <div class="overflow-x-auto max-h-[620px]">
             <table class="saber-table">
               <thead>
                 <tr>
@@ -1559,76 +2130,127 @@ function renderTeamHubSubView(container) {
                   <th>Pos</th>
                   <th>Age</th>
                   <th>OVR/POT</th>
-                  <th class="text-right">${baseYearLabel} WAR</th>
-                  ${yrs.map(y => `<th class="text-center">${y} Status</th>`).join("")}
+                  <th class="text-left">Leading Process KPI</th>
+                  <th class="text-center">Sample Gate</th>
+                  <th class="text-right">${baseYearLabel} Surplus</th>
+                  ${yrs.map(y => `<th class="text-center">${y} Control &amp; Surplus</th>`).join("")}
                 </tr>
               </thead>
               <tbody>
-                ${(roadmap.player_matrix || []).map(p => `
-                  <tr onclick="openPlayerModal(${p.player_id})" class="cursor-pointer">
-                    <td class="font-bold text-white hover:text-sky-400">${p.name}</td>
-                    <td class="text-center font-mono text-xs text-sky-300">${p.pos}</td>
-                    <td class="text-center font-mono">${p.age}</td>
-                    <td class="text-center">${rtgBadge(p.oa, p.pot)}</td>
-                    <td class="text-right font-mono font-extrabold text-sky-400">${Number(p.war || 0).toFixed(1)}</td>
-                    ${(p.years || []).map(cell => {
-                      let cls = "bg-slate-900/60 text-slate-500 border-slate-800";
-                      if (cell.status === "Guaranteed" || cell.status === "Signed") cls = "bg-sky-500/15 text-sky-200 border-sky-500/40";
-                      else if (cell.status === "Team Control" || cell.status === "Pre-Arb" || cell.status === "Arb") cls = "bg-emerald-500/15 text-emerald-300 border-emerald-500/40";
-                      else if (cell.status === "Option") cls = "bg-amber-500/15 text-amber-300 border-amber-500/40";
-                      const tierNorm = String(cell.age_tier || "").toLowerCase();
-                      const tierDot = tierNorm === "prime" ? "🟢" : (tierNorm === "ascent" ? "🔵" : (tierNorm === "veteran" || tierNorm === "vet" ? "🟡" : "🔴"));
-                      return `
-                        <td class="text-center p-1.5">
-                          <div class="px-2 py-1 rounded-lg border text-xs font-mono ${cls}">
-                            <div class="font-bold">${cell.label}</div>
-                            <div class="text-[9px] opacity-80">${tierDot} Age ${cell.age} (${cell.age_tier})</div>
-                          </div>
-                        </td>
-                      `;
-                    }).join("")}
-                  </tr>
-                `).join("")}
+                ${(roadmap.player_matrix || []).map(p => {
+                  const s0 = Number(p.yr0_surplus_millions || 0);
+                  return `
+                    <tr onclick="openPlayerModal(${p.player_id})" class="cursor-pointer">
+                      <td class="font-bold text-white hover:text-sky-400">
+                        ${p.name}
+                        ${p.no_trade ? `<span class="ml-1 px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[9px] font-mono" title="No-Trade Clause">NTC</span>` : ""}
+                      </td>
+                      <td class="text-center font-mono text-xs text-slate-300">${p.pos}</td>
+                      <td class="text-center font-mono">${p.age}</td>
+                      <td class="text-center">${rtgBadge(p.oa, p.pot)}</td>
+                      <td class="font-mono text-xs">
+                        <div class="flex items-center gap-1.5">
+                          ${vancePctBadge(p.process_pct || 50, `${p.process_pct || 50}p`)}
+                          <span class="font-bold text-slate-200">${p.process_headline || p.metric_str || ''}</span>
+                        </div>
+                      </td>
+                      <td class="text-center font-mono text-[10px]">
+                        <span class="px-1.5 py-0.5 rounded ${p.sample_confident ? 'bg-slate-800 text-slate-300' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'}">${p.sample_badge || p.sample_volume || '-'}</span>
+                      </td>
+                      <td class="text-right font-mono font-extrabold ${s0 >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${s0 >= 0 ? '+' : '-'}$${Math.abs(s0).toFixed(1)}M</td>
+                      ${(p.years || []).map(cell => {
+                        let bdrCls = "bg-slate-900/50 text-slate-500 border-slate-800/80";
+                        if (cell.status === "Guaranteed" || cell.status === "Signed") bdrCls = "bg-slate-900 text-slate-200 border-slate-700";
+                        else if (cell.status === "Team Control" || cell.status === "Pre-Arb" || cell.status === "Arb") bdrCls = "bg-sky-950/35 text-sky-200 border-sky-500/35";
+                        else if (cell.status === "Option") bdrCls = "bg-amber-950/35 text-amber-200 border-amber-500/40";
+                        return `
+                          <td class="text-center p-1">
+                            <div class="px-2 py-1 rounded border text-[11px] font-mono ${bdrCls}">
+                              <div class="font-bold">${cell.label}</div>
+                              <div class="text-[9px] flex items-center justify-between gap-1 mt-0.5 opacity-85">
+                                <span>Age ${cell.age} (${cell.age_tier})</span>
+                                ${cell.under_control ? `<span class="${(cell.surplus_millions || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'} font-bold">${cell.surplus_label || ''}</span>` : ""}
+                              </div>
+                            </div>
+                          </td>
+                        `;
+                      }).join("")}
+                    </tr>
+                  `;
+                }).join("")}
               </tbody>
             </table>
           </div>
         </div>
 
-        <div class="glass-card overflow-hidden uw:col-span-5">
-          <div class="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex justify-between items-center">
-            <h3 class="font-extrabold text-sm uppercase tracking-wider text-white"><i class="bi bi-stars text-amber-400 mr-1.5"></i> Organizational Prospect &amp; Succession Pipeline (Age &le; 26)</h3>
-            <span class="text-xs text-slate-400">Sorted by Potential Ceiling</span>
+        <!-- 4D. Sabermetric Prospect & Defensive Spectrum Pipeline (5 Cols) -->
+        <div class="vance-panel overflow-hidden uw:col-span-5">
+          <div class="px-4 py-3 bg-slate-950/90 border-b border-slate-800 space-y-2">
+            <div class="flex flex-wrap justify-between items-center gap-2">
+              <div>
+                <h3 class="font-extrabold text-xs uppercase tracking-wider text-white">
+                  <i class="bi bi-stars text-emerald-400 mr-1.5"></i> Sabermetric Prospect &amp; Succession Pipeline (Age &le; 26)
+                </h3>
+                <p class="text-[11px] text-slate-400">Projected process metrics, defensive spectrum viability, variance risk &amp; blocking status</p>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-1 pt-1">
+              ${[
+                ["ALL", `All (${allProspects.length})`],
+                ["Ready", "MLB Ready"],
+                ["HighNeed", "Fills Weak Unit"],
+                ["Blocked", "Blocked / Shift"],
+                ["LowRisk", "Low Variance"],
+              ].map(([fKey, fLbl]) => `
+                <button onclick="setRoadmapPipelineFilter('${fKey}')" class="px-2 py-0.5 rounded text-[10px] font-mono font-bold border transition ${pipeFilter === fKey ? 'bg-white text-slate-950 border-white' : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-600'}">${fLbl}</button>
+              `).join("")}
+            </div>
           </div>
-          <div class="overflow-x-auto">
+          <div class="overflow-x-auto max-h-[620px]">
             <table class="saber-table">
               <thead>
                 <tr>
                   <th class="text-left">Prospect</th>
                   <th>Pos</th>
                   <th>Age</th>
-                  <th class="text-center">OVR / POT</th>
-                  <th class="text-left">Ceiling &amp; Growth</th>
-                  <th class="text-center">Projected ETA</th>
-                  <th class="text-left">Key Scouting Tools (20-80)</th>
-                  <th class="text-left">Succession / Need</th>
+                  <th class="text-center">OVR/POT</th>
+                  <th class="text-left">Proj Process &amp; Tools</th>
+                  <th class="text-left">Def Spectrum Fit</th>
+                  <th class="text-center">ETA &amp; Risk</th>
+                  <th class="text-left">Succession Path</th>
                 </tr>
               </thead>
               <tbody>
-                ${(roadmap.prospect_pipeline || []).map(pr => `
+                ${filteredProspects.map(pr => `
                   <tr onclick="openPlayerModal(${pr.player_id})" class="cursor-pointer">
-                    <td class="font-bold text-white hover:text-sky-400">${pr.name}</td>
-                    <td class="text-center font-mono text-xs text-sky-300">${pr.pos}</td>
-                    <td class="text-center font-mono">${pr.age}</td>
-                    <td class="text-center">${rtgBadge(pr.oa, pr.pot)}</td>
-                    <td class="font-mono text-xs">
-                      <span class="font-bold text-emerald-400">+${pr.growth_delta !== undefined ? pr.growth_delta : Math.max(0, (pr.pot || 0) - (pr.oa || 0))}</span>
-                      <span class="text-[10px] text-slate-300 block">${pr.upside || ''}</span>
+                    <td class="font-bold text-white hover:text-sky-400">
+                      ${pr.name}
+                      <span class="block text-[10px] font-mono text-slate-400 font-normal">${pr.upside || ''}</span>
                     </td>
-                    <td class="text-center"><span class="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 font-mono text-xs font-bold">${pr.eta}</span></td>
-                    <td class="font-mono text-xs text-slate-300">${pr.key_tools}</td>
-                    <td>
-                      <span class="px-2 py-0.5 rounded text-[10px] font-bold ${pr.addresses_need === 'High Need' || pr.addresses_need === true ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-slate-800 text-slate-300'}">${pr.addresses_need === true ? 'High Need' : (pr.addresses_need || 'Depth / Core')}</span>
-                      ${pr.projected_role ? `<div class="text-[10px] font-mono text-slate-400 mt-0.5">${pr.projected_role}</div>` : ""}
+                    <td class="text-center font-mono text-xs text-sky-300 font-bold">${pr.pos}</td>
+                    <td class="text-center font-mono">${pr.age}</td>
+                    <td class="text-center">
+                      ${rtgBadge(pr.oa, pr.pot)}
+                      <div class="text-[9px] font-mono text-emerald-400 mt-0.5">+${pr.growth_delta || Math.max(0, (pr.pot || 0) - (pr.oa || 0))} Δ</div>
+                    </td>
+                    <td class="font-mono text-xs">
+                      <div class="flex items-center gap-1.5">
+                        ${vancePctBadge(pr.proj_process_pct || 60, `${pr.proj_process_pct || 60}p`)}
+                        <span class="font-bold text-white">${pr.proj_process_label || ''}</span>
+                      </div>
+                      <div class="text-[10px] text-slate-400 mt-0.5">${pr.key_tools}</div>
+                    </td>
+                    <td class="font-mono text-[11px] text-slate-300">
+                      <div class="font-semibold text-slate-200">${pr.def_spectrum_str || pr.pos}</div>
+                      ${pr.shift_target_pos ? `<span class="text-[9px] text-amber-300">Shift → ${pr.shift_target_pos}</span>` : ""}
+                    </td>
+                    <td class="text-center font-mono">
+                      <span class="px-1.5 py-0.5 rounded bg-slate-800 text-white text-[10px] font-bold border border-slate-700">${pr.eta}</span>
+                      <div class="mt-1">${riskBadgeHtml(pr.risk_tier || 'Medium')}</div>
+                    </td>
+                    <td class="font-mono text-[10px]">
+                      <span class="px-1.5 py-0.5 rounded font-bold ${pr.is_blocked ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : (pr.fills_need ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-slate-800 text-slate-300')}">${pr.blocking_status || pr.addresses_need}</span>
+                      <div class="text-slate-400 mt-0.5">Inc: ${pr.incumbent_name} (${pr.incumbent_oa} OVR)</div>
                     </td>
                   </tr>
                 `).join("")}
@@ -1875,17 +2497,12 @@ function renderTeamHubSubView(container) {
             </div>
           </div>
 
-          <!-- Executive KPI Grid -->
+          <!-- Executive KPI Grid (Process-First Sabermetric Hierarchy) -->
           <div class="grid grid-cols-3 sm:grid-cols-6 gap-2.5 uw:gap-3 text-center shrink-0">
-            <div class="bg-slate-950/75 px-4 py-3 rounded-2xl border border-white/15 shadow-lg">
-              <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Record</div>
-              <div class="text-xl uw:text-2xl font-black text-white font-mono mt-0.5">${team.record_str || `${team.w}-${team.l}`}</div>
-              <div class="text-[11px] text-sky-400 font-mono font-bold">${fmtAvg(team.pct)}</div>
-            </div>
             <div class="bg-slate-950/75 px-4 py-3 rounded-2xl border border-white/15 shadow-lg">
               <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Pythagorean</div>
               <div class="text-xl uw:text-2xl font-black text-emerald-400 font-mono mt-0.5">${team.pyth_w}-${team.pyth_l}</div>
-              <div class="text-[11px] text-slate-300 font-mono">Diff: ${team.run_diff > 0 ? '+' : ''}${team.run_diff}</div>
+              <div class="text-[11px] text-slate-300 font-mono">Act: ${team.record_str || `${team.w}-${team.l}`} (${team.run_diff > 0 ? '+' : ''}${team.run_diff}R)</div>
             </div>
             <div class="bg-slate-950/75 px-4 py-3 rounded-2xl border border-white/15 shadow-lg">
               <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Offense wRC+</div>
@@ -1893,9 +2510,9 @@ function renderTeamHubSubView(container) {
               <div class="text-[11px] text-slate-300 font-mono">wOBA ${fmtAvg(team.woba)}</div>
             </div>
             <div class="bg-slate-950/75 px-4 py-3 rounded-2xl border border-white/15 shadow-lg">
-              <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Team ERA / FIP</div>
-              <div class="text-xl uw:text-2xl font-black text-amber-300 font-mono mt-0.5">${team.era.toFixed(2)}</div>
-              <div class="text-[11px] text-slate-300 font-mono">FIP ${team.fip.toFixed(2)}</div>
+              <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Staff FIP / ERA+</div>
+              <div class="text-xl uw:text-2xl font-black text-amber-300 font-mono mt-0.5">${team.fip.toFixed(2)}</div>
+              <div class="text-[11px] text-slate-300 font-mono">ERA+ ${team.era_plus || 100} (ERA ${team.era.toFixed(2)})</div>
             </div>
             <div class="bg-slate-950/75 px-4 py-3 rounded-2xl border border-white/15 shadow-lg">
               <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Defense ZR</div>
@@ -1906,6 +2523,11 @@ function renderTeamHubSubView(container) {
               <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total WAR</div>
               <div class="text-xl uw:text-2xl font-black text-sky-400 font-mono mt-0.5">${team.total_war.toFixed(1)}</div>
               <div class="text-[11px] text-slate-300 font-mono">PO Odds ${team.playoff_prob.toFixed(0)}%</div>
+            </div>
+            <div class="bg-slate-950/75 px-4 py-3 rounded-2xl border border-white/15 shadow-lg">
+              <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Window &amp; Age</div>
+              <div class="text-xl uw:text-2xl font-black text-white font-mono mt-0.5">${roadmap.avg_core_age || '27.0'}y</div>
+              <div class="text-[11px] text-emerald-400 font-mono truncate">${(roadmap.window_label || 'Contender').split(' ')[0]}</div>
             </div>
           </div>
         </div>
@@ -1940,6 +2562,9 @@ function renderTeamHubSubView(container) {
   if (subTab === "strengths" || subTab === "command") {
     renderPositionalStrengthsChart("team-pos-strengths-canvas", strengths.units || []);
     renderTeamRadarChart("team-radar-canvas", team, teams);
+  }
+  if (subTab === "roadmap" || subTab === "command") {
+    renderRoadmapHorizonChart("roadmap-horizon-canvas", activeSandboxHorizon, activeSandboxYearlyProjs, roadmap.budget);
   }
 }
 
@@ -7010,19 +7635,24 @@ function renderRecordsSubView(container) {
           <table class="saber-table">
             <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Pos</th><th>Streak Category</th><th>Length</th><th>Started</th><th>Ended</th><th>Status</th></tr></thead>
             <tbody>
-              ${streaks.map((st, idx) => `
+              ${streaks.map((st, idx) => {
+                const sName = (st.streak_name && typeof st.streak_name === "object") ? (st.streak_name.name || "Streak") : (st.streak_name || "Streak");
+                const sUnit = st.streak_unit || (st.streak_name && typeof st.streak_name === "object" && st.streak_name.unit) || "G";
+                const pName = st.name || st.player_name || `Player #${st.player_id}`;
+                return `
                 <tr onclick="openPlayerModal(${st.player_id})" class="cursor-pointer">
                   <td class="font-mono text-slate-400">${idx + 1}</td>
-                  <td class="font-bold text-white">${st.name}</td>
+                  <td class="font-bold text-white">${pName}</td>
                   <td><div class="flex items-center gap-1.5"><img src="${teamLogoUrl(st.team?.logo)}" class="w-4 h-4 object-contain"><span>${st.team?.abbr || ''}</span></div></td>
-                  <td>${st.position}</td>
-                  <td class="font-bold text-sky-300">${st.streak_name}</td>
-                  <td class="font-mono font-black text-lg text-amber-300">${st.value}</td>
+                  <td>${st.position || ''}</td>
+                  <td class="font-bold text-sky-300">${sName}</td>
+                  <td class="font-mono font-black text-lg text-amber-300">${st.value} <span class="text-xs font-normal text-slate-400">${sUnit}</span></td>
                   <td class="font-mono text-xs text-slate-300">${st.started || '—'}</td>
                   <td class="font-mono text-xs text-slate-300">${st.is_active ? 'Ongoing' : (st.ended || '—')}</td>
                   <td>${st.is_active ? `<span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-[10px] font-black">ACTIVE</span>` : `<span class="text-xs text-slate-500">Completed</span>`}</td>
                 </tr>
-              `).join("")}
+              `;
+              }).join("")}
             </tbody>
           </table>
         </div>
@@ -8475,20 +9105,25 @@ async function renderFrontPageTab(container) {
                       <i class="bi bi-lightning-charge-fill mr-1"></i> Active Player Streaks
                     </div>
                     <div class="space-y-1.5">
-                      ${activeStreaks.slice(0, 5).map(st => `
+                      ${activeStreaks.slice(0, 5).map(st => {
+                        const sName = (st.streak_name && typeof st.streak_name === "object") ? (st.streak_name.name || "Streak") : (st.streak_name || "Streak");
+                        const sUnit = st.streak_unit || (st.streak_name && typeof st.streak_name === "object" && st.streak_name.unit) || "G";
+                        const pName = st.player_name || st.name || `Player #${st.player_id}`;
+                        return `
                         <div onclick="openPlayerModal(${st.player_id})" class="flex items-center justify-between text-xs py-1 px-1.5 rounded hover:bg-slate-800/60 cursor-pointer transition">
                           <div class="flex items-center gap-2 min-w-0">
                             <img src="${playerPicUrl(st.player_id)}" class="w-6 h-7 object-cover rounded border border-slate-700" alt="">
                             <div class="truncate">
-                              <div class="font-bold text-white np-ink truncate">${st.player_name} <span class="text-[10px] font-mono text-slate-400">(${st.team_abbr})</span></div>
-                              <div class="text-[10px] text-slate-400 np-muted">${st.streak_name}</div>
+                              <div class="font-bold text-white np-ink truncate">${pName} <span class="text-[10px] font-mono text-slate-400">(${st.team_abbr || 'TM'})</span></div>
+                              <div class="text-[10px] text-slate-400 np-muted">${sName}</div>
                             </div>
                           </div>
                           <span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-400/40 font-mono font-black text-xs shrink-0">
-                            ${st.value} G
+                            ${st.value} ${sUnit}
                           </span>
                         </div>
-                      `).join("")}
+                      `;
+                      }).join("")}
                     </div>
                   </div>
                 ` : ""}

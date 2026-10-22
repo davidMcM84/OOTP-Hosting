@@ -523,4 +523,102 @@ select option {
   box-shadow: 0 16px 38px -8px rgba(245, 158, 11, 0.25);
 }
 
+/* ============================================================================
+   3. ALEX VANCE — SABERMETRIC INTERFACE ARCHITECTURE (5-YEAR ROADMAP & HUB)
+   Grayscale-First Foundation + Pre-Attentive Diverging Percentile Color Scale
+   ============================================================================ */
+:root {
+  --vance-surface-0: #0a0a0c;
+  --vance-surface-1: #121316;
+  --vance-surface-2: #191b1f;
+  --vance-surface-3: #23262d;
+  --vance-border-muted: rgba(148, 163, 184, 0.16);
+  --vance-border-active: rgba(219, 219, 219, 0.45);
+  --savant-cold-95: #002244;
+  --savant-cold-75: #1d4ed8;
+  --savant-cold-60: #38bdf8;
+  --savant-neutral: #64748b;
+  --savant-warm-65: #f97316;
+  --savant-hot-85: #D32F2F;
+  --savant-hot-95: #ef4444;
+}
+
+.vance-panel {
+  background: var(--vance-surface-1);
+  border: 1px solid var(--vance-border-muted);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.82);
+}
+
+.vance-trust-strip {
+  background: linear-gradient(90deg, #0d0e11 0%, #15171c 50%, #0d0e11 100%);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-left: 3px solid #dbdbdb;
+  border-radius: 10px;
+}
+
+.vance-horizon-card {
+  background: #121316;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 10px;
+  transition: border-color 0.15s ease, transform 0.15s ease, background-color 0.15s ease;
+}
+
+.vance-horizon-card:hover {
+  border-color: rgba(219, 219, 219, 0.42);
+  background: #16181d;
+}
+
+.vance-horizon-card.is-selected {
+  border-color: #dbdbdb;
+  background: #191b22;
+  box-shadow: 0 0 0 1px rgba(219, 219, 219, 0.35), 0 10px 24px -8px rgba(0, 0, 0, 0.85);
+}
+
+/* 15-Role x 5-Year Matrix Cell — High Data-Ink Ratio, 3px Left Semantic Indicator */
+.vance-matrix-cell {
+  position: relative;
+  background: #121316;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-left-width: 3px;
+  border-radius: 8px;
+  padding: 7px 9px;
+  transition: border-color 0.14s ease, background-color 0.14s ease, transform 0.12s ease;
+}
+
+.vance-matrix-cell:hover {
+  background: #191c22;
+  border-color: rgba(219, 219, 219, 0.42);
+}
+
+.vance-matrix-cell.cell-selected {
+  background: #1e222b;
+  border-color: #dbdbdb;
+  box-shadow: 0 0 0 1px rgba(219, 219, 219, 0.3);
+}
+
+.vance-matrix-cell.edge-signed { border-left-color: #94a3b8; }
+.vance-matrix-cell.edge-control { border-left-color: #38bdf8; }
+.vance-matrix-cell.edge-pipeline { border-left-color: #10b981; }
+.vance-matrix-cell.edge-option { border-left-color: #f59e0b; }
+.vance-matrix-cell.edge-gap-high { border-left-color: #D32F2F; background: rgba(211, 47, 47, 0.08); }
+.vance-matrix-cell.edge-gap-med { border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.06); }
+.vance-matrix-cell.edge-sandbox { border-left-color: #22c55e; background: rgba(34, 197, 94, 0.10); }
+
+/* Pre-Attentive (<200ms) Percentile & Surplus Badge */
+.vance-pct-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.68rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+
+
 

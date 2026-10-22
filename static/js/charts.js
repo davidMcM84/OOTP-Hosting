@@ -1621,4 +1621,169 @@ function renderWorldEcosystemChart(canvasId, leaguesEcosystem, histTrends) {
   });
 }
 
+/**
+ * Alex Vance Sabermetric Pre-Attentive Diverging Color Mapping (<200ms Recognition)
+ * Maps 1-99 percentile from Deep Cold Blue (#002244 / #1d4ed8) -> Neutral Slate (#475569) -> Elite Crimson Red (#D32F2F)
+ */
+function vanceDivergingStyle(pct) {
+  const p = Math.max(1, Math.min(99, Number(pct) || 50));
+  if (p >= 85) return { bg: "rgba(211, 47, 47, 0.26)", border: "rgba(239, 68, 68, 0.65)", text: "#fca5a5", solid: "#D32F2F" };
+  if (p >= 68) return { bg: "rgba(234, 88, 12, 0.22)", border: "rgba(249, 115, 22, 0.55)", text: "#fdba74", solid: "#ea580c" };
+  if (p >= 38) return { bg: "rgba(71, 85, 105, 0.26)", border: "rgba(148, 163, 184, 0.35)", text: "#e2e8f0", solid: "#64748b" };
+  if (p >= 20) return { bg: "rgba(29, 78, 216, 0.24)", border: "rgba(59, 130, 246, 0.55)", text: "#93c5fd", solid: "#1d4ed8" };
+  return { bg: "rgba(0, 34, 68, 0.65)", border: "rgba(56, 189, 248, 0.45)", text: "#7dd3fc", solid: "#002244" };
+}
+
+function vancePctBadge(pct, customLabel) {
+  const p = Math.max(1, Math.min(99, Math.round(Number(pct) || 50)));
+  const st = vanceDivergingStyle(p);
+  const lbl = customLabel !== undefined ? customLabel : `${p}p`;
+  return `<span class="vance-pct-pill" style="background:${st.bg};color:${st.text};border:1px solid ${st.border}" title="${p}th Percentile (Pre-Attentive Scale)">${lbl}</span>`;
+}
+
+/**
+ * Renders the 5-Year Franchise Capital Allocation & Contention Window Trajectory Chart
+ * Stacked Bars: Guaranteed Payroll, Option Decisions, Arb/Pre-Arb Projections vs. Budget Ceiling
+ * Dual-Axis Line: Projected Team WAR vs. 42.0 WAR (~90-Win Contender Benchmark)
+ */
+function renderRoadmapHorizonChart(canvasId, payrollHorizon, yearlyProjs, budget) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId);
+  if (!ctx || !payrollHorizon || !payrollHorizon.length) return;
+
+  const labels = payrollHorizon.map((ph, i) => i === 0 ? `${ph.year} (Now)` : `${ph.year} (+${i}Y)`);
+  const guarM = payrollHorizon.map(ph => Number(((ph.guaranteed_salary || ph.committed_salary || 0) / 1e6).toFixed(1)));
+  const optM = payrollHorizon.map(ph => Number(((ph.option_salary || 0) / 1e6).toFixed(1)));
+  const arbM = payrollHorizon.map(ph => Number(((ph.arb_salary || ph.arb_estimate || 0) / 1e6).toFixed(1)));
+  const sandboxM = payrollHorizon.map(ph => Number((Math.max(0, ph.sandbox_salary_delta || 0) / 1e6).toFixed(1)));
+  const budgetM = payrollHorizon.map(() => Number(((budget || 150000000) / 1e6).toFixed(1)));
+  const projWar = (yearlyProjs || []).map(yp => Number((yp.projected_team_war || 0).toFixed(1)));
+  const contenderWar = payrollHorizon.map(() => 42.0);
+
+  window._chartInstances[canvasId] = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        {
+          type: "line",
+          label: "Projected Team WAR",
+          data: projWar,
+          borderColor: "#ef4444",
+          backgroundColor: "#D32F2F",
+          borderWidth: 2.8,
+          pointRadius: 4.5,
+          pointHoverRadius: 6,
+          tension: 0.25,
+          yAxisID: "yWar",
+          order: 0,
+        },
+        {
+          type: "line",
+          label: "90W Contender Target (42 WAR)",
+          data: contenderWar,
+          borderColor: "rgba(219, 219, 219, 0.45)",
+          borderDash: [5, 4],
+          borderWidth: 1.5,
+          pointRadius: 0,
+          fill: false,
+          yAxisID: "yWar",
+          order: 1,
+        },
+        {
+          type: "line",
+          label: "Franchise Budget Ceiling",
+          data: budgetM,
+          borderColor: "rgba(56, 189, 248, 0.55)",
+          borderDash: [3, 3],
+          borderWidth: 1.5,
+          pointRadius: 0,
+          fill: false,
+          yAxisID: "yPay",
+          order: 2,
+        },
+        {
+          type: "bar",
+          label: "Guaranteed $",
+          data: guarM,
+          backgroundColor: "rgba(100, 116, 139, 0.72)",
+          borderColor: "rgba(148, 163, 184, 0.85)",
+          borderWidth: 1,
+          stack: "payroll",
+          yAxisID: "yPay",
+          order: 3,
+        },
+        {
+          type: "bar",
+          label: "Option Years $",
+          data: optM,
+          backgroundColor: "rgba(245, 158, 11, 0.68)",
+          borderColor: "rgba(251, 191, 36, 0.85)",
+          borderWidth: 1,
+          stack: "payroll",
+          yAxisID: "yPay",
+          order: 4,
+        },
+        {
+          type: "bar",
+          label: "Arb / Pre-Arb Est $",
+          data: arbM,
+          backgroundColor: "rgba(29, 78, 216, 0.62)",
+          borderColor: "rgba(56, 189, 248, 0.75)",
+          borderWidth: 1,
+          stack: "payroll",
+          yAxisID: "yPay",
+          order: 5,
+        },
+        ...(sandboxM.some(v => v > 0) ? [{
+          type: "bar",
+          label: "Sandbox Moves $",
+          data: sandboxM,
+          backgroundColor: "rgba(16, 185, 129, 0.75)",
+          borderColor: "#34d399",
+          borderWidth: 1,
+          stack: "payroll",
+          yAxisID: "yPay",
+          order: 6,
+        }] : []),
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          position: "top",
+          labels: { color: "#cbd5e1", boxWidth: 10, padding: 10, font: { size: 10, family: "monospace", weight: "700" } },
+        },
+      },
+      scales: {
+        x: {
+          stacked: true,
+          grid: { color: "rgba(148, 163, 184, 0.1)" },
+          ticks: { color: "#e2e8f0", font: { size: 10, family: "monospace", weight: "700" } },
+        },
+        yPay: {
+          stacked: true,
+          position: "left",
+          beginAtZero: true,
+          title: { display: true, text: "Payroll Allocation ($M)", color: "#94a3b8", font: { size: 10, family: "monospace" } },
+          grid: { color: "rgba(148, 163, 184, 0.12)" },
+          ticks: { color: "#94a3b8", font: { size: 10, family: "monospace" }, callback: v => `$${v}M` },
+        },
+        yWar: {
+          position: "right",
+          suggestedMin: 20,
+          suggestedMax: 58,
+          title: { display: true, text: "Projected WAR", color: "#fca5a5", font: { size: 10, family: "monospace" } },
+          grid: { drawOnChartArea: false },
+          ticks: { color: "#fca5a5", font: { size: 10, family: "monospace" }, callback: v => `${v}W` },
+        },
+      },
+    },
+  });
+}
+
+
 
