@@ -68,6 +68,7 @@ const AppState = {
   statsplus: null,
   bnnCatalog: null,
   leadersData: null,
+  leadersViewMode: "portal", // portal | savant | broadsheet | workbench
   leadersCategoryTab: "batting", // batting | pitching | fielding | statcast | table
   leadersQualMode: "qualified", // qualified | half | all
   leadersSubLeague: "ALL",
@@ -75,6 +76,28 @@ const AppState = {
   leadersPos: "",
   leadersPitcherRole: "ALL", // ALL | SP | RP
   leadersTableDomain: "batting", // batting | pitching | fielding
+  leadersGroupFilter: "ALL",
+  leadersWatchlistTab: "mvp", // mvp | cy | reliever | rookie | platinum
+  leadersVisualMode: "offense", // offense | pitching | war_stack
+  leadersOffenseAxes: "xwoba_iso", // xwoba_iso | wrc_barrel
+  leadersPitchAxes: "kbb_fip", // kbb_fip | kbb_siera
+  leadersHardwareTab: "major", // major | gg | ss
+  leadersTcHeroMode: "batting", // batting | pitching
+  leadersUnicornMode: "statcast", // statcast | defense
+  leadersComparePool: "batters", // batters | pitchers
+  leadersScoutA: 0,
+  leadersScoutB: 0,
+  leadersSavantPool: "batters",
+  leadersSavantSort: "xwoba",
+  leadersBroadsheetDom: "batting",
+  leadersBroadsheetPace: false,
+  leadersWbPool: "batters",
+  leadersWbPreset: "saber",
+  leadersWbMinVal: -1,
+  leadersWbAge: "ALL",
+  leadersWbHand: "ALL",
+  leadersWbSortKey: "war",
+  leadersWbSortAsc: false,
   recordsData: null,
   recordsSubTab: "side_by_side", // side_by_side | season_records | career_records | single_game | streaks | teams
   recordsDomain: "batting", // batting | pitching | fielding
@@ -6713,10 +6736,20 @@ window.uploadOnlineArchive = async function() {
 
 
 // ============================================================================
-// MODULE 9: LEAGUE LEADERS HUB (QUALIFIED LEADERS IN ALL STATISTICAL CATEGORIES)
+// MODULE 9: LEAGUE LEADERS HUB — BNN.COM AWARD RACE & 4-ARCHETYPE PORTAL
 // ============================================================================
 
 const BATTING_LEADER_CATEGORIES = [
+  // Sabermetric & Value Stats
+  { key: "war", code: "WAR", label: "Wins Above Replacement", group: "Sabermetric", isRate: false, asc: false, fmt: v => Number(v || 0).toFixed(1) },
+  { key: "wrc_plus", code: "wRC+", label: "Weighted Runs Created Plus", group: "Sabermetric", isRate: true, asc: false, fmt: v => Math.round(Number(v || 0)) },
+  { key: "xwoba", code: "xwOBA", label: "Expected wOBA (Process)", group: "Sabermetric", isRate: true, asc: false, fmt: v => fmtAvg(v) },
+  { key: "woba", code: "wOBA", label: "Weighted On-Base Average", group: "Sabermetric", isRate: true, asc: false, fmt: v => fmtAvg(v) },
+  { key: "ops_plus", code: "OPS+", label: "Adjusted OPS+", group: "Sabermetric", isRate: true, asc: false, fmt: v => Math.round(Number(v || 0)) },
+  { key: "wraa", code: "wRAA", label: "Weighted Runs Above Avg", group: "Sabermetric", isRate: false, asc: false, fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(1)}` },
+  { key: "wrc", code: "wRC", label: "Weighted Runs Created", group: "Sabermetric", isRate: false, asc: false, fmt: v => Number(v || 0).toFixed(1) },
+  { key: "wpa", code: "WPA", label: "Win Probability Added", group: "Sabermetric", isRate: false, asc: false, fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(2)}` },
+
   // Rate & Slash Stats (require PA qualification)
   { key: "avg", code: "AVG", label: "Batting Average", group: "Slash & Rate", isRate: true, asc: false, fmt: v => fmtAvg(v) },
   { key: "obp", code: "OBP", label: "On-Base Percentage", group: "Slash & Rate", isRate: true, asc: false, fmt: v => fmtAvg(v) },
@@ -6729,50 +6762,26 @@ const BATTING_LEADER_CATEGORIES = [
   { key: "bb_k", code: "BB/K", label: "Walk-to-Strikeout Ratio", group: "Slash & Rate", isRate: true, asc: false, fmt: v => Number(v || 0).toFixed(2) },
   { key: "sec_a", code: "SecA", label: "Secondary Average", group: "Slash & Rate", isRate: true, asc: false, fmt: v => fmtAvg(v) },
 
-  // Sabermetric & Value Stats
-  { key: "war", code: "WAR", label: "Wins Above Replacement", group: "Sabermetric", isRate: false, asc: false, fmt: v => Number(v || 0).toFixed(1) },
-  { key: "wrc_plus", code: "wRC+", label: "Weighted Runs Created Plus", group: "Sabermetric", isRate: true, asc: false, fmt: v => Math.round(Number(v || 0)) },
-  { key: "ops_plus", code: "OPS+", label: "Adjusted OPS+", group: "Sabermetric", isRate: true, asc: false, fmt: v => Math.round(Number(v || 0)) },
-  { key: "woba", code: "wOBA", label: "Weighted On-Base Average", group: "Sabermetric", isRate: true, asc: false, fmt: v => fmtAvg(v) },
-  { key: "wraa", code: "wRAA", label: "Weighted Runs Above Avg", group: "Sabermetric", isRate: false, asc: false, fmt: v => `${Number(v || 0) > 0 ? '+' : ''}${Number(v || 0).toFixed(1)}` },
-  { key: "wrc", code: "wRC", label: "Weighted Runs Created", group: "Sabermetric", isRate: false, asc: false, fmt: v => Number(v || 0).toFixed(1) },
-  { key: "wpa", code: "WPA", label: "Win Probability Added", group: "Sabermetric", isRate: false, asc: false, fmt: v => `${Number(v || 0) > 0 ? '+' : ''}${Number(v || 0).toFixed(2)}` },
-
   // Counting Stats
-  { key: "hr", code: "HR", label: "Home Runs", group: "Counting", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "rbi", code: "RBI", label: "Runs Batted In", group: "Counting", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "r", code: "R", label: "Runs Scored", group: "Counting", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "h", code: "H", label: "Hits", group: "Counting", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "tb", code: "TB", label: "Total Bases", group: "Counting", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "xbh", code: "XBH", label: "Extra-Base Hits", group: "Counting", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "2b", code: "2B", label: "Doubles", group: "Counting", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "3b", code: "3B", label: "Triples", group: "Counting", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "1b", code: "1B", label: "Singles", group: "Counting", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "tob", code: "TOB", label: "Times On Base (H+BB+HBP)", group: "Counting", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "bb", code: "BB", label: "Walks (Base on Balls)", group: "Counting", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "ibb", code: "IBB", label: "Intentional Walks", group: "Counting", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "hp", code: "HBP", label: "Hit By Pitch", group: "Counting", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "sb", code: "SB", label: "Stolen Bases", group: "Counting", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "pa", code: "PA", label: "Plate Appearances", group: "Counting", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "g", code: "G", label: "Games Played", group: "Counting", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "hr", code: "HR", label: "Home Runs", group: "Counting", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "rbi", code: "RBI", label: "Runs Batted In", group: "Counting", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "r", code: "R", label: "Runs Scored", group: "Counting", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "h", code: "H", label: "Hits", group: "Counting", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "tb", code: "TB", label: "Total Bases", group: "Counting", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "xbh", code: "XBH", label: "Extra-Base Hits", group: "Counting", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "2b", code: "2B", label: "Doubles", group: "Counting", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "3b", code: "3B", label: "Triples", group: "Counting", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "1b", code: "1B", label: "Singles", group: "Counting", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "tob", code: "TOB", label: "Times On Base (H+BB+HBP)", group: "Counting", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "bb", code: "BB", label: "Walks (Base on Balls)", group: "Counting", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "ibb", code: "IBB", label: "Intentional Walks", group: "Counting", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "hp", code: "HBP", label: "Hit By Pitch", group: "Counting", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "sb", code: "SB", label: "Stolen Bases", group: "Counting", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "pa", code: "PA", label: "Plate Appearances", group: "Counting", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "g", code: "G", label: "Games Played", group: "Counting", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
 ];
 
 const PITCHING_LEADER_CATEGORIES = [
-  // Rate & Command Stats (require IP qualification)
-  { key: "era", code: "ERA", label: "Earned Run Average", group: "Rate & Command", isRate: true, asc: true, fmt: v => Number(v || 0).toFixed(2) },
-  { key: "whip", code: "WHIP", label: "Walks + Hits / IP", group: "Rate & Command", isRate: true, asc: true, fmt: v => Number(v || 0).toFixed(2) },
-  { key: "baa", code: "BAA", label: "Opponent Batting Avg", group: "Rate & Command", isRate: true, asc: true, fmt: v => fmtAvg(v) },
-  { key: "k9", code: "K/9", label: "Strikeouts per 9 IP", group: "Rate & Command", isRate: true, asc: false, fmt: v => Number(v || 0).toFixed(2) },
-  { key: "bb9", code: "BB/9", label: "Lowest Walks per 9 IP", group: "Rate & Command", isRate: true, asc: true, fmt: v => Number(v || 0).toFixed(2) },
-  { key: "hr9", code: "HR/9", label: "Lowest Home Runs per 9 IP", group: "Rate & Command", isRate: true, asc: true, fmt: v => Number(v || 0).toFixed(2) },
-  { key: "h9", code: "H/9", label: "Lowest Hits per 9 IP", group: "Rate & Command", isRate: true, asc: true, fmt: v => Number(v || 0).toFixed(2) },
-  { key: "k_bb", code: "K/BB", label: "Strikeout-to-Walk Ratio", group: "Rate & Command", isRate: true, asc: false, fmt: v => Number(v || 0).toFixed(2) },
-  { key: "k_pct", code: "K%", label: "Strikeout Rate (K%)", group: "Rate & Command", isRate: true, asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
-  { key: "k_minus_bb", code: "K-BB%", label: "K% minus BB%", group: "Rate & Command", isRate: true, asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
-  { key: "w_pct", code: "W%", label: "Winning Percentage", group: "Rate & Command", isRate: true, asc: false, fmt: v => fmtAvg(v) },
-  { key: "lob_pct", code: "LOB%", label: "Left On-Base Percentage", group: "Rate & Command", isRate: true, asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
-  { key: "gb_pct", code: "GB%", label: "Groundball Percentage", group: "Rate & Command", isRate: true, asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
-
   // Sabermetric Stats
   { key: "war", code: "WAR", label: "Pitching WAR (FIP-based)", group: "Sabermetric", isRate: false, asc: false, fmt: v => Number(v || 0).toFixed(1) },
   { key: "ra9war", code: "RA9-WAR", label: "RA9-WAR (Run-Prevention)", group: "Sabermetric", isRate: false, asc: false, fmt: v => Number(v || 0).toFixed(1) },
@@ -6781,36 +6790,51 @@ const PITCHING_LEADER_CATEGORIES = [
   { key: "siera", code: "SIERA", label: "Skill-Interactive ERA", group: "Sabermetric", isRate: true, asc: true, fmt: v => Number(v || 0).toFixed(2) },
   { key: "era_plus", code: "ERA+", label: "Park-Adjusted ERA+", group: "Sabermetric", isRate: true, asc: false, fmt: v => Math.round(Number(v || 0)) },
   { key: "fip_minus", code: "FIP-", label: "Lowest Park-Adjusted FIP-", group: "Sabermetric", isRate: true, asc: true, fmt: v => Math.round(Number(v || 0)) },
-  { key: "wpa", code: "WPA", label: "Win Probability Added", group: "Sabermetric", isRate: false, asc: false, fmt: v => `${Number(v || 0) > 0 ? '+' : ''}${Number(v || 0).toFixed(2)}` },
+  { key: "wpa", code: "WPA", label: "Win Probability Added", group: "Sabermetric", isRate: false, asc: false, fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(2)}` },
+
+  // Rate & Command Stats (require IP qualification)
+  { key: "era", code: "ERA", label: "Earned Run Average", group: "Rate & Command", isRate: true, asc: true, fmt: v => Number(v || 0).toFixed(2) },
+  { key: "whip", code: "WHIP", label: "Walks + Hits / IP", group: "Rate & Command", isRate: true, asc: true, fmt: v => Number(v || 0).toFixed(2) },
+  { key: "k_minus_bb", code: "K-BB%", label: "K% minus BB% (Command)", group: "Rate & Command", isRate: true, asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
+  { key: "k_pct", code: "K%", label: "Strikeout Rate (K%)", group: "Rate & Command", isRate: true, asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
+  { key: "k9", code: "K/9", label: "Strikeouts per 9 IP", group: "Rate & Command", isRate: true, asc: false, fmt: v => Number(v || 0).toFixed(2) },
+  { key: "bb9", code: "BB/9", label: "Lowest Walks per 9 IP", group: "Rate & Command", isRate: true, asc: true, fmt: v => Number(v || 0).toFixed(2) },
+  { key: "hr9", code: "HR/9", label: "Lowest Home Runs per 9 IP", group: "Rate & Command", isRate: true, asc: true, fmt: v => Number(v || 0).toFixed(2) },
+  { key: "h9", code: "H/9", label: "Lowest Hits per 9 IP", group: "Rate & Command", isRate: true, asc: true, fmt: v => Number(v || 0).toFixed(2) },
+  { key: "k_bb", code: "K/BB", label: "Strikeout-to-Walk Ratio", group: "Rate & Command", isRate: true, asc: false, fmt: v => Number(v || 0).toFixed(2) },
+  { key: "baa", code: "BAA", label: "Opponent Batting Avg", group: "Rate & Command", isRate: true, asc: true, fmt: v => fmtAvg(v) },
+  { key: "w_pct", code: "W%", label: "Winning Percentage", group: "Rate & Command", isRate: true, asc: false, fmt: v => fmtAvg(v) },
+  { key: "lob_pct", code: "LOB%", label: "Left On-Base Percentage", group: "Rate & Command", isRate: true, asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
+  { key: "gb_pct", code: "GB%", label: "Groundball Percentage", group: "Rate & Command", isRate: true, asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
 
   // Counting & Bullpen Stats
-  { key: "w", code: "W", label: "Wins", group: "Counting & Bullpen", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "k", code: "K", label: "Strikeouts", group: "Counting & Bullpen", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "sv", code: "SV", label: "Saves", group: "Counting & Bullpen", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "hld", code: "HLD", label: "Holds", group: "Counting & Bullpen", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "sv_hld", code: "SV+HLD", label: "Saves + Holds", group: "Counting & Bullpen", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "qs", code: "QS", label: "Quality Starts", group: "Counting & Bullpen", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "ip", code: "IP", label: "Innings Pitched", group: "Counting & Bullpen", isRate: false, asc: false, fmt: v => Number(v || 0).toFixed(1) },
-  { key: "cg", code: "CG", label: "Complete Games", group: "Counting & Bullpen", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "sho", code: "SHO", label: "Shutouts", group: "Counting & Bullpen", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "g", code: "G", label: "Games Pitched", group: "Counting & Bullpen", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "gs", code: "GS", label: "Games Started", group: "Counting & Bullpen", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "sd", code: "SD", label: "Shutdowns (Relief Leverage)", group: "Counting & Bullpen", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "w", code: "W", label: "Wins", group: "Counting & Bullpen", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "k", code: "K", label: "Strikeouts", group: "Counting & Bullpen", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "sv", code: "SV", label: "Saves", group: "Counting & Bullpen", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "hld", code: "HLD", label: "Holds", group: "Counting & Bullpen", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "sv_hld", code: "SV+HLD", label: "Saves + Holds", group: "Counting & Bullpen", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "qs", code: "QS", label: "Quality Starts", group: "Counting & Bullpen", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "ip", code: "IP", label: "Innings Pitched", group: "Counting & Bullpen", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toFixed(1) },
+  { key: "cg", code: "CG", label: "Complete Games", group: "Counting & Bullpen", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "sho", code: "SHO", label: "Shutouts", group: "Counting & Bullpen", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "g", code: "G", label: "Games Pitched", group: "Counting & Bullpen", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "gs", code: "GS", label: "Games Started", group: "Counting & Bullpen", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "sd", code: "SD", label: "Shutdowns (Relief Leverage)", group: "Counting & Bullpen", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
 ];
 
 const FIELDING_LEADER_CATEGORIES = [
-  { key: "zr", code: "ZR", label: "Zone Rating (Runs Saved)", group: "Advanced Defense", isRate: false, asc: false, fmt: v => `${Number(v || 0) > 0 ? '+' : ''}${Number(v || 0).toFixed(2)}` },
-  { key: "def_runs", code: "DEF", label: "Total Defensive Runs (ZR+Frm+Arm)", group: "Advanced Defense", isRate: false, asc: false, fmt: v => `${Number(v || 0) > 0 ? '+' : ''}${Number(v || 0).toFixed(2)}` },
-  { key: "framing", code: "FRM", label: "Catcher Framing Runs", group: "Advanced Defense", isRate: false, asc: false, fmt: v => `${Number(v || 0) > 0 ? '+' : ''}${Number(v || 0).toFixed(2)}` },
-  { key: "arm", code: "ARM", label: "Outfield / Infield Arm Runs", group: "Advanced Defense", isRate: false, asc: false, fmt: v => `${Number(v || 0) > 0 ? '+' : ''}${Number(v || 0).toFixed(2)}` },
+  { key: "def_runs", code: "DEF", label: "Total Defensive Runs (ZR+Frm+Arm)", group: "Advanced Defense", isRate: false, asc: false, fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(2)}` },
+  { key: "zr", code: "ZR", label: "Zone Rating (Runs Saved)", group: "Advanced Defense", isRate: false, asc: false, fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(2)}` },
+  { key: "framing", code: "FRM", label: "Catcher Framing Runs", group: "Advanced Defense", isRate: false, asc: false, fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(2)}` },
+  { key: "arm", code: "ARM", label: "Outfield / Infield Arm Runs", group: "Advanced Defense", isRate: false, asc: false, fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(2)}` },
   { key: "fld_pct", code: "FLD%", label: "Fielding Percentage", group: "Rate & Range", isRate: true, asc: false, fmt: v => fmtAvg(v) },
   { key: "rf9", code: "RF/9", label: "Range Factor per 9 Inn", group: "Rate & Range", isRate: true, asc: false, fmt: v => Number(v || 0).toFixed(2) },
   { key: "rto_pct", code: "CS%", label: "Catcher Runners Thrown Out %", group: "Rate & Range", isRate: false, asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
-  { key: "dp", code: "DP", label: "Double Plays Turned", group: "Counting Defense", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "po", code: "PO", label: "Putouts", group: "Counting Defense", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "a", code: "A", label: "Assists", group: "Counting Defense", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "tc", code: "TC", label: "Total Chances", group: "Counting Defense", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
-  { key: "fld_ip", code: "INN", label: "Defensive Innings Played", group: "Counting Defense", isRate: false, asc: false, fmt: v => Number(v || 0).toFixed(1) },
+  { key: "dp", code: "DP", label: "Double Plays Turned", group: "Counting Defense", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "po", code: "PO", label: "Putouts", group: "Counting Defense", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "a", code: "A", label: "Assists", group: "Counting Defense", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "tc", code: "TC", label: "Total Chances", group: "Counting Defense", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "fld_ip", code: "INN", label: "Defensive Innings Played", group: "Counting Defense", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toFixed(1) },
 ];
 
 const STATCAST_LEADER_CATEGORIES = [
@@ -6820,11 +6844,11 @@ const STATCAST_LEADER_CATEGORIES = [
   { key: "avg_ev", code: "Avg EV", label: "Average Exit Velocity (mph)", group: "Batter Statcast", pool: "batters", isRate: true, asc: false, fmt: v => `${Number(v || 0).toFixed(1)} mph` },
   { key: "max_ev", code: "Max EV", label: "Max Exit Velocity (mph)", group: "Batter Statcast", pool: "batters", isRate: false, asc: false, fmt: v => `${Number(v || 0).toFixed(1)} mph` },
   { key: "barrel_pct", code: "Brl%", label: "Barrel Percentage", group: "Batter Statcast", pool: "batters", isRate: true, asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
-  { key: "barrels", code: "Barrels", label: "Total Barrels", group: "Batter Statcast", pool: "batters", isRate: false, asc: false, fmt: v => Number(v || 0).toLocaleString() },
+  { key: "barrels", code: "Barrels", label: "Total Barrels", group: "Batter Statcast", pool: "batters", isRate: false, asc: false, isCounting: true, fmt: v => Number(v || 0).toLocaleString() },
   { key: "hard_hit_pct", code: "Hard%", label: "Hard-Hit Rate (95+ mph)", group: "Batter Statcast", pool: "batters", isRate: true, asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
   { key: "sweet_spot_pct", code: "SwSp%", label: "Launch Angle Sweet-Spot %", group: "Batter Statcast", pool: "batters", isRate: true, asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
   { key: "avg_sprint", code: "Sprint", label: "Sprint Speed (ft/sec)", group: "Baserunning & Speed", pool: "batters", isRate: true, asc: false, fmt: v => `${Number(v || 0).toFixed(1)} ft/s` },
-  { key: "ubr", code: "UBR", label: "Ultimate Base Running (Runs)", group: "Baserunning & Speed", pool: "batters", isRate: false, asc: false, fmt: v => `${Number(v || 0) > 0 ? '+' : ''}${Number(v || 0).toFixed(2)}` },
+  { key: "ubr", code: "UBR", label: "Ultimate Base Running (Runs)", group: "Baserunning & Speed", pool: "batters", isRate: false, asc: false, fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(2)}` },
   { key: "sb_pct", code: "SB%", label: "Stolen Base Success Rate", group: "Baserunning & Speed", pool: "batters", isRate: false, asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
   { key: "velocity_mph", code: "Velo", label: "Fastball Velocity (mph)", group: "Pitcher Statcast", pool: "pitchers", isRate: false, asc: false, fmt: v => `${Number(v || 0).toFixed(1)} mph` },
   { key: "avg_ev_against", code: "EV Agst", label: "Lowest Exit Velo Allowed", group: "Pitcher Statcast", pool: "pitchers", isRate: true, asc: true, fmt: v => `${Number(v || 0).toFixed(1)} mph` },
@@ -6834,7 +6858,7 @@ const STATCAST_LEADER_CATEGORIES = [
 
 async function renderLeagueLeadersTab(container) {
   if (!AppState.leadersData) {
-    showLoading("Computing Official Qualified League Leaders Across All Categories...");
+    showLoading("Synthesizing Official MLB/OOTP Qualified Podiums, Composite Award Races & Statcast Leaderboards...");
     try {
       const lid = AppState.activeLeagueId || "";
       const yr = AppState.activeYear || "";
@@ -6848,18 +6872,378 @@ async function renderLeagueLeadersTab(container) {
 
 window.setLeadersOption = function(key, val) {
   AppState[key] = val;
+  if (key === "leadersCategoryTab") {
+    AppState.leadersGroupFilter = "ALL";
+  }
+  if (key === "leadersWbPool") {
+    AppState.leadersWbMinVal = -1;
+    AppState.leadersWbSortKey = "war";
+    AppState.leadersWbSortAsc = false;
+  }
   const container = document.getElementById("main-view-container");
-  if (container) renderLeagueLeadersSubView(container);
+  if (container && AppState.activeTab === "leaders") {
+    renderLeagueLeadersSubView(container);
+  }
 };
 
-function renderLeaderCardHtml(cat, pool, qualRuleLabel, qualMode) {
+window.setLeadersViewMode = function(mode) {
+  AppState.leadersViewMode = mode || "portal";
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "leaders") {
+    renderLeagueLeadersSubView(container);
+  }
+};
+
+window.setLeadersViewportMode = function(mode) {
+  AppState.frontPageViewportMode = mode || "auto";
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "leaders") {
+    renderLeagueLeadersSubView(container);
+  }
+};
+
+window.setLeadersTheme = function(theme) {
+  AppState.frontPageTheme = theme === "light" ? "light" : "dark";
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "leaders") {
+    renderLeagueLeadersSubView(container);
+  }
+};
+
+window.dockLeadersPlayer = function(playerId, ev) {
+  if (ev && ev.stopPropagation) ev.stopPropagation();
+  if (!playerId) return;
+  if (typeof togglePlayerSideDock === "function") togglePlayerSideDock(true);
+  if (typeof renderPlayerIntoSideDock === "function") renderPlayerIntoSideDock(playerId);
+};
+
+window.pinLeadersDuel = function(slot, playerId, pool, ev) {
+  if (ev && ev.stopPropagation) ev.stopPropagation();
+  if (pool && AppState.leadersComparePool !== pool) {
+    AppState.leadersComparePool = pool;
+    AppState.leadersScoutA = 0;
+    AppState.leadersScoutB = 0;
+  }
+  if (slot === "B") AppState.leadersScoutB = Number(playerId);
+  else AppState.leadersScoutA = Number(playerId);
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "leaders") {
+    renderLeagueLeadersSubView(container);
+  }
+};
+
+window.sortLeadersWorkbench = function(colKey, defaultAsc = false) {
+  if (AppState.leadersWbSortKey === colKey) {
+    AppState.leadersWbSortAsc = !AppState.leadersWbSortAsc;
+  } else {
+    AppState.leadersWbSortKey = colKey;
+    AppState.leadersWbSortAsc = Boolean(defaultAsc);
+  }
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "leaders") {
+    renderLeagueLeadersSubView(container);
+  }
+};
+
+window.exportLeadersCsv = function(poolType) {
+  const data = AppState.leadersData;
+  if (!data) return;
+  const rows = poolType === "pitchers" ? (data.pitchers || []) : (poolType === "fielders" ? (data.fielders || []) : (data.batters || []));
+  if (!rows.length) return;
+  const cols = poolType === "pitchers"
+    ? ["player_id", "name", "team_abbr", "sub_league_abbr", "role", "age", "throws", "g", "gs", "w", "l", "sv", "hld", "qs", "ip_display", "era", "whip", "fip", "xfip", "siera", "era_plus", "fip_minus", "k", "bb", "k_pct", "bb_pct", "k_minus_bb", "velocity_mph", "wpa", "ra9war", "war", "cy_score"]
+    : (poolType === "fielders"
+      ? ["player_id", "name", "team_abbr", "sub_league_abbr", "position", "age", "fld_g", "fld_gs", "fld_ip", "tc", "po", "a", "e", "dp", "fld_pct", "rf9", "zr", "framing", "arm", "def_runs", "platinum_score"]
+      : ["player_id", "name", "team_abbr", "sub_league_abbr", "position", "age", "bats", "g", "pa", "ab", "r", "h", "2b", "3b", "hr", "rbi", "sb", "bb", "k", "avg", "obp", "slg", "ops", "iso", "babip", "bb_pct", "k_pct", "woba", "xwoba", "wrc_plus", "ops_plus", "avg_ev", "barrel_pct", "hard_hit_pct", "avg_sprint", "wpa", "ubr", "def_runs", "war", "mvp_score"]);
+
+  const csvLines = [cols.join(",")];
+  rows.forEach(r => {
+    csvLines.push(cols.map(c => {
+      const val = r[c] !== undefined && r[c] !== null ? String(r[c]) : "";
+      return val.includes(",") || val.includes('"') ? `"${val.replace(/"/g, '""')}"` : val;
+    }).join(","));
+  });
+  const blob = new Blob([csvLines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `ootp_leaders_${data.season_year || "season"}_${poolType}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
+
+function savantPinColor(pct) {
+  const p = Math.max(1, Math.min(99, Math.round(Number(pct) || 50)));
+  if (p >= 90) return "#D32F2F";
+  if (p >= 75) return "#E53935";
+  if (p >= 60) return "#EF6C00";
+  if (p >= 42) return "#64748B";
+  if (p >= 25) return "#1E4E79";
+  return "#002244";
+}
+
+function computeSavantPercentile(val, sortedAscArr, lowerIsBetter = false) {
+  if (!sortedAscArr || !sortedAscArr.length) return 50;
+  const v = Number(val);
+  if (!Number.isFinite(v)) return 50;
+  const n = sortedAscArr.length;
+  if (n === 1) return 99;
+  let less = 0;
+  let equal = 0;
+  for (let i = 0; i < n; i++) {
+    if (sortedAscArr[i] < v) less++;
+    else if (sortedAscArr[i] === v) equal++;
+  }
+  let raw = ((less + 0.5 * equal) / n) * 100;
+  if (lowerIsBetter) raw = 100 - raw;
+  return Math.max(1, Math.min(99, Math.round(raw)));
+}
+
+function buildLeadersVisualSuiteHtml(batters, pitchers, qual, isLight) {
+  const mode = AppState.leadersVisualMode || "offense";
+  const offAxes = AppState.leadersOffenseAxes || "xwoba_iso";
+  const pitAxes = AppState.leadersPitchAxes || "kbb_fip";
+
+  const axisInk = isLight ? "#475569" : "#94A3B8";
+  const gridStroke = isLight ? "rgba(15,23,42,0.10)" : "rgba(148,163,184,0.15)";
+  const crossStroke = isLight ? "rgba(15,23,42,0.28)" : "rgba(248,250,252,0.26)";
+  const labelInk = isLight ? "#0F172A" : "#F8FAFC";
+
+  let svgHtml = "";
+  let subtitleHtml = "";
+  let subControlsHtml = "";
+
+  if (mode === "offense") {
+    const qBat = batters.filter(b => b.is_qualified);
+    const pool = (qBat.length >= 8 ? qBat : batters.filter(b => b.is_half_qualified)).slice(0, 85);
+    const xKey = offAxes === "wrc_barrel" ? "wrc_plus" : "xwoba";
+    const yKey = offAxes === "wrc_barrel" ? "barrel_pct" : "iso";
+    const xLbl = offAxes === "wrc_barrel" ? "wRC+ (Park-Adjusted Offense)" : "Expected wOBA (xwOBA Process)";
+    const yLbl = offAxes === "wrc_barrel" ? "Barrel % (Batted-Ball Impact)" : "Isolated Power (ISO = SLG - AVG)";
+
+    subControlsHtml = `
+      <div class="inline-flex items-center rounded bg-black/25 p-0.5 border bnn-border text-[10.5px] font-mono">
+        <button onclick="setLeadersOption('leadersOffenseAxes','xwoba_iso')" class="px-2 py-0.5 rounded font-bold ${offAxes === 'xwoba_iso' ? 'bg-sky-500 text-slate-950' : 'bnn-muted'}">xwOBA vs ISO</button>
+        <button onclick="setLeadersOption('leadersOffenseAxes','wrc_barrel')" class="px-2 py-0.5 rounded font-bold ${offAxes === 'wrc_barrel' ? 'bg-sky-500 text-slate-950' : 'bnn-muted'}">wRC+ vs Barrel%</button>
+      </div>
+    `;
+    subtitleHtml = `Qualified Hitters (${qual.qual_pa || 0}+ PA) · Separates <strong class="text-rose-400">Complete Superstars</strong> from <strong class="text-sky-400">Contact Technicians</strong> &amp; <strong class="text-amber-400">TTO Sluggers</strong>`;
+
+    if (pool.length < 3) {
+      svgHtml = `<div class="py-12 text-center text-xs font-mono bnn-muted">Insufficient qualified hitters for quadrant scatter under current filter.</div>`;
+    } else {
+      const xs = pool.map(p => Number(p[xKey] || 0)).sort((a, b) => a - b);
+      const ys = pool.map(p => Number(p[yKey] || 0)).sort((a, b) => a - b);
+      const medX = xs[Math.floor(xs.length / 2)];
+      const medY = ys[Math.floor(ys.length / 2)];
+      const minX = Math.min(xs[0], medX * 0.88);
+      const maxX = Math.max(xs[xs.length - 1], medX * 1.14) || 1;
+      const minY = Math.min(ys[0], medY * 0.70);
+      const maxY = Math.max(ys[ys.length - 1], medY * 1.25) || 1;
+      const padL = 52, padR = 24, padT = 24, padB = 34, W = 680, H = 258;
+      const sx = v => padL + ((v - minX) / Math.max(0.0001, maxX - minX)) * (W - padL - padR);
+      const sy = v => H - padB - ((v - minY) / Math.max(0.0001, maxY - minY)) * (H - padT - padB);
+      const cx = sx(medX);
+      const cy = sy(medY);
+
+      const topIds = new Set([...pool].sort((a, b) => Number(b.war || 0) - Number(a.war || 0)).slice(0, 9).map(p => p.player_id));
+      const dots = pool.map(b => {
+        const vx = Number(b[xKey] || 0);
+        const vy = Number(b[yKey] || 0);
+        const px = sx(vx);
+        const py = sy(vy);
+        const isSuper = vx >= medX && vy >= medY;
+        const isTto = vx < medX && vy >= medY;
+        const isTech = vx >= medX && vy < medY;
+        const fill = isSuper ? "#E11D48" : (isTech ? "#0EA5E9" : (isTto ? "#F59E0B" : "#64748B"));
+        const r = topIds.has(b.player_id) ? 5.6 : 4.0;
+        const lastName = (b.name || "").split(" ").slice(-1)[0];
+        const fmtX = xKey === "xwoba" ? fmtAvg(vx) : Math.round(vx);
+        const fmtY = yKey === "iso" ? fmtAvg(vy) : `${vy.toFixed(1)}%`;
+        return `
+          <g onclick="openPlayerModal(${b.player_id})" class="cursor-pointer">
+            <title>${b.name} (${b.team_abbr} · ${b.position}) — ${xKey === 'xwoba' ? 'xwOBA' : 'wRC+'}: ${fmtX}, ${yKey === 'iso' ? 'ISO' : 'Brl%'}: ${fmtY}, WAR: ${Number(b.war || 0).toFixed(1)}</title>
+            <circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${r}" fill="${fill}" fill-opacity="0.88" stroke="${labelInk}" stroke-width="${topIds.has(b.player_id) ? '1.3' : '0.5'}"/>
+            ${topIds.has(b.player_id) ? `<text x="${(px + 7).toFixed(1)}" y="${(py + 3).toFixed(1)}" fill="${labelInk}" font-size="9.5" font-family="'JetBrains Mono', monospace" font-weight="800">${lastName}</text>` : ""}
+          </g>
+        `;
+      }).join("");
+
+      svgHtml = `
+        <svg viewBox="0 0 ${W} ${H}" class="w-full h-auto select-none">
+          <rect x="${cx.toFixed(1)}" y="${padT}" width="${Math.max(0, W - padR - cx).toFixed(1)}" height="${Math.max(0, cy - padT).toFixed(1)}" fill="#E11D48" fill-opacity="0.06"/>
+          <rect x="${padL}" y="${padT}" width="${Math.max(0, cx - padL).toFixed(1)}" height="${Math.max(0, cy - padT).toFixed(1)}" fill="#F59E0B" fill-opacity="0.05"/>
+          <rect x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" width="${Math.max(0, W - padR - cx).toFixed(1)}" height="${Math.max(0, H - padB - cy).toFixed(1)}" fill="#0EA5E9" fill-opacity="0.06"/>
+          <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H - padB}" stroke="${gridStroke}" stroke-width="1"/>
+          <line x1="${padL}" y1="${H - padB}" x2="${W - padR}" y2="${H - padB}" stroke="${gridStroke}" stroke-width="1"/>
+          <line x1="${cx.toFixed(1)}" y1="${padT}" x2="${cx.toFixed(1)}" y2="${H - padB}" stroke="${crossStroke}" stroke-dasharray="4 3" stroke-width="1.2"/>
+          <line x1="${padL}" y1="${cy.toFixed(1)}" x2="${W - padR}" y2="${cy.toFixed(1)}" stroke="${crossStroke}" stroke-dasharray="4 3" stroke-width="1.2"/>
+          <text x="${W - padR - 6}" y="${padT + 13}" text-anchor="end" fill="#FB7185" font-size="9.5" font-weight="800" font-family="'JetBrains Mono', monospace">COMPLETE SUPERSTARS ▲</text>
+          <text x="${padL + 6}" y="${padT + 13}" fill="#FBBF24" font-size="9.5" font-weight="800" font-family="'JetBrains Mono', monospace">▲ TTO POWER SLUGGERS</text>
+          <text x="${W - padR - 6}" y="${H - padB - 7}" text-anchor="end" fill="#38BDF8" font-size="9.5" font-weight="800" font-family="'JetBrains Mono', monospace">CONTACT / OBP TECHNICIANS ▼</text>
+          <text x="${padL + 6}" y="${H - padB - 7}" fill="${axisInk}" font-size="9" font-weight="700" font-family="'JetBrains Mono', monospace">▼ REGRESSION / LIGHT BAT</text>
+          <text x="${(W / 2).toFixed(0)}" y="${H - 6}" text-anchor="middle" fill="${axisInk}" font-size="10" font-weight="700" font-family="'JetBrains Mono', monospace">${xLbl} (Median ${xKey === 'xwoba' ? fmtAvg(medX) : Math.round(medX)}) →</text>
+          <text x="14" y="${(H / 2).toFixed(0)}" text-anchor="middle" fill="${axisInk}" font-size="10" font-weight="700" font-family="'JetBrains Mono', monospace" transform="rotate(-90 14 ${(H / 2).toFixed(0)})">${yLbl} →</text>
+          ${dots}
+        </svg>
+      `;
+    }
+  } else if (mode === "pitching") {
+    const qPit = pitchers.filter(p => AppState.leadersPitcherRole === "RP" ? p.is_reliever_qualified : p.is_qualified);
+    const pool = (qPit.length >= 6 ? qPit : pitchers.filter(p => p.is_reliever_qualified)).slice(0, 80);
+    const yKey = pitAxes === "kbb_siera" ? "siera" : "fip";
+    const yCode = pitAxes === "kbb_siera" ? "SIERA" : "FIP";
+
+    subControlsHtml = `
+      <div class="inline-flex items-center rounded bg-black/25 p-0.5 border bnn-border text-[10.5px] font-mono">
+        <button onclick="setLeadersOption('leadersPitchAxes','kbb_fip')" class="px-2 py-0.5 rounded font-bold ${pitAxes === 'kbb_fip' ? 'bg-amber-400 text-slate-950' : 'bnn-muted'}">K-BB% vs FIP</button>
+        <button onclick="setLeadersOption('leadersPitchAxes','kbb_siera')" class="px-2 py-0.5 rounded font-bold ${pitAxes === 'kbb_siera' ? 'bg-amber-400 text-slate-950' : 'bnn-muted'}">K-BB% vs SIERA</button>
+      </div>
+    `;
+    subtitleHtml = `Qualified Arms · Inverted Y-Axis (Lower ${yCode} = Higher Up) · Separates <strong class="text-amber-400">Frontline Aces</strong> from <strong class="text-emerald-400">Contact Managers</strong>`;
+
+    if (pool.length < 3) {
+      svgHtml = `<div class="py-12 text-center text-xs font-mono bnn-muted">Insufficient qualified pitchers for quadrant scatter under current filter.</div>`;
+    } else {
+      const xs = pool.map(p => Number(p.k_minus_bb || 0)).sort((a, b) => a - b);
+      const ys = pool.map(p => Number(p[yKey] || 4.2)).sort((a, b) => a - b);
+      const medX = xs[Math.floor(xs.length / 2)];
+      const medY = ys[Math.floor(ys.length / 2)];
+      const minX = Math.min(xs[0] - 2, medX - 8);
+      const maxX = Math.max(xs[xs.length - 1] + 2, medX + 10);
+      const minY = Math.max(1.2, Math.min(ys[0] - 0.25, medY - 1.1));
+      const maxY = Math.max(ys[ys.length - 1] + 0.25, medY + 1.1);
+      const padL = 52, padR = 24, padT = 24, padB = 34, W = 680, H = 258;
+      const sx = v => padL + ((v - minX) / Math.max(0.01, maxX - minX)) * (W - padL - padR);
+      // Inverted Y: lower FIP/SIERA sits at the TOP
+      const sy = v => padT + ((v - minY) / Math.max(0.01, maxY - minY)) * (H - padT - padB);
+      const cx = sx(medX);
+      const cy = sy(medY);
+
+      const topIds = new Set([...pool].sort((a, b) => Number(b.war || 0) - Number(a.war || 0)).slice(0, 9).map(p => p.player_id));
+      const dots = pool.map(p => {
+        const vx = Number(p.k_minus_bb || 0);
+        const vy = Number(p[yKey] || 4.0);
+        const px = sx(vx);
+        const py = sy(vy);
+        const isAce = vx >= medX && vy <= medY;
+        const isContact = vx < medX && vy <= medY;
+        const isWild = vx >= medX && vy > medY;
+        const fill = isAce ? "#F59E0B" : (isContact ? "#10B981" : (isWild ? "#38BDF8" : "#64748B"));
+        const r = topIds.has(p.player_id) ? 5.6 : 4.0;
+        const lastName = (p.name || "").split(" ").slice(-1)[0];
+        return `
+          <g onclick="openPlayerModal(${p.player_id})" class="cursor-pointer">
+            <title>${p.name} (${p.team_abbr} · ${p.role}) — K-BB%: ${vx.toFixed(1)}%, ${yCode}: ${vy.toFixed(2)}, ERA: ${Number(p.era || 0).toFixed(2)}, WAR: ${Number(p.war || 0).toFixed(1)}</title>
+            <circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${r}" fill="${fill}" fill-opacity="0.9" stroke="${labelInk}" stroke-width="${topIds.has(p.player_id) ? '1.3' : '0.5'}"/>
+            ${topIds.has(p.player_id) ? `<text x="${(px + 7).toFixed(1)}" y="${(py + 3).toFixed(1)}" fill="${labelInk}" font-size="9.5" font-family="'JetBrains Mono', monospace" font-weight="800">${lastName}</text>` : ""}
+          </g>
+        `;
+      }).join("");
+
+      svgHtml = `
+        <svg viewBox="0 0 ${W} ${H}" class="w-full h-auto select-none">
+          <rect x="${cx.toFixed(1)}" y="${padT}" width="${Math.max(0, W - padR - cx).toFixed(1)}" height="${Math.max(0, cy - padT).toFixed(1)}" fill="#F59E0B" fill-opacity="0.07"/>
+          <rect x="${padL}" y="${padT}" width="${Math.max(0, cx - padL).toFixed(1)}" height="${Math.max(0, cy - padT).toFixed(1)}" fill="#10B981" fill-opacity="0.06"/>
+          <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H - padB}" stroke="${gridStroke}" stroke-width="1"/>
+          <line x1="${padL}" y1="${H - padB}" x2="${W - padR}" y2="${H - padB}" stroke="${gridStroke}" stroke-width="1"/>
+          <line x1="${cx.toFixed(1)}" y1="${padT}" x2="${cx.toFixed(1)}" y2="${H - padB}" stroke="${crossStroke}" stroke-dasharray="4 3" stroke-width="1.2"/>
+          <line x1="${padL}" y1="${cy.toFixed(1)}" x2="${W - padR}" y2="${cy.toFixed(1)}" stroke="${crossStroke}" stroke-dasharray="4 3" stroke-width="1.2"/>
+          <text x="${W - padR - 6}" y="${padT + 13}" text-anchor="end" fill="#FBBF24" font-size="9.5" font-weight="800" font-family="'JetBrains Mono', monospace">CY YOUNG FRONTLINE ACES ▲</text>
+          <text x="${padL + 6}" y="${padT + 13}" fill="#34D399" font-size="9.5" font-weight="800" font-family="'JetBrains Mono', monospace">▲ CONTACT &amp; HR SUPPRESSORS</text>
+          <text x="${W - padR - 6}" y="${H - padB - 7}" text-anchor="end" fill="#38BDF8" font-size="9.5" font-weight="800" font-family="'JetBrains Mono', monospace">WHIFF / HR-PRONE FLAMETHROWERS ▼</text>
+          <text x="${padL + 6}" y="${H - padB - 7}" fill="${axisInk}" font-size="9" font-weight="700" font-family="'JetBrains Mono', monospace">▼ REGRESSION RISK ZONE</text>
+          <text x="${(W / 2).toFixed(0)}" y="${H - 6}" text-anchor="middle" fill="${axisInk}" font-size="10" font-weight="700" font-family="'JetBrains Mono', monospace">K-BB% Command Differential (Median ${medX.toFixed(1)}%) →</text>
+          <text x="14" y="${(H / 2).toFixed(0)}" text-anchor="middle" fill="${axisInk}" font-size="10" font-weight="700" font-family="'JetBrains Mono', monospace" transform="rotate(-90 14 ${(H / 2).toFixed(0)})">← Better (Lower ${yCode} · Med ${medY.toFixed(2)})</text>
+          ${dots}
+        </svg>
+      `;
+    }
+  } else {
+    // Mode C: Top-10 WAR Decomposition Stack
+    const top10 = [...batters].sort((a, b) => Number(b.war || 0) - Number(a.war || 0)).slice(0, 10);
+    subtitleHtml = `Top-10 Position Players by Total WAR · Decomposed into <span class="text-rose-400 font-bold">Batting wRAA</span> + <span class="text-amber-400 font-bold">Baserunning UBR</span> + <span class="text-emerald-400 font-bold">Defense (ZR+Frm+Arm)</span> + <span class="text-sky-400 font-bold">Pos/Rep</span>`;
+    subControlsHtml = `
+      <div class="hidden sm:flex items-center gap-2 text-[10px] font-mono">
+        <span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-rose-500"></span>Bat</span>
+        <span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-amber-400"></span>BSR</span>
+        <span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span>Def</span>
+        <span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-sky-500"></span>Pos+Rep</span>
+      </div>
+    `;
+    const maxWar = Math.max(1, ...top10.map(b => Number(b.war || 0)));
+    svgHtml = `
+      <div class="space-y-1.5 py-1">
+        ${top10.map((b, idx) => {
+          const batR = Math.max(0, Number(b.bat_runs ?? b.wraa ?? 0));
+          const bsrR = Math.max(0, Number(b.bsr_runs ?? b.ubr ?? 0));
+          const defR = Math.max(0, Number(b.def_runs ?? (Number(b.zr || 0) + Number(b.framing || 0))));
+          const posRepR = Math.max(2, Number(b.pos_adj || 0) + Number(b.rep_runs || 15));
+          const sumPos = Math.max(1, batR + bsrR + defR + posRepR);
+          const totScale = Math.max(12, Math.min(100, (Number(b.war || 0) / maxWar) * 100));
+          const wBat = (batR / sumPos) * totScale;
+          const wBsr = (bsrR / sumPos) * totScale;
+          const wDef = (defR / sumPos) * totScale;
+          const wPos = (posRepR / sumPos) * totScale;
+          return `
+            <div onclick="openPlayerModal(${b.player_id})" class="grid grid-cols-12 items-center gap-2 text-[11px] font-mono px-1.5 py-1 rounded cursor-pointer bnn-row-hover">
+              <div class="col-span-4 sm:col-span-3 flex items-center gap-1.5 min-w-0">
+                <span class="w-4 text-[10px] bnn-muted font-bold">${idx + 1}.</span>
+                <img src="${teamLogoUrl(b.team_logo)}" class="w-3.5 h-3.5 object-contain shrink-0" alt="">
+                <span class="font-sans font-bold truncate">${b.name}</span>
+                <span class="text-[9.5px] bnn-muted hidden sm:inline">${b.position}</span>
+              </div>
+              <div class="col-span-6 sm:col-span-7 h-3.5 rounded bg-slate-800/40 overflow-hidden flex" title="Bat: ${Number(b.bat_runs || 0).toFixed(1)} · BSR: ${Number(b.bsr_runs || 0).toFixed(1)} · Def: ${Number(b.def_runs || 0).toFixed(1)} · Pos: ${Number(b.pos_adj || 0).toFixed(1)}">
+                <div style="width:${wBat.toFixed(1)}%" class="bg-rose-500 h-full"></div>
+                <div style="width:${wBsr.toFixed(1)}%" class="bg-amber-400 h-full"></div>
+                <div style="width:${wDef.toFixed(1)}%" class="bg-emerald-500 h-full"></div>
+                <div style="width:${wPos.toFixed(1)}%" class="bg-sky-500/85 h-full"></div>
+              </div>
+              <div class="col-span-2 text-right font-extrabold text-amber-400">
+                ${Number(b.war || 0).toFixed(1)} <span class="text-[9.5px] bnn-muted font-normal hidden sm:inline">WAR</span>
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }
+
+  return `
+    <div class="bnn-card p-3.5 space-y-2.5">
+      <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b bnn-border">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-[10.5px] font-mono font-extrabold uppercase tracking-wider text-sky-400">CENTER STAGE ANALYTICAL SUITE</span>
+            <span class="px-1.5 py-0.2 rounded text-[9.5px] font-mono font-bold bg-sky-500/15 text-sky-300 border border-sky-500/30">TRUE-TALENT PROCESS</span>
+          </div>
+          <div class="text-[11px] bnn-muted mt-0.5">${subtitleHtml}</div>
+        </div>
+        <div class="flex flex-wrap items-center gap-1.5">
+          <div class="inline-flex items-center rounded-lg bg-black/30 p-0.5 border bnn-border text-[10.5px] font-mono">
+            <button onclick="setLeadersOption('leadersVisualMode','offense')" class="px-2.5 py-1 rounded font-extrabold transition ${mode === 'offense' ? 'bg-rose-600 text-white' : 'bnn-muted hover:text-white'}">A · Offense Quadrant</button>
+            <button onclick="setLeadersOption('leadersVisualMode','pitching')" class="px-2.5 py-1 rounded font-extrabold transition ${mode === 'pitching' ? 'bg-amber-400 text-slate-950' : 'bnn-muted hover:text-white'}">B · Pitching Command</button>
+            <button onclick="setLeadersOption('leadersVisualMode','war_stack')" class="px-2.5 py-1 rounded font-extrabold transition ${mode === 'war_stack' ? 'bg-emerald-500 text-slate-950' : 'bnn-muted hover:text-white'}">C · WAR Stack</button>
+          </div>
+          ${subControlsHtml}
+        </div>
+      </div>
+      <div class="leaders-visual-canvas p-2.5">
+        ${svgHtml}
+      </div>
+    </div>
+  `;
+}
+
+function renderLeaderCardHtml(cat, pool, qualRuleLabel, qualMode, accentHex = "#F59E0B") {
   let eligible = pool.slice();
   if (qualMode === "qualified") {
     if (cat.isRate) {
       const qOnly = eligible.filter(p => p.is_qualified || (cat.pool === "pitchers" && AppState.leadersPitcherRole === "RP" && p.is_reliever_qualified));
       if (qOnly.length >= 3) eligible = qOnly;
     } else {
-      // For counting stats, exclude zero values if possible
       const nonZero = eligible.filter(p => Number(p[cat.key] || 0) !== 0);
       if (nonZero.length > 0) eligible = nonZero;
     }
@@ -6870,7 +7254,6 @@ function renderLeaderCardHtml(cat, pool, qualRuleLabel, qualMode) {
     }
   }
 
-  // Special filter for Catcher CS% so non-catchers with 0 SBA don't clutter
   if (cat.key === "rto_pct") {
     eligible = eligible.filter(p => Number(p.sba || 0) >= 8);
   }
@@ -6891,73 +7274,767 @@ function renderLeaderCardHtml(cat, pool, qualRuleLabel, qualMode) {
 
   if (!leader) {
     return `
-      <div class="glass-card p-4 border border-slate-800/80 flex flex-col justify-between">
-        <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-          <span class="text-xs font-extrabold text-white">${cat.label}</span>
-          <span class="px-2 py-0.5 rounded bg-slate-900 text-[10px] font-mono font-bold text-slate-400">${cat.code}</span>
+      <div class="bnn-card p-3.5 flex flex-col justify-between">
+        <div class="flex items-center justify-between border-b bnn-border pb-2">
+          <span class="text-xs font-extrabold">${cat.label}</span>
+          <span class="px-2 py-0.5 rounded bnn-subcard text-[10px] font-mono font-bold bnn-muted">${cat.code}</span>
         </div>
-        <div class="py-6 text-center text-xs text-slate-500">No qualified players match current filter</div>
+        <div class="py-6 text-center text-xs font-mono bnn-muted">No qualified players match current filter</div>
       </div>
     `;
   }
 
   const awardPills = (leader.awards || []).slice(0, 2).map(a =>
-    `<span class="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-400/40">${a.name}</span>`
+    `<span class="px-1.5 py-0.2 rounded text-[9px] font-mono font-extrabold bg-amber-500/20 text-amber-400 border border-amber-400/40">${a.name}</span>`
   ).join("");
 
+  // Process/Mirage diagnostic pill on rate stats (e.g. AVG vs xBA, ERA vs FIP)
+  let processNote = "";
+  if (cat.key === "avg" && leader.xba) {
+    const diff = Number(leader.avg || 0) - Number(leader.xba || 0);
+    processNote = `<span class="text-[9.5px] font-mono ${diff > 0.028 ? 'text-amber-400' : 'bnn-muted'}">xBA ${fmtAvg(leader.xba)}</span>`;
+  } else if (cat.key === "era" && leader.fip !== undefined) {
+    const diff = Number(leader.fip || 0) - Number(leader.era || 0);
+    processNote = `<span class="text-[9.5px] font-mono ${diff > 0.65 ? 'text-amber-400' : 'bnn-muted'}">FIP ${Number(leader.fip).toFixed(2)}</span>`;
+  } else if (leader.war !== undefined) {
+    processNote = `<span class="text-[10px] font-mono bnn-muted">${Number(leader.war).toFixed(1)} WAR</span>`;
+  } else if (leader.def_runs !== undefined) {
+    processNote = `<span class="text-[10px] font-mono bnn-muted">${Number(leader.def_runs) > 0 ? "+" : ""}${Number(leader.def_runs).toFixed(1)} DEF</span>`;
+  }
+
+  const vFirst = Number(leader[cat.key] || 0);
+  const vLast = Number(top10[top10.length - 1]?.[cat.key] || 0);
+  const span = Math.max(0.0001, Math.abs(vFirst - vLast));
+
   return `
-    <div class="glass-card p-4 border border-slate-800/90 hover:border-slate-600 transition flex flex-col justify-between">
+    <div class="bnn-card p-3.5 flex flex-col justify-between">
       <div>
-        <!-- Card Header -->
-        <div class="flex items-center justify-between gap-2 border-b border-slate-800/90 pb-2.5 mb-3">
-          <div>
-            <div class="text-xs font-black text-white uppercase tracking-tight">${cat.label}</div>
-            <div class="text-[10px] font-mono text-slate-400">${cat.isRate ? `Qualifier: ${qualRuleLabel}` : 'Season Leader'}</div>
+        <div class="flex items-center justify-between gap-2 border-b bnn-border pb-2 mb-2.5">
+          <div class="min-w-0">
+            <div class="text-xs font-black uppercase tracking-tight truncate">${cat.label}</div>
+            <div class="text-[10px] font-mono bnn-muted">${cat.isRate ? `Gate: ${qualRuleLabel}` : "Season Cumulative"} · ${cat.group}</div>
           </div>
-          <span class="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono font-black text-amber-300 shrink-0">${cat.code}</span>
+          <span class="px-2 py-0.5 rounded bnn-subcard border bnn-border text-[11px] font-mono font-black shrink-0" style="color:${accentHex}">${cat.code}</span>
         </div>
 
         <!-- #1 Spotlight Podium -->
-        <div onclick="openPlayerModal(${leader.player_id})" class="p-3 rounded-xl bg-gradient-to-r from-amber-500/15 via-slate-900/90 to-slate-950 border border-amber-400/35 mb-3 cursor-pointer hover:border-amber-300 transition flex items-center justify-between gap-3">
+        <div onclick="openPlayerModal(${leader.player_id})" class="leaders-podium-hero p-2.5 mb-2.5 cursor-pointer flex items-center justify-between gap-2.5">
           <div class="flex items-center gap-2.5 min-w-0">
             <div class="relative shrink-0">
-              <img src="${playerPicUrl(leader.player_id)}" class="w-11 h-14 rounded-lg object-cover bg-slate-950 border border-amber-400/50" onerror="this.style.display='none'">
-              <span class="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-amber-400 text-slate-950 font-black text-[10px] flex items-center justify-center shadow">#1</span>
+              <img src="${playerPicUrl(leader.player_id)}" class="w-10 h-13 rounded-lg object-cover bg-slate-950 border border-amber-400/50" onerror="this.style.display='none'" alt="">
+              <span class="absolute -top-1.5 -left-1.5 w-4.5 h-4.5 px-1 rounded-full bg-amber-400 text-slate-950 font-mono font-black text-[9.5px] flex items-center justify-center shadow">#1</span>
             </div>
             <div class="min-w-0">
               <div class="flex items-center gap-1.5">
-                <img src="${teamLogoUrl(leader.team_logo)}" class="w-4 h-4 object-contain shrink-0">
-                <span class="text-sm font-black text-white truncate hover:underline">${leader.name}</span>
+                <img src="${teamLogoUrl(leader.team_logo)}" class="w-4 h-4 object-contain shrink-0" alt="">
+                <span class="text-[13px] font-black truncate hover:underline">${leader.name}</span>
               </div>
-              <div class="text-[11px] text-slate-300 font-mono flex flex-wrap items-center gap-1.5 mt-0.5">
-                <span class="font-bold text-sky-300">${leader.team_abbr}</span>
-                <span>•</span>
-                <span>${leader.position || leader.role || ''}</span>
-                ${leader.pa ? `<span>• ${leader.pa} PA</span>` : (leader.ip_display ? `<span>• ${leader.ip_display} IP</span>` : (leader.fld_g ? `<span>• ${leader.fld_g} G</span>` : ''))}
+              <div class="text-[10.5px] bnn-muted font-mono flex flex-wrap items-center gap-1 mt-0.5">
+                <span class="font-bold text-sky-400">${leader.team_abbr}</span>
+                <span>·</span>
+                <span>${leader.position || leader.role || ""}</span>
+                ${leader.pa ? `<span>· ${leader.pa} PA</span>` : (leader.ip_display ? `<span>· ${leader.ip_display} IP</span>` : (leader.fld_g ? `<span>· ${leader.fld_g} G</span>` : ""))}
               </div>
-              ${awardPills ? `<div class="flex flex-wrap gap-1 mt-1">${awardPills}</div>` : ''}
+              ${awardPills ? `<div class="flex flex-wrap gap-1 mt-1">${awardPills}</div>` : ""}
             </div>
           </div>
           <div class="text-right shrink-0">
-            <div class="text-2xl font-black font-mono text-amber-300 tracking-tight">${cat.fmt(leader[cat.key])}</div>
-            <div class="text-[10px] font-mono text-slate-400">${leader.war !== undefined ? `${Number(leader.war).toFixed(1)} WAR` : `${leader.zr !== undefined ? `${Number(leader.zr).toFixed(1)} ZR` : ''}`}</div>
+            <div class="text-xl font-black font-mono tracking-tight" style="color:${accentHex}">${cat.fmt(leader[cat.key])}</div>
+            <div>${processNote}</div>
           </div>
         </div>
 
-        <!-- #2 to #10 Contenders -->
-        <div class="space-y-1">
-          ${chases.map((pl, idx) => `
-            <div onclick="openPlayerModal(${pl.player_id})" class="px-2 py-1 rounded-lg hover:bg-slate-800/70 cursor-pointer transition flex items-center justify-between text-xs">
-              <div class="flex items-center gap-2 min-w-0">
-                <span class="w-5 text-[11px] font-mono font-bold text-slate-400">${idx + 2}.</span>
-                <img src="${teamLogoUrl(pl.team_logo)}" class="w-3.5 h-3.5 object-contain shrink-0">
-                <span class="font-semibold text-slate-200 truncate hover:text-white">${pl.name}</span>
-                <span class="text-[10px] font-mono text-slate-400">${pl.team_abbr}</span>
+        <!-- #2 to #10 Tabular Chasers with Relative Bar Fills -->
+        <div class="space-y-0.5">
+          ${chases.map((pl, idx) => {
+            const vCur = Number(pl[cat.key] || 0);
+            const rel = cat.asc
+              ? Math.max(18, Math.min(96, 22 + ((vLast - vCur) / span) * 74))
+              : Math.max(18, Math.min(96, 22 + ((vCur - vLast) / span) * 74));
+            return `
+              <div onclick="openPlayerModal(${pl.player_id})" class="leaders-chaser-row px-2 py-1 cursor-pointer flex items-center justify-between text-[11.5px]">
+                <div class="leaders-chaser-fill" style="width:${rel.toFixed(0)}%; background:${accentHex};"></div>
+                <div class="relative z-10 flex items-center gap-1.5 min-w-0">
+                  <span class="w-4 text-[10.5px] font-mono font-bold bnn-muted">${idx + 2}.</span>
+                  <img src="${teamLogoUrl(pl.team_logo)}" class="w-3.5 h-3.5 object-contain shrink-0" alt="">
+                  <span class="font-semibold truncate">${pl.name}</span>
+                  <span class="text-[10px] font-mono bnn-muted">${pl.team_abbr}</span>
+                </div>
+                <span class="relative z-10 font-mono font-bold ml-2">${cat.fmt(pl[cat.key])}</span>
               </div>
-              <span class="font-mono font-bold text-white ml-2">${cat.fmt(pl[cat.key])}</span>
-            </div>
-          `).join("")}
+            `;
+          }).join("")}
         </div>
+      </div>
+    </div>
+  `;
+}
+
+function buildLeadersContenderDuelCardHtml(batters, pitchers) {
+  const poolKey = AppState.leadersComparePool === "pitchers" ? "pitchers" : "batters";
+  const pool = poolKey === "pitchers"
+    ? [...pitchers].sort((a, b) => Number(b.cy_score || b.war || 0) - Number(a.cy_score || a.war || 0))
+    : [...batters].sort((a, b) => Number(b.mvp_score || b.war || 0) - Number(a.mvp_score || a.war || 0));
+
+  const candA = pool.find(p => p.player_id === Number(AppState.leadersScoutA)) || pool[0];
+  const candB = pool.find(p => p.player_id === Number(AppState.leadersScoutB) && p.player_id !== candA?.player_id) || pool.find(p => p.player_id !== candA?.player_id) || pool[0];
+
+  const metrics = poolKey === "pitchers"
+    ? [
+        { key: "cy_score", label: "CY IDX", asc: false, fmt: v => Number(v || 0).toFixed(1) },
+        { key: "war", label: "WAR", asc: false, fmt: v => Number(v || 0).toFixed(1) },
+        { key: "era", label: "ERA", asc: true, fmt: v => Number(v || 0).toFixed(2) },
+        { key: "fip", label: "FIP", asc: true, fmt: v => Number(v || 0).toFixed(2) },
+        { key: "siera", label: "SIERA", asc: true, fmt: v => Number(v || 0).toFixed(2) },
+        { key: "k_minus_bb", label: "K-BB%", asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
+        { key: "ip", label: "IP", asc: false, fmt: v => Number(v || 0).toFixed(1) },
+      ]
+    : [
+        { key: "mvp_score", label: "MVP IDX", asc: false, fmt: v => Number(v || 0).toFixed(1) },
+        { key: "war", label: "WAR", asc: false, fmt: v => Number(v || 0).toFixed(1) },
+        { key: "wrc_plus", label: "wRC+", asc: false, fmt: v => Math.round(Number(v || 0)) },
+        { key: "xwoba", label: "xwOBA", asc: false, fmt: v => fmtAvg(v) },
+        { key: "ops", label: "OPS", asc: false, fmt: v => fmtAvg(v) },
+        { key: "hr", label: "HR", asc: false, fmt: v => Number(v || 0) },
+        { key: "wpa", label: "WPA", asc: false, fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(2)}` },
+      ];
+
+  const topOpts = pool.slice(0, 30);
+
+  return `
+    <div class="bnn-card p-3 space-y-2.5">
+      <div class="flex items-center justify-between border-b bnn-border pb-2">
+        <div>
+          <div class="text-[10.5px] font-mono font-extrabold uppercase tracking-wider text-amber-400">QUICK-SCOUT CONTENDER DUEL</div>
+          <div class="text-[10px] bnn-muted">Head-to-Head Award Tape Comparison</div>
+        </div>
+        <div class="inline-flex rounded bg-black/25 p-0.5 border bnn-border text-[10px] font-mono">
+          <button onclick="setLeadersOption('leadersComparePool','batters')" class="px-2 py-0.5 rounded font-bold ${poolKey === 'batters' ? 'bg-rose-600 text-white' : 'bnn-muted'}">MVP</button>
+          <button onclick="setLeadersOption('leadersComparePool','pitchers')" class="px-2 py-0.5 rounded font-bold ${poolKey === 'pitchers' ? 'bg-amber-400 text-slate-950' : 'bnn-muted'}">Cy Young</button>
+        </div>
+      </div>
+
+      ${candA && candB ? `
+        <div class="grid grid-cols-2 gap-1.5 text-[10.5px] font-mono">
+          <select onchange="pinLeadersDuel('A', this.value, '${poolKey}')" class="bnn-subcard border bnn-border rounded px-1.5 py-1 font-bold truncate">
+            ${topOpts.map(p => `<option value="${p.player_id}" ${p.player_id === candA.player_id ? "selected" : ""}>${p.name} (${p.team_abbr})</option>`).join("")}
+          </select>
+          <select onchange="pinLeadersDuel('B', this.value, '${poolKey}')" class="bnn-subcard border bnn-border rounded px-1.5 py-1 font-bold truncate">
+            ${topOpts.map(p => `<option value="${p.player_id}" ${p.player_id === candB.player_id ? "selected" : ""}>${p.name} (${p.team_abbr})</option>`).join("")}
+          </select>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div onclick="openPlayerModal(${candA.player_id})" class="bnn-subcard p-2 rounded border-l-2 border-l-rose-500 cursor-pointer">
+            <div class="flex items-center gap-1.5">
+              <img src="${teamLogoUrl(candA.team_logo)}" class="w-4 h-4 object-contain" alt="">
+              <span class="text-xs font-black truncate">${candA.name}</span>
+            </div>
+            <div class="text-[10px] font-mono bnn-muted mt-0.5">${candA.team_abbr} · ${candA.position || candA.role} · Age ${candA.age}</div>
+          </div>
+          <div onclick="openPlayerModal(${candB.player_id})" class="bnn-subcard p-2 rounded border-l-2 border-l-sky-400 cursor-pointer text-right">
+            <div class="flex items-center justify-end gap-1.5">
+              <span class="text-xs font-black truncate">${candB.name}</span>
+              <img src="${teamLogoUrl(candB.team_logo)}" class="w-4 h-4 object-contain" alt="">
+            </div>
+            <div class="text-[10px] font-mono bnn-muted mt-0.5">${candB.team_abbr} · ${candB.position || candB.role} · Age ${candB.age}</div>
+          </div>
+        </div>
+
+        <div class="space-y-1 font-mono text-[11px]">
+          ${metrics.map(m => {
+            const va = Number(candA[m.key] || 0);
+            const vb = Number(candB[m.key] || 0);
+            const aWins = m.asc ? va < vb : va > vb;
+            const bWins = m.asc ? vb < va : vb > va;
+            return `
+              <div class="grid grid-cols-3 items-center px-2 py-1 rounded bnn-subcard">
+                <span class="${aWins ? 'text-rose-400 font-black' : 'bnn-muted'}">${m.fmt(va)}</span>
+                <span class="text-center text-[9.5px] font-extrabold bnn-muted">${m.label}</span>
+                <span class="text-right ${bWins ? 'text-sky-400 font-black' : 'bnn-muted'}">${m.fmt(vb)}</span>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      ` : `<div class="py-4 text-center text-xs font-mono bnn-muted">Select two contenders to compare</div>`}
+    </div>
+  `;
+}
+
+function buildLeadersTripleCrownExplorerHtml(tcList) {
+  if (!tcList || !tcList.length) return "";
+  const scopes = tcList.length > 1 ? tcList.slice(1) : tcList;
+  return `
+    <div class="bnn-card p-3 space-y-2.5">
+      <div class="flex items-center justify-between border-b bnn-border pb-2">
+        <div>
+          <div class="text-[10.5px] font-mono font-extrabold uppercase tracking-wider text-emerald-400">TRIPLE CROWN SUB-LEAGUE MATRIX</div>
+          <div class="text-[10px] bnn-muted">Live AVG/HR/RBI &amp; ERA/W/K Leg Leaders</div>
+        </div>
+        <i class="bi bi-trophy-fill text-emerald-400 text-xs"></i>
+      </div>
+      <div class="space-y-2">
+        ${scopes.map(tc => {
+          const bt = tc.batting?.threat;
+          const pt = tc.pitching?.threat;
+          return `
+            <div class="bnn-subcard p-2 rounded space-y-1.5 text-[10.5px] font-mono">
+              <div class="flex items-center justify-between">
+                <span class="font-extrabold text-amber-400 uppercase">${tc.scope_abbr || tc.scope}</span>
+                ${tc.batting?.is_triple_crown || tc.pitching?.is_triple_crown
+                  ? `<span class="px-1.5 py-0.2 rounded bg-emerald-500 text-slate-950 font-black text-[9.5px]">3-OF-3 CROWN LOCK!</span>`
+                  : `<span class="text-[9.5px] bnn-muted">${bt ? `${bt.name.split(" ").slice(-1)[0]} (${bt.crowns_led}/3 Bat)` : ""}</span>`}
+              </div>
+              <div class="grid grid-cols-2 gap-1.5">
+                <div class="space-y-0.5">
+                  <div class="text-[9.5px] font-bold text-rose-400">BATTING LEGS</div>
+                  ${tc.batting?.avg ? `<div onclick="openPlayerModal(${tc.batting.avg.player_id})" class="flex justify-between cursor-pointer hover:underline"><span class="bnn-muted">AVG</span><span class="font-bold truncate ml-1">${tc.batting.avg.name.split(" ").slice(-1)[0]} ${fmtAvg(tc.batting.avg.value)}</span></div>` : ""}
+                  ${tc.batting?.hr ? `<div onclick="openPlayerModal(${tc.batting.hr.player_id})" class="flex justify-between cursor-pointer hover:underline"><span class="bnn-muted">HR</span><span class="font-bold truncate ml-1">${tc.batting.hr.name.split(" ").slice(-1)[0]} ${tc.batting.hr.value}</span></div>` : ""}
+                  ${tc.batting?.rbi ? `<div onclick="openPlayerModal(${tc.batting.rbi.player_id})" class="flex justify-between cursor-pointer hover:underline"><span class="bnn-muted">RBI</span><span class="font-bold truncate ml-1">${tc.batting.rbi.name.split(" ").slice(-1)[0]} ${tc.batting.rbi.value}</span></div>` : ""}
+                </div>
+                <div class="space-y-0.5">
+                  <div class="text-[9.5px] font-bold text-amber-400">PITCHING LEGS</div>
+                  ${tc.pitching?.era ? `<div onclick="openPlayerModal(${tc.pitching.era.player_id})" class="flex justify-between cursor-pointer hover:underline"><span class="bnn-muted">ERA</span><span class="font-bold truncate ml-1">${tc.pitching.era.name.split(" ").slice(-1)[0]} ${Number(tc.pitching.era.value).toFixed(2)}</span></div>` : ""}
+                  ${tc.pitching?.w ? `<div onclick="openPlayerModal(${tc.pitching.w.player_id})" class="flex justify-between cursor-pointer hover:underline"><span class="bnn-muted">W</span><span class="font-bold truncate ml-1">${tc.pitching.w.name.split(" ").slice(-1)[0]} ${tc.pitching.w.value}</span></div>` : ""}
+                  ${tc.pitching?.k ? `<div onclick="openPlayerModal(${tc.pitching.k.player_id})" class="flex justify-between cursor-pointer hover:underline"><span class="bnn-muted">K</span><span class="font-bold truncate ml-1">${tc.pitching.k.name.split(" ").slice(-1)[0]} ${tc.pitching.k.value}</span></div>` : ""}
+                </div>
+              </div>
+              ${pt && pt.crowns_led >= 2 ? `<div class="text-[9.5px] text-emerald-400 font-bold pt-0.5 border-t bnn-border">★ Pitching Threat: ${pt.name} (${pt.crowns_led}/3 legs · #${pt.era_rank} ERA, #${pt.w_rank} W, #${pt.k_rank} K)</div>` : ""}
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function buildLeadersSavantViewHtml(batters, pitchers, qual, qualMode) {
+  const poolType = AppState.leadersSavantPool === "pitchers" ? "pitchers" : "batters";
+  const cols = poolType === "pitchers"
+    ? [
+        { key: "war", label: "WAR", asc: false, fmt: v => Number(v || 0).toFixed(1) },
+        { key: "fip_minus", label: "FIP-", asc: true, fmt: v => Math.round(Number(v || 100)) },
+        { key: "era_plus", label: "ERA+", asc: false, fmt: v => Math.round(Number(v || 100)) },
+        { key: "siera", label: "SIERA", asc: true, fmt: v => Number(v || 0).toFixed(2) },
+        { key: "k_minus_bb", label: "K-BB%", asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
+        { key: "k_pct", label: "K%", asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
+        { key: "bb_pct", label: "BB%", asc: true, fmt: v => `${Number(v || 0).toFixed(1)}%` },
+        { key: "velocity_mph", label: "Velo", asc: false, fmt: v => `${Number(v || 0).toFixed(1)}` },
+        { key: "barrel_against_pct", label: "Brl% Agst", asc: true, fmt: v => `${Number(v || 0).toFixed(1)}%` },
+      ]
+    : [
+        { key: "war", label: "WAR", asc: false, fmt: v => Number(v || 0).toFixed(1) },
+        { key: "xwoba", label: "xwOBA", asc: false, fmt: v => fmtAvg(v) },
+        { key: "wrc_plus", label: "wRC+", asc: false, fmt: v => Math.round(Number(v || 100)) },
+        { key: "avg_ev", label: "Avg EV", asc: false, fmt: v => `${Number(v || 0).toFixed(1)}` },
+        { key: "barrel_pct", label: "Barrel%", asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
+        { key: "hard_hit_pct", label: "Hard-Hit%", asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
+        { key: "sweet_spot_pct", label: "SwSpot%", asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
+        { key: "bb_pct", label: "BB%", asc: false, fmt: v => `${Number(v || 0).toFixed(1)}%` },
+        { key: "k_pct", label: "K%", asc: true, fmt: v => `${Number(v || 0).toFixed(1)}%` },
+        { key: "avg_sprint", label: "Sprint", asc: false, fmt: v => `${Number(v || 0).toFixed(1)}` },
+      ];
+
+  let basePool = poolType === "pitchers" ? pitchers.slice() : batters.slice();
+  if (qualMode === "qualified") {
+    const qOnly = basePool.filter(p => poolType === "pitchers" ? (AppState.leadersPitcherRole === "RP" ? p.is_reliever_qualified : p.is_qualified) : p.is_qualified);
+    if (qOnly.length >= 5) basePool = qOnly;
+  } else if (qualMode === "half") {
+    const hOnly = basePool.filter(p => p.is_half_qualified || p.is_reliever_qualified || p.is_qualified);
+    if (hOnly.length >= 5) basePool = hOnly;
+  }
+
+  const sortCol = cols.find(c => c.key === AppState.leadersSavantSort) || cols[1] || cols[0];
+  const distMap = {};
+  cols.forEach(c => {
+    distMap[c.key] = basePool.map(p => Number(p[c.key] || 0)).filter(v => Number.isFinite(v)).sort((a, b) => a - b);
+  });
+
+  const sortedPool = basePool.slice().sort((a, b) => {
+    const va = Number(a[sortCol.key] ?? (sortCol.asc ? 9999 : -9999));
+    const vb = Number(b[sortCol.key] ?? (sortCol.asc ? 9999 : -9999));
+    return sortCol.asc ? va - vb : vb - va;
+  }).slice(0, 60);
+
+  return `
+    <div class="bnn-card p-4 space-y-3">
+      <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b bnn-border">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-mono font-black uppercase">ARCHETYPE 02 · SAVANT PERCENTILES</span>
+            <span class="text-xs font-mono bnn-muted">1st Pct <span class="inline-block w-2.5 h-2.5 rounded-full align-middle" style="background:#002244"></span> → 50th <span class="inline-block w-2.5 h-2.5 rounded-full align-middle" style="background:#64748B"></span> → 99th Pct <span class="inline-block w-2.5 h-2.5 rounded-full align-middle" style="background:#D32F2F"></span></span>
+          </div>
+          <h3 class="text-base font-black mt-1">Process &amp; Batted-Ball Percentile Slider Board (${basePool.length} Qualified Cohort)</h3>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="inline-flex rounded-lg bg-black/30 p-0.5 border bnn-border text-xs font-mono">
+            <button onclick="setLeadersOption('leadersSavantPool','batters')" class="px-3 py-1 rounded font-extrabold ${poolType === 'batters' ? 'bg-rose-600 text-white' : 'bnn-muted'}">Batters (${qual.qual_pa || 0}+ PA)</button>
+            <button onclick="setLeadersOption('leadersSavantPool','pitchers')" class="px-3 py-1 rounded font-extrabold ${poolType === 'pitchers' ? 'bg-amber-400 text-slate-950' : 'bnn-muted'}">Pitchers (${qual.qual_ip || 0}+ IP)</button>
+          </div>
+          <button onclick="exportLeadersCsv('${poolType}')" class="px-2.5 py-1 rounded bnn-subcard border bnn-border text-[11px] font-mono font-bold hover:border-sky-400">
+            <i class="bi bi-download mr-1"></i>CSV
+          </button>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto max-h-[75vh]">
+        <table class="leaders-agate-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Player</th>
+              <th>Club</th>
+              <th>${poolType === 'pitchers' ? 'IP' : 'PA'}</th>
+              ${cols.map(c => `
+                <th onclick="setLeadersOption('leadersSavantSort','${c.key}')" class="min-w-[112px] text-center ${sortCol.key === c.key ? '!text-amber-400 underline' : ''}">
+                  ${c.label} ${sortCol.key === c.key ? (c.asc ? "▲" : "▼") : ""}
+                </th>
+              `).join("")}
+            </tr>
+          </thead>
+          <tbody>
+            ${sortedPool.map((p, idx) => `
+              <tr onclick="openPlayerModal(${p.player_id})" class="cursor-pointer">
+                <td class="bnn-muted font-bold">${idx + 1}</td>
+                <td>
+                  <div class="flex items-center gap-2">
+                    <span class="font-sans font-extrabold">${p.name}</span>
+                    <span class="text-[10px] bnn-muted">${p.position || p.role}</span>
+                    <button onclick="dockLeadersPlayer(${p.player_id}, event)" class="px-1.5 py-0.2 rounded bnn-subcard border bnn-border text-[9px] bnn-muted hover:text-sky-400" title="Pin to Ultrawide Scout Dock">Dock</button>
+                  </div>
+                </td>
+                <td>
+                  <div class="flex items-center gap-1">
+                    <img src="${teamLogoUrl(p.team_logo)}" class="w-3.5 h-3.5 object-contain" alt="">
+                    <span class="font-bold">${p.team_abbr}</span>
+                  </div>
+                </td>
+                <td class="bnn-muted">${poolType === 'pitchers' ? (p.ip_display || Number(p.ip || 0).toFixed(1)) : p.pa}</td>
+                ${cols.map(c => {
+                  const pct = computeSavantPercentile(p[c.key], distMap[c.key], c.asc);
+                  const pinHex = savantPinColor(pct);
+                  return `
+                    <td class="px-2.5 py-2">
+                      <div class="flex items-center justify-between text-[10px] mb-1">
+                        <span class="font-bold">${c.fmt(p[c.key])}</span>
+                        <span class="text-[9px] bnn-muted">${pct}th</span>
+                      </div>
+                      <div class="leaders-savant-track my-1">
+                        <div class="leaders-savant-fill" style="width:${pct}%; background:${pinHex}; opacity:0.62;"></div>
+                        <div class="leaders-savant-pin" style="left:${pct}%; background:${pinHex};">${pct}</div>
+                      </div>
+                    </td>
+                  `;
+                }).join("")}
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function buildLeadersBroadsheetViewHtml(batters, pitchers, fielders, qual, qualMode) {
+  const dom = AppState.leadersBroadsheetDom || "batting";
+  const showPace = Boolean(AppState.leadersBroadsheetPace);
+  const teamG = Math.max(1, Number(qual.team_games || 162));
+  const paceMult = 162.0 / teamG;
+
+  const cats = dom === "pitching"
+    ? PITCHING_LEADER_CATEGORIES
+    : (dom === "fielding" ? FIELDING_LEADER_CATEGORIES : (dom === "statcast" ? STATCAST_LEADER_CATEGORIES : BATTING_LEADER_CATEGORIES));
+
+  // Count Black-Ink (#1 leads) across all categories in current domain
+  const blackInkCounts = {};
+  const boxesHtml = cats.map(cat => {
+    const rawPool = cat.pool === "pitchers" || dom === "pitching"
+      ? pitchers
+      : (dom === "fielding" ? fielders : batters);
+    let elig = rawPool.slice();
+    if (qualMode === "qualified") {
+      if (cat.isRate) {
+        const qOnly = elig.filter(p => p.is_qualified || ((cat.pool === "pitchers" || dom === "pitching") && AppState.leadersPitcherRole === "RP" && p.is_reliever_qualified));
+        if (qOnly.length >= 3) elig = qOnly;
+      } else {
+        const nz = elig.filter(p => Number(p[cat.key] || 0) !== 0);
+        if (nz.length > 0) elig = nz;
+      }
+    } else if (qualMode === "half" && cat.isRate) {
+      const hOnly = elig.filter(p => p.is_half_qualified || p.is_reliever_qualified || p.is_qualified);
+      if (hOnly.length >= 3) elig = hOnly;
+    }
+    if (cat.key === "rto_pct") elig = elig.filter(p => Number(p.sba || 0) >= 8);
+    if (cat.key === "sb_pct") elig = elig.filter(p => (Number(p.sb || 0) + Number(p.cs || 0)) >= 8);
+
+    elig.sort((a, b) => {
+      const va = Number(a[cat.key] ?? (cat.asc ? 9999 : -9999));
+      const vb = Number(b[cat.key] ?? (cat.asc ? 9999 : -9999));
+      return cat.asc ? va - vb : vb - va;
+    });
+    const top10 = elig.slice(0, 10);
+    if (top10[0]) {
+      const lid = top10[0].player_id;
+      blackInkCounts[lid] = blackInkCounts[lid] || { name: top10[0].name, team_abbr: top10[0].team_abbr, count: 0, player_id: lid };
+      blackInkCounts[lid].count += 1;
+    }
+
+    return `
+      <div class="leaders-broadsheet-box flex flex-col">
+        <div class="px-2.5 py-1.5 border-b bnn-border flex items-center justify-between bg-black/20">
+          <span class="text-[11px] font-black uppercase tracking-tight truncate">${cat.code} · ${cat.label}</span>
+          <span class="text-[9.5px] font-mono bnn-muted shrink-0">${cat.isCounting && showPace ? "162-G PACE" : (cat.isRate ? "QUAL" : "SEASON")}</span>
+        </div>
+        <div class="divide-y divide-slate-800/40 font-mono text-[11px]">
+          ${top10.length ? top10.map((pl, idx) => {
+            const rawVal = Number(pl[cat.key] || 0);
+            const dispStr = (showPace && cat.isCounting)
+              ? `${Math.round(rawVal * paceMult)} (${cat.fmt(rawVal)})`
+              : cat.fmt(rawVal);
+            return `
+              <div onclick="openPlayerModal(${pl.player_id})" class="px-2.5 py-1 flex items-center justify-between cursor-pointer bnn-row-hover ${idx === 0 ? 'bg-amber-500/10' : ''}">
+                <div class="flex items-center gap-1.5 min-w-0">
+                  <span class="w-4 text-[10px] bnn-muted">${idx + 1}.</span>
+                  <span class="font-sans truncate ${idx === 0 ? 'leaders-black-ink text-amber-400' : 'font-semibold'}">${pl.name}</span>
+                  <span class="text-[9.5px] bnn-muted">${pl.team_abbr}</span>
+                </div>
+                <span class="${idx === 0 ? 'leaders-black-ink text-amber-400' : 'font-bold'} ml-2 shrink-0">${dispStr}</span>
+              </div>
+            `;
+          }).join("") : `<div class="p-3 text-center text-[10.5px] bnn-muted">No qualifiers</div>`}
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  const topBlackInk = Object.values(blackInkCounts).sort((a, b) => b.count - a.count).slice(0, 6);
+
+  return `
+    <div class="space-y-3">
+      <div class="bnn-card p-3.5 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded bg-amber-400 text-slate-950 text-[10px] font-mono font-black uppercase">ARCHETYPE 03 · BLACK-INK AGATE BROADSHEET</span>
+            <span class="text-xs font-mono bnn-muted">Sporting News / B-Ref Archival Multi-Column Top-10 Boxes (${cats.length} Categories)</span>
+          </div>
+          ${topBlackInk.length ? `
+            <div class="flex flex-wrap items-center gap-2 mt-1.5 text-[11px] font-mono">
+              <span class="font-extrabold text-amber-400">BLACK INK LEADERS:</span>
+              ${topBlackInk.map(bi => `
+                <button onclick="openPlayerModal(${bi.player_id})" class="px-2 py-0.5 rounded bnn-subcard border bnn-border hover:border-amber-400">
+                  <strong>${bi.name}</strong> (${bi.team_abbr}) · <span class="text-amber-400 font-black">${bi.count}× #1</span>
+                </button>
+              `).join("")}
+            </div>
+          ` : ""}
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="inline-flex rounded-lg bg-black/30 p-0.5 border bnn-border text-[11px] font-mono">
+            <button onclick="setLeadersOption('leadersBroadsheetDom','batting')" class="px-2.5 py-1 rounded font-extrabold ${dom === 'batting' ? 'bg-rose-600 text-white' : 'bnn-muted'}">Batting (${BATTING_LEADER_CATEGORIES.length})</button>
+            <button onclick="setLeadersOption('leadersBroadsheetDom','pitching')" class="px-2.5 py-1 rounded font-extrabold ${dom === 'pitching' ? 'bg-amber-400 text-slate-950' : 'bnn-muted'}">Pitching (${PITCHING_LEADER_CATEGORIES.length})</button>
+            <button onclick="setLeadersOption('leadersBroadsheetDom','fielding')" class="px-2.5 py-1 rounded font-extrabold ${dom === 'fielding' ? 'bg-emerald-500 text-slate-950' : 'bnn-muted'}">Fielding (${FIELDING_LEADER_CATEGORIES.length})</button>
+            <button onclick="setLeadersOption('leadersBroadsheetDom','statcast')" class="px-2.5 py-1 rounded font-extrabold ${dom === 'statcast' ? 'bg-sky-400 text-slate-950' : 'bnn-muted'}">Statcast (${STATCAST_LEADER_CATEGORIES.length})</button>
+          </div>
+          <button onclick="setLeadersOption('leadersBroadsheetPace', ${!showPace})" class="px-2.5 py-1 rounded border text-[11px] font-mono font-extrabold ${showPace ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'bnn-subcard bnn-border bnn-muted'}">
+            <i class="bi bi-speedometer2 mr-1"></i>162-G Pace (${teamG} G Played)
+          </button>
+          <button onclick="exportLeadersCsv('${dom === 'pitching' ? 'pitchers' : (dom === 'fielding' ? 'fielders' : 'batters')}')" class="px-2.5 py-1 rounded bnn-subcard border bnn-border text-[11px] font-mono font-bold hover:border-sky-400">
+            <i class="bi bi-download mr-1"></i>CSV
+          </button>
+        </div>
+      </div>
+
+      <div class="leaders-broadsheet-grid">
+        ${boxesHtml}
+      </div>
+    </div>
+  `;
+}
+
+function buildLeadersWorkbenchViewHtml(batters, pitchers, qual) {
+  const poolType = AppState.leadersWbPool === "pitchers" ? "pitchers" : "batters";
+  const preset = AppState.leadersWbPreset || "saber";
+  const defaultMin = poolType === "pitchers" ? Number(qual.qual_ip || 50) : Number(qual.qual_pa || 150);
+  const minVal = AppState.leadersWbMinVal >= 0 ? Number(AppState.leadersWbMinVal) : defaultMin;
+  const maxSlider = poolType === "pitchers" ? Math.max(220, Math.round(defaultMin * 1.4)) : Math.max(680, Math.round(defaultMin * 1.35));
+  const ageFilter = AppState.leadersWbAge || "ALL";
+  const handFilter = AppState.leadersWbHand || "ALL";
+
+  const batPresets = {
+    saber: [
+      { key: "pa", label: "PA", fmt: v => v },
+      { key: "avg", label: "AVG", fmt: v => fmtAvg(v) },
+      { key: "obp", label: "OBP", fmt: v => fmtAvg(v) },
+      { key: "slg", label: "SLG", fmt: v => fmtAvg(v) },
+      { key: "iso", label: "ISO", fmt: v => fmtAvg(v) },
+      { key: "bb_pct", label: "BB%", fmt: v => `${Number(v || 0).toFixed(1)}%` },
+      { key: "k_pct", label: "K%", asc: true, fmt: v => `${Number(v || 0).toFixed(1)}%` },
+      { key: "woba", label: "wOBA", fmt: v => fmtAvg(v) },
+      { key: "xwoba", label: "xwOBA", fmt: v => fmtAvg(v) },
+      { key: "wrc_plus", label: "wRC+", fmt: v => Math.round(Number(v || 0)) },
+      { key: "def_runs", label: "DEF", fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(1)}` },
+      { key: "wpa", label: "WPA", fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(2)}` },
+      { key: "war", label: "WAR", fmt: v => Number(v || 0).toFixed(1) },
+      { key: "mvp_score", label: "MVP IDX", fmt: v => Number(v || 0).toFixed(1) },
+    ],
+    traditional: [
+      { key: "g", label: "G", fmt: v => v },
+      { key: "pa", label: "PA", fmt: v => v },
+      { key: "ab", label: "AB", fmt: v => v },
+      { key: "r", label: "R", fmt: v => v },
+      { key: "h", label: "H", fmt: v => v },
+      { key: "2b", label: "2B", fmt: v => v },
+      { key: "3b", label: "3B", fmt: v => v },
+      { key: "hr", label: "HR", fmt: v => v },
+      { key: "rbi", label: "RBI", fmt: v => v },
+      { key: "sb", label: "SB", fmt: v => v },
+      { key: "bb", label: "BB", fmt: v => v },
+      { key: "k", label: "SO", asc: true, fmt: v => v },
+      { key: "avg", label: "AVG", fmt: v => fmtAvg(v) },
+      { key: "ops", label: "OPS", fmt: v => fmtAvg(v) },
+      { key: "war", label: "WAR", fmt: v => Number(v || 0).toFixed(1) },
+    ],
+    statcast: [
+      { key: "pa", label: "PA", fmt: v => v },
+      { key: "xwoba", label: "xwOBA", fmt: v => fmtAvg(v) },
+      { key: "woba", label: "wOBA", fmt: v => fmtAvg(v) },
+      { key: "woba_diff", label: "wOBA-xwOBA", fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(3)}` },
+      { key: "xba", label: "xBA", fmt: v => fmtAvg(v) },
+      { key: "xslg", label: "xSLG", fmt: v => fmtAvg(v) },
+      { key: "avg_ev", label: "Avg EV", fmt: v => `${Number(v || 0).toFixed(1)}` },
+      { key: "max_ev", label: "Max EV", fmt: v => `${Number(v || 0).toFixed(1)}` },
+      { key: "barrel_pct", label: "Brl%", fmt: v => `${Number(v || 0).toFixed(1)}%` },
+      { key: "hard_hit_pct", label: "Hard%", fmt: v => `${Number(v || 0).toFixed(1)}%` },
+      { key: "sweet_spot_pct", label: "SwSp%", fmt: v => `${Number(v || 0).toFixed(1)}%` },
+      { key: "avg_sprint", label: "Sprint", fmt: v => `${Number(v || 0).toFixed(1)}` },
+      { key: "war", label: "WAR", fmt: v => Number(v || 0).toFixed(1) },
+    ],
+    defense: [
+      { key: "g", label: "G", fmt: v => v },
+      { key: "fld_ip", label: "Fld Inn", fmt: v => Number(v || 0).toFixed(1) },
+      { key: "zr", label: "ZR", fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(2)}` },
+      { key: "framing", label: "Framing", fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(2)}` },
+      { key: "arm", label: "Arm", fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(2)}` },
+      { key: "def_runs", label: "Def Runs", fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(1)}` },
+      { key: "ubr", label: "UBR", fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(2)}` },
+      { key: "bat_runs", label: "Bat wRAA", fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(1)}` },
+      { key: "pos_adj", label: "Pos Adj", fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(1)}` },
+      { key: "war", label: "WAR", fmt: v => Number(v || 0).toFixed(1) },
+    ],
+  };
+
+  const pitPresets = {
+    saber: [
+      { key: "ip", label: "IP", fmt: v => Number(v || 0).toFixed(1) },
+      { key: "era", label: "ERA", asc: true, fmt: v => Number(v || 0).toFixed(2) },
+      { key: "fip", label: "FIP", asc: true, fmt: v => Number(v || 0).toFixed(2) },
+      { key: "xfip", label: "xFIP", asc: true, fmt: v => Number(v || 0).toFixed(2) },
+      { key: "siera", label: "SIERA", asc: true, fmt: v => Number(v || 0).toFixed(2) },
+      { key: "era_plus", label: "ERA+", fmt: v => Math.round(Number(v || 0)) },
+      { key: "fip_minus", label: "FIP-", asc: true, fmt: v => Math.round(Number(v || 0)) },
+      { key: "k_pct", label: "K%", fmt: v => `${Number(v || 0).toFixed(1)}%` },
+      { key: "bb_pct", label: "BB%", asc: true, fmt: v => `${Number(v || 0).toFixed(1)}%` },
+      { key: "k_minus_bb", label: "K-BB%", fmt: v => `${Number(v || 0).toFixed(1)}%` },
+      { key: "wpa", label: "WPA", fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(2)}` },
+      { key: "ra9war", label: "RA9-WAR", fmt: v => Number(v || 0).toFixed(1) },
+      { key: "war", label: "WAR", fmt: v => Number(v || 0).toFixed(1) },
+      { key: "cy_score", label: "CY IDX", fmt: v => Number(v || 0).toFixed(1) },
+    ],
+    traditional: [
+      { key: "g", label: "G", fmt: v => v },
+      { key: "gs", label: "GS", fmt: v => v },
+      { key: "w", label: "W", fmt: v => v },
+      { key: "l", label: "L", asc: true, fmt: v => v },
+      { key: "sv", label: "SV", fmt: v => v },
+      { key: "hld", label: "HLD", fmt: v => v },
+      { key: "qs", label: "QS", fmt: v => v },
+      { key: "ip", label: "IP", fmt: v => Number(v || 0).toFixed(1) },
+      { key: "era", label: "ERA", asc: true, fmt: v => Number(v || 0).toFixed(2) },
+      { key: "whip", label: "WHIP", asc: true, fmt: v => Number(v || 0).toFixed(2) },
+      { key: "k", label: "SO", fmt: v => v },
+      { key: "bb", label: "BB", asc: true, fmt: v => v },
+      { key: "war", label: "WAR", fmt: v => Number(v || 0).toFixed(1) },
+    ],
+    statcast: [
+      { key: "ip", label: "IP", fmt: v => Number(v || 0).toFixed(1) },
+      { key: "velocity_mph", label: "Velo", fmt: v => `${Number(v || 0).toFixed(1)}` },
+      { key: "avg_ev_against", label: "EV Agst", asc: true, fmt: v => `${Number(v || 0).toFixed(1)}` },
+      { key: "hard_hit_against_pct", label: "HH% Agst", asc: true, fmt: v => `${Number(v || 0).toFixed(1)}%` },
+      { key: "barrel_against_pct", label: "Brl% Agst", asc: true, fmt: v => `${Number(v || 0).toFixed(1)}%` },
+      { key: "gb_pct", label: "GB%", fmt: v => `${Number(v || 0).toFixed(1)}%` },
+      { key: "babip", label: "BABIP", asc: true, fmt: v => fmtAvg(v) },
+      { key: "lob_pct", label: "LOB%", fmt: v => `${Number(v || 0).toFixed(1)}%` },
+      { key: "siera", label: "SIERA", asc: true, fmt: v => Number(v || 0).toFixed(2) },
+      { key: "war", label: "WAR", fmt: v => Number(v || 0).toFixed(1) },
+    ],
+    defense: [
+      { key: "g", label: "G", fmt: v => v },
+      { key: "ip", label: "IP", fmt: v => Number(v || 0).toFixed(1) },
+      { key: "sv", label: "SV", fmt: v => v },
+      { key: "hld", label: "HLD", fmt: v => v },
+      { key: "sd", label: "SD", fmt: v => v },
+      { key: "wpa", label: "WPA", fmt: v => `${Number(v || 0) > 0 ? "+" : ""}${Number(v || 0).toFixed(2)}` },
+      { key: "reliever_score", label: "REL IDX", fmt: v => Number(v || 0).toFixed(1) },
+      { key: "cy_score", label: "CY IDX", fmt: v => Number(v || 0).toFixed(1) },
+      { key: "war", label: "WAR", fmt: v => Number(v || 0).toFixed(1) },
+    ],
+  };
+
+  const activeCols = (poolType === "pitchers" ? pitPresets : batPresets)[preset] || (poolType === "pitchers" ? pitPresets.saber : batPresets.saber);
+  const rawList = poolType === "pitchers" ? pitchers : batters;
+
+  const filtered = rawList.filter(p => {
+    const sample = poolType === "pitchers" ? Number(p.ip || 0) : Number(p.pa || 0);
+    if (sample < minVal) return false;
+    const age = Number(p.age || 26);
+    if (ageFilter === "U25" && age > 25) return false;
+    if (ageFilter === "PRIME" && (age < 26 || age > 30)) return false;
+    if (ageFilter === "VET" && age < 31) return false;
+    const hand = poolType === "pitchers" ? p.throws : p.bats;
+    if (handFilter !== "ALL" && hand !== handFilter) return false;
+    return true;
+  });
+
+  const sKey = AppState.leadersWbSortKey || "war";
+  const sAsc = Boolean(AppState.leadersWbSortAsc);
+  filtered.sort((a, b) => {
+    const va = Number(a[sKey] ?? (sAsc ? 9999 : -9999));
+    const vb = Number(b[sKey] ?? (sAsc ? 9999 : -9999));
+    return sAsc ? va - vb : vb - va;
+  });
+
+  // Sample stabilization heuristic guidance
+  const stabBadge = poolType === "pitchers"
+    ? (minVal >= 120 ? "FIP & K-BB% Stabilized (120+ IP)" : (minVal >= 40 ? "K% & BB% Stabilized (~40+ IP)" : "Small Sample Warning (<40 IP)"))
+    : (minVal >= 320 ? "wOBA, ISO & Barrel% Stabilized (320+ PA)" : (minVal >= 120 ? "K% & BB% Stabilized (120+ PA)" : "Small Sample Warning (<120 PA)"));
+  const stabCls = (poolType === "pitchers" ? minVal >= 40 : minVal >= 120)
+    ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/35"
+    : "bg-amber-500/15 text-amber-400 border-amber-500/40";
+
+  return `
+    <div class="space-y-3.5">
+      <div class="grid grid-cols-1 xl:grid-cols-12 gap-3.5 items-start">
+        <!-- Workbench Controls -->
+        <div class="xl:col-span-8 bnn-card p-3.5 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b bnn-border">
+            <div>
+              <span class="px-2 py-0.5 rounded bg-sky-500 text-slate-950 text-[10px] font-mono font-black uppercase">ARCHETYPE 04 · FRONT-OFFICE QUERY WORKBENCH</span>
+              <h3 class="text-sm font-black mt-1">Custom Sample Gate, Age/Hand Splits &amp; Column Preset Explorer (${filtered.length} Matches)</h3>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded border text-[10px] font-mono font-bold ${stabCls}">${stabBadge}</span>
+              <button onclick="exportLeadersCsv('${poolType}')" class="px-2.5 py-1 rounded bnn-subcard border bnn-border text-[11px] font-mono font-bold hover:border-sky-400">
+                <i class="bi bi-download mr-1"></i>Export CSV
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs font-mono">
+            <!-- Pool & Preset -->
+            <div class="space-y-1">
+              <div class="text-[10px] bnn-muted font-extrabold uppercase">Player Pool</div>
+              <div class="inline-flex w-full rounded bg-black/30 p-0.5 border bnn-border">
+                <button onclick="setLeadersOption('leadersWbPool','batters')" class="flex-1 py-1 rounded font-bold ${poolType === 'batters' ? 'bg-rose-600 text-white' : 'bnn-muted'}">Batters</button>
+                <button onclick="setLeadersOption('leadersWbPool','pitchers')" class="flex-1 py-1 rounded font-bold ${poolType === 'pitchers' ? 'bg-amber-400 text-slate-950' : 'bnn-muted'}">Pitchers</button>
+              </div>
+            </div>
+
+            <!-- Minimum PA / IP Slider -->
+            <div class="space-y-1">
+              <div class="flex justify-between text-[10px] font-extrabold uppercase">
+                <span class="bnn-muted">Min ${poolType === 'pitchers' ? 'IP' : 'PA'} Gate</span>
+                <span class="text-sky-400">${minVal} ${poolType === 'pitchers' ? 'IP' : 'PA'}</span>
+              </div>
+              <input type="range" min="0" max="${maxSlider}" step="${poolType === 'pitchers' ? 5 : 10}" value="${minVal}"
+                     onchange="setLeadersOption('leadersWbMinVal', Number(this.value))"
+                     class="w-full accent-sky-500 cursor-pointer">
+            </div>
+
+            <!-- Age Bracket -->
+            <div class="space-y-1">
+              <div class="text-[10px] bnn-muted font-extrabold uppercase">Age Curve Split</div>
+              <select onchange="setLeadersOption('leadersWbAge', this.value)" class="w-full bnn-subcard border bnn-border rounded px-2 py-1 font-bold">
+                <option value="ALL" ${ageFilter === 'ALL' ? 'selected' : ''}>All Ages</option>
+                <option value="U25" ${ageFilter === 'U25' ? 'selected' : ''}>Rookie / U-25 (≤25)</option>
+                <option value="PRIME" ${ageFilter === 'PRIME' ? 'selected' : ''}>Prime Peak (26–30)</option>
+                <option value="VET" ${ageFilter === 'VET' ? 'selected' : ''}>Veteran (31+)</option>
+              </select>
+            </div>
+
+            <!-- Handedness -->
+            <div class="space-y-1">
+              <div class="text-[10px] bnn-muted font-extrabold uppercase">${poolType === 'pitchers' ? 'Throws' : 'Bats'} Split</div>
+              <div class="inline-flex w-full rounded bg-black/30 p-0.5 border bnn-border">
+                ${(poolType === "pitchers" ? ["ALL", "R", "L"] : ["ALL", "R", "L", "S"]).map(h => `
+                  <button onclick="setLeadersOption('leadersWbHand','${h}')" class="flex-1 py-1 rounded font-bold ${handFilter === h ? 'bg-sky-500 text-slate-950' : 'bnn-muted'}">${h}</button>
+                `).join("")}
+              </div>
+            </div>
+          </div>
+
+          <!-- Column Preset Bar -->
+          <div class="flex flex-wrap items-center gap-1.5 pt-1">
+            <span class="text-[10px] font-mono font-extrabold uppercase bnn-muted mr-1">Column Lens:</span>
+            ${[
+              { id: "saber", label: "Sabermetric Core" },
+              { id: "traditional", label: "Traditional Box" },
+              { id: "statcast", label: "Statcast Process" },
+              { id: "defense", label: poolType === "pitchers" ? "Leverage & Awards" : "Defense & WAR Stack" },
+            ].map(pr => `
+              <button onclick="setLeadersOption('leadersWbPreset','${pr.id}')" class="px-2.5 py-1 rounded text-[11px] font-mono font-bold border transition ${preset === pr.id ? 'bg-sky-500 text-slate-950 border-sky-400 font-black' : 'bnn-subcard bnn-border bnn-muted'}">${pr.label}</button>
+            `).join("")}
+          </div>
+        </div>
+
+        <!-- Side-by-Side Contender Duel Pin -->
+        <div class="xl:col-span-4">
+          ${buildLeadersContenderDuelCardHtml(batters, pitchers)}
+        </div>
+      </div>
+
+      <!-- Query Result Table -->
+      <div class="bnn-card p-3 overflow-x-auto max-h-[68vh]">
+        <table class="leaders-agate-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Player</th>
+              <th>Club</th>
+              <th>Pos</th>
+              <th>Age</th>
+              <th>${poolType === 'pitchers' ? 'Thr' : 'Bat'}</th>
+              ${activeCols.map(c => `
+                <th onclick="sortLeadersWorkbench('${c.key}', ${Boolean(c.asc)})" class="text-right ${sKey === c.key ? '!text-amber-400 underline' : ''}">
+                  ${c.label} ${sKey === c.key ? (sAsc ? "▲" : "▼") : ""}
+                </th>
+              `).join("")}
+              <th class="text-center">Pin Duel</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filtered.slice(0, 200).map((p, idx) => `
+              <tr onclick="openPlayerModal(${p.player_id})" class="cursor-pointer">
+                <td class="bnn-muted">${idx + 1}</td>
+                <td class="font-sans font-extrabold">${p.name}</td>
+                <td>
+                  <div class="flex items-center gap-1">
+                    <img src="${teamLogoUrl(p.team_logo)}" class="w-3.5 h-3.5 object-contain" alt="">
+                    <span class="font-bold">${p.team_abbr}</span>
+                  </div>
+                </td>
+                <td>${p.position || p.role}</td>
+                <td>${p.age}</td>
+                <td>${poolType === 'pitchers' ? p.throws : p.bats}</td>
+                ${activeCols.map(c => `<td class="text-right ${sKey === c.key ? 'font-black text-amber-400' : ''}">${c.fmt(p[c.key])}</td>`).join("")}
+                <td class="text-center">
+                  <button onclick="pinLeadersDuel('A', ${p.player_id}, '${poolType}', event)" class="px-1.5 py-0.2 rounded bnn-subcard border bnn-border text-[9.5px] hover:border-rose-400 text-rose-400 font-bold" title="Pin as Contender A">A</button>
+                  <button onclick="pinLeadersDuel('B', ${p.player_id}, '${poolType}', event)" class="px-1.5 py-0.2 rounded bnn-subcard border bnn-border text-[9.5px] hover:border-sky-400 text-sky-400 font-bold ml-0.5" title="Pin as Contender B">B</button>
+                </td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
       </div>
     </div>
   `;
@@ -6966,9 +8043,15 @@ function renderLeaderCardHtml(cat, pool, qualRuleLabel, qualMode) {
 function renderLeagueLeadersSubView(container) {
   const data = AppState.leadersData;
   if (!data || data.error) {
-    container.innerHTML = `<div class="glass-card p-8 text-center text-rose-400">${(data && data.error) || 'Failed to load League Leaders'}</div>`;
+    container.innerHTML = `<div class="glass-card p-8 text-center text-rose-400">${(data && data.error) || "Failed to load League Leaders"}</div>`;
     return;
   }
+
+  const isLight = AppState.frontPageTheme === "light";
+  const themeCls = isLight ? "bnn-portal-light" : "bnn-portal-dark";
+  const vpMode = AppState.frontPageViewportMode || "auto";
+  const vpClass = vpMode === "ultrawide" ? "bnn-vp-ultrawide" : (vpMode === "standard" ? "bnn-vp-standard" : "bnn-vp-auto");
+  const viewMode = AppState.leadersViewMode || "portal";
 
   const qual = data.qualification || {};
   const subLeagues = data.sub_leagues || [];
@@ -6979,6 +8062,7 @@ function renderLeagueLeadersSubView(container) {
   const teamFilter = Number(AppState.leadersTeam) || 0;
   const posFilter = AppState.leadersPos || "";
   const roleFilter = AppState.leadersPitcherRole || "ALL";
+  const groupFilter = AppState.leadersGroupFilter || "ALL";
 
   const filterPlayer = (p, isPitcher = false) => {
     if (slFilter !== "ALL" && Number(p.sub_league_id) !== Number(slFilter)) return false;
@@ -6996,304 +8080,824 @@ function renderLeagueLeadersSubView(container) {
   const pitchers = (data.pitchers || []).filter(p => filterPlayer(p, true));
   const fielders = (data.fielders || []).filter(f => filterPlayer(f, false));
 
-  let bodyHtml = "";
-  if (catTab === "batting") {
-    const groups = ["Slash & Rate", "Sabermetric", "Counting"];
-    bodyHtml = groups.map(grp => {
-      const cats = BATTING_LEADER_CATEGORIES.filter(c => c.group === grp);
-      return `
-        <div class="space-y-3">
-          <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-            <h3 class="text-sm font-black uppercase tracking-wider text-sky-300 flex items-center gap-2">
-              <i class="bi bi-trophy-fill text-amber-400"></i> Batting — ${grp} Leaders (${cats.length} Categories)
-            </h3>
-            <span class="text-xs font-mono text-slate-400">Rate Qualifier: ${qual.bat_rule_desc || `${qual.qual_pa} PA`}</span>
-          </div>
-          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 uw:grid-cols-5 gap-4">
-            ${cats.map(c => renderLeaderCardHtml(c, batters, `${qual.qual_pa} PA`, qualMode)).join("")}
-          </div>
-        </div>
-      `;
-    }).join('<div class="my-6"></div>');
-  } else if (catTab === "pitching") {
-    const groups = ["Rate & Command", "Sabermetric", "Counting & Bullpen"];
-    const pQualLabel = roleFilter === "RP" ? `${qual.qual_reliever_ip} IP (Reliever)` : `${qual.qual_ip} IP`;
-    bodyHtml = groups.map(grp => {
-      const cats = PITCHING_LEADER_CATEGORIES.filter(c => c.group === grp);
-      return `
-        <div class="space-y-3">
-          <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-            <h3 class="text-sm font-black uppercase tracking-wider text-amber-300 flex items-center gap-2">
-              <i class="bi bi-fire text-amber-400"></i> Pitching — ${grp} Leaders (${cats.length} Categories)
-            </h3>
-            <span class="text-xs font-mono text-slate-400">Rate Qualifier: ${pQualLabel}</span>
-          </div>
-          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 uw:grid-cols-5 gap-4">
-            ${cats.map(c => renderLeaderCardHtml({ ...c, pool: "pitchers" }, pitchers, pQualLabel, qualMode)).join("")}
-          </div>
-        </div>
-      `;
-    }).join('<div class="my-6"></div>');
-  } else if (catTab === "fielding") {
-    const groups = ["Advanced Defense", "Rate & Range", "Counting Defense"];
-    bodyHtml = groups.map(grp => {
-      const cats = FIELDING_LEADER_CATEGORIES.filter(c => c.group === grp);
-      return `
-        <div class="space-y-3">
-          <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-            <h3 class="text-sm font-black uppercase tracking-wider text-emerald-300 flex items-center gap-2">
-              <i class="bi bi-shield-fill-check text-emerald-400"></i> Fielding & Defense — ${grp} Leaders (${cats.length} Categories)
-            </h3>
-            <span class="text-xs font-mono text-slate-400">Qualifier: ${qual.fld_rule_desc || `${qual.qual_fld_g} G`}</span>
-          </div>
-          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 uw:grid-cols-4 gap-4">
-            ${cats.map(c => renderLeaderCardHtml(c, fielders, `${qual.qual_fld_g} G`, qualMode)).join("")}
-          </div>
-        </div>
-      `;
-    }).join('<div class="my-6"></div>');
-  } else if (catTab === "statcast") {
-    const groups = ["Batter Statcast", "Baserunning & Speed", "Pitcher Statcast"];
-    bodyHtml = groups.map(grp => {
-      const cats = STATCAST_LEADER_CATEGORIES.filter(c => c.group === grp);
-      return `
-        <div class="space-y-3">
-          <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-            <h3 class="text-sm font-black uppercase tracking-wider text-purple-300 flex items-center gap-2">
-              <i class="bi bi-bullseye text-purple-400"></i> ${grp} Leaders (${cats.length} Categories)
-            </h3>
-            <span class="text-xs font-mono text-slate-400">Batted-Ball & Speed Tracking</span>
-          </div>
-          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
-            ${cats.map(c => {
-              const pool = c.pool === "pitchers" ? pitchers : batters;
-              const qLabel = c.pool === "pitchers" ? `${qual.qual_ip} IP` : `${qual.qual_pa} PA`;
-              return renderLeaderCardHtml(c, pool, qLabel, qualMode);
-            }).join("")}
-          </div>
-        </div>
-      `;
-    }).join('<div class="my-6"></div>');
+  // =========================================================================
+  // LEVEL 1: HERO KPI DATA COMPUTATION
+  // =========================================================================
+  const mvpSorted = [...batters].sort((a, b) => (Number(b.war || 0) - Number(a.war || 0)) || (Number(b.mvp_score || 0) - Number(a.mvp_score || 0)));
+  const mvp1 = mvpSorted[0] || null;
+  const mvp2 = mvpSorted[1] || null;
+  const mvpGap = mvp1 && mvp2 ? Math.max(0, Number(mvp1.war || 0) - Number(mvp2.war || 0)) : 0;
+
+  const qPitForCy = pitchers.filter(p => roleFilter === "RP" ? p.is_reliever_qualified : p.is_qualified);
+  const cyPool = qPitForCy.length >= 2 ? qPitForCy : pitchers;
+  const cySorted = [...cyPool].sort((a, b) => (Number(b.war || 0) - Number(a.war || 0)) || (Number(b.cy_score || 0) - Number(a.cy_score || 0)));
+  const cy1 = cySorted[0] || null;
+  const cy2 = cySorted[1] || null;
+  const cyGap = cy1 && cy2 ? Math.max(0, Number(cy1.war || 0) - Number(cy2.war || 0)) : 0;
+
+  // Hero 03: Triple Crown & 2-of-3 Chase Radar
+  const tcList = data.triple_crown || [];
+  const tcMode = AppState.leadersTcHeroMode === "pitching" ? "pitching" : "batting";
+  const activeTcScopes = slFilter !== "ALL"
+    ? tcList.filter(t => String(t.sub_league_id) === String(slFilter))
+    : (tcList.length > 1 ? tcList.slice(1) : tcList);
+  const bestTcScope = activeTcScopes
+    .map(sc => ({ scope: sc, threat: sc[tcMode]?.threat, isLock: sc[tcMode]?.is_triple_crown }))
+    .filter(x => x.threat)
+    .sort((a, b) => (Number(b.isLock) - Number(a.isLock)) || ((b.threat.crowns_led || 0) - (a.threat.crowns_led || 0)) || ((b.threat.top3_legs || 0) - (a.threat.top3_legs || 0)))[0] || null;
+
+  // Hero 04: Statcast & Defensive Unicorn
+  const uniMode = AppState.leadersUnicornMode === "defense" ? "defense" : "statcast";
+  const qBatStat = batters.filter(b => b.is_qualified);
+  const statPool = qBatStat.length >= 3 ? qBatStat : batters;
+  const topStatcast = [...statPool].sort((a, b) => (Number(b.xwoba || 0) - Number(a.xwoba || 0)) || (Number(b.barrel_pct || 0) - Number(a.barrel_pct || 0)))[0] || null;
+  const topDefender = [...fielders].sort((a, b) => (Number(b.def_runs || 0) - Number(a.def_runs || 0)) || (Number(b.platinum_score || 0) - Number(a.platinum_score || 0)))[0] || null;
+  const uniPlayer = uniMode === "defense" ? topDefender : topStatcast;
+
+  // =========================================================================
+  // MAIN BODY BY ARCHETYPE VIEW MODE
+  // =========================================================================
+  let archetypeBodyHtml = "";
+
+  if (viewMode === "savant") {
+    archetypeBodyHtml = buildLeadersSavantViewHtml(batters, pitchers, qual, qualMode);
+  } else if (viewMode === "broadsheet") {
+    archetypeBodyHtml = buildLeadersBroadsheetViewHtml(batters, pitchers, fielders, qual, qualMode);
+  } else if (viewMode === "workbench") {
+    archetypeBodyHtml = buildLeadersWorkbenchViewHtml(batters, pitchers, qual);
   } else {
-    // Sortable Master Qualified Table
-    const dom = AppState.leadersTableDomain || "batting";
-    let rowsHtml = "";
-    let headersHtml = "";
-    if (dom === "batting") {
-      const pool = qualMode === "qualified" ? batters.filter(b => b.is_qualified) : (qualMode === "half" ? batters.filter(b => b.is_half_qualified) : batters);
-      headersHtml = `
-        <th>#</th><th>Player</th><th>Team</th><th>Pos</th><th>G</th><th>PA</th><th>AB</th><th>R</th><th>H</th><th>2B</th><th>3B</th><th>HR</th><th>RBI</th><th>SB</th><th>BB</th><th>K</th>
-        <th>AVG</th><th>OBP</th><th>SLG</th><th>OPS</th><th>ISO</th><th>BABIP</th><th>wOBA</th><th>xwOBA</th><th>wRC+</th><th>OPS+</th><th>WPA</th><th>UBR</th><th>ZR</th><th>WAR</th>
-      `;
-      rowsHtml = pool.slice(0, 250).map((b, i) => `
-        <tr onclick="openPlayerModal(${b.player_id})" class="cursor-pointer">
-          <td class="text-slate-400 font-mono">${i + 1}</td>
-          <td class="font-bold text-white">${b.name}</td>
-          <td><div class="flex items-center gap-1.5"><img src="${teamLogoUrl(b.team_logo)}" class="w-4 h-4 object-contain"><span>${b.team_abbr}</span></div></td>
-          <td>${b.position}</td>
-          <td>${b.g}</td><td>${b.pa}</td><td>${b.ab}</td><td>${b.r}</td><td>${b.h}</td><td>${b["2b"]}</td><td>${b["3b"]}</td>
-          <td class="font-bold text-amber-300">${b.hr}</td><td class="font-bold text-emerald-300">${b.rbi}</td><td>${b.sb}</td><td>${b.bb}</td><td>${b.k}</td>
-          <td class="font-bold text-white">${fmtAvg(b.avg)}</td><td>${fmtAvg(b.obp)}</td><td>${fmtAvg(b.slg)}</td><td class="font-bold text-sky-300">${fmtAvg(b.ops)}</td>
-          <td>${fmtAvg(b.iso)}</td><td>${fmtAvg(b.babip)}</td><td class="font-bold text-amber-300">${fmtAvg(b.woba)}</td><td>${fmtAvg(b.xwoba)}</td>
-          <td class="font-bold text-emerald-400">${b.wrc_plus}</td><td>${b.ops_plus}</td><td>${b.wpa.toFixed(2)}</td><td>${b.ubr.toFixed(1)}</td><td>${b.zr.toFixed(1)}</td>
-          <td class="font-black text-sky-400">${b.war.toFixed(1)}</td>
-        </tr>
-      `).join("");
-    } else if (dom === "pitching") {
-      const pool = qualMode === "qualified"
-        ? pitchers.filter(p => roleFilter === "RP" ? p.is_reliever_qualified : p.is_qualified)
-        : (qualMode === "half" ? pitchers.filter(p => p.is_reliever_qualified) : pitchers);
-      headersHtml = `
-        <th>#</th><th>Pitcher</th><th>Team</th><th>Role</th><th>G</th><th>GS</th><th>W</th><th>L</th><th>SV</th><th>HLD</th><th>QS</th><th>IP</th>
-        <th>ERA</th><th>WHIP</th><th>FIP</th><th>xFIP</th><th>SIERA</th><th>ERA+</th><th>FIP-</th><th>K</th><th>BB</th><th>K/9</th><th>BB/9</th><th>HR/9</th><th>K/BB</th><th>K-BB%</th><th>WPA</th><th>RA9-WAR</th><th>WAR</th>
-      `;
-      rowsHtml = pool.slice(0, 250).map((p, i) => `
-        <tr onclick="openPlayerModal(${p.player_id})" class="cursor-pointer">
-          <td class="text-slate-400 font-mono">${i + 1}</td>
-          <td class="font-bold text-white">${p.name}</td>
-          <td><div class="flex items-center gap-1.5"><img src="${teamLogoUrl(p.team_logo)}" class="w-4 h-4 object-contain"><span>${p.team_abbr}</span></div></td>
-          <td>${p.role}</td>
-          <td>${p.g}</td><td>${p.gs}</td><td class="font-bold text-emerald-300">${p.w}</td><td>${p.l}</td><td class="font-bold text-amber-300">${p.sv}</td><td>${p.hld}</td><td>${p.qs}</td>
-          <td class="font-mono">${p.ip_display}</td>
-          <td class="font-bold text-amber-300">${p.era.toFixed(2)}</td><td>${p.whip.toFixed(2)}</td><td class="font-bold text-sky-300">${p.fip.toFixed(2)}</td>
-          <td>${p.xfip.toFixed(2)}</td><td>${p.siera.toFixed(2)}</td><td class="font-bold text-emerald-400">${p.era_plus}</td><td>${p.fip_minus}</td>
-          <td class="font-bold text-white">${p.k}</td><td>${p.bb}</td><td>${p.k9.toFixed(2)}</td><td>${p.bb9.toFixed(2)}</td><td>${p.hr9.toFixed(2)}</td>
-          <td>${p.k_bb.toFixed(2)}</td><td>${p.k_minus_bb.toFixed(1)}%</td><td>${p.wpa.toFixed(2)}</td><td>${p.ra9war.toFixed(1)}</td>
-          <td class="font-black text-sky-400">${p.war.toFixed(1)}</td>
-        </tr>
-      `).join("");
+    // =======================================================================
+    // ARCHETYPE 01: BNN.COM AWARD RACE & BROADCAST LEADERBOARD PORTAL
+    // =======================================================================
+    const wlTab = AppState.leadersWatchlistTab || "mvp";
+    let wlList = [];
+    let wlScoreKey = "mvp_score";
+    let wlTitle = "MVP Composite Index";
+    let wlPoolTag = "batters";
+    let wlAccent = "#E11D48";
+
+    if (wlTab === "cy") {
+      wlList = [...pitchers].sort((a, b) => Number(b.cy_score || 0) - Number(a.cy_score || 0)).slice(0, 8);
+      wlScoreKey = "cy_score";
+      wlTitle = "Cy Young Dominance Index";
+      wlPoolTag = "pitchers";
+      wlAccent = "#F59E0B";
+    } else if (wlTab === "reliever") {
+      wlList = [...pitchers].filter(p => p.role !== "SP" || Number(p.sv || 0) + Number(p.hld || 0) > 0)
+        .sort((a, b) => Number(b.reliever_score || 0) - Number(a.reliever_score || 0)).slice(0, 8);
+      wlScoreKey = "reliever_score";
+      wlTitle = "Reliever of the Year Index";
+      wlPoolTag = "pitchers";
+      wlAccent = "#38BDF8";
+    } else if (wlTab === "rookie") {
+      const rkBat = batters.filter(b => b.is_rookie);
+      const rkPit = pitchers.filter(p => p.is_rookie);
+      const comb = (rkBat.length + rkPit.length >= 4)
+        ? [...rkBat.map(x => ({ ...x, _pool: "batters" })), ...rkPit.map(x => ({ ...x, _pool: "pitchers" }))]
+        : [...batters.filter(b => b.is_u25).map(x => ({ ...x, _pool: "batters" })), ...pitchers.filter(p => p.is_u25).map(x => ({ ...x, _pool: "pitchers" }))];
+      wlList = comb.sort((a, b) => Number(b.rookie_score || 0) - Number(a.rookie_score || 0)).slice(0, 8);
+      wlScoreKey = "rookie_score";
+      wlTitle = (rkBat.length + rkPit.length >= 4) ? "Official Rookie Pacesetters" : "Rookie & U-25 Pacesetters";
+      wlPoolTag = "batters";
+      wlAccent = "#10B981";
+    } else if (wlTab === "platinum") {
+      wlList = [...fielders].sort((a, b) => Number(b.platinum_score || 0) - Number(a.platinum_score || 0)).slice(0, 8);
+      wlScoreKey = "platinum_score";
+      wlTitle = "Platinum Glove Defense Index";
+      wlPoolTag = "batters";
+      wlAccent = "#A855F7";
     } else {
-      const pool = qualMode === "qualified" ? fielders.filter(f => f.is_qualified) : fielders;
-      headersHtml = `
-        <th>#</th><th>Fielder</th><th>Team</th><th>Pos</th><th>G</th><th>GS</th><th>Inn</th><th>TC</th><th>PO</th><th>A</th><th>E</th><th>DP</th><th>FLD%</th><th>RF/9</th><th>ZR</th><th>Framing</th><th>ARM</th><th>Def Runs</th>
+      wlList = [...batters].sort((a, b) => Number(b.mvp_score || 0) - Number(a.mvp_score || 0)).slice(0, 8);
+    }
+    const maxWlScore = Math.max(1, Number(wlList[0]?.[wlScoreKey] || 100));
+
+    // Center Stage Domain Podiums or Master Agate Table
+    let centerDomainHtml = "";
+    if (catTab === "table") {
+      const dom = AppState.leadersTableDomain || "batting";
+      let headersHtml = "";
+      let rowsHtml = "";
+      if (dom === "batting") {
+        const pool = qualMode === "qualified" ? batters.filter(b => b.is_qualified) : (qualMode === "half" ? batters.filter(b => b.is_half_qualified) : batters);
+        headersHtml = `
+          <th>#</th><th>Player</th><th>Club</th><th>Pos</th><th>G</th><th>PA</th><th>HR</th><th>RBI</th><th>SB</th>
+          <th>AVG</th><th>OBP</th><th>SLG</th><th>OPS</th><th>ISO</th><th>BB%</th><th>K%</th><th>wOBA</th><th>xwOBA</th><th>wRC+</th><th>DEF</th><th>WPA</th><th>WAR</th>
+        `;
+        rowsHtml = pool.slice(0, 220).map((b, i) => `
+          <tr onclick="openPlayerModal(${b.player_id})" class="cursor-pointer">
+            <td class="bnn-muted">${i + 1}</td>
+            <td class="font-sans font-extrabold">${b.name}</td>
+            <td><div class="flex items-center gap-1"><img src="${teamLogoUrl(b.team_logo)}" class="w-3.5 h-3.5 object-contain" alt=""><span>${b.team_abbr}</span></div></td>
+            <td>${b.position}</td>
+            <td>${b.g}</td><td>${b.pa}</td>
+            <td class="font-bold text-amber-400">${b.hr}</td><td class="font-bold text-emerald-400">${b.rbi}</td><td>${b.sb}</td>
+            <td class="font-bold">${fmtAvg(b.avg)}</td><td>${fmtAvg(b.obp)}</td><td>${fmtAvg(b.slg)}</td><td class="font-bold text-sky-400">${fmtAvg(b.ops)}</td>
+            <td>${fmtAvg(b.iso)}</td><td>${Number(b.bb_pct || 0).toFixed(1)}%</td><td>${Number(b.k_pct || 0).toFixed(1)}%</td>
+            <td class="font-bold text-amber-400">${fmtAvg(b.woba)}</td><td class="font-bold text-rose-400">${fmtAvg(b.xwoba)}</td>
+            <td class="font-extrabold text-emerald-400">${b.wrc_plus}</td>
+            <td>${Number(b.def_runs || b.zr || 0) > 0 ? "+" : ""}${Number(b.def_runs ?? b.zr ?? 0).toFixed(1)}</td>
+            <td>${Number(b.wpa || 0).toFixed(2)}</td>
+            <td class="font-black text-sky-400">${Number(b.war || 0).toFixed(1)}</td>
+          </tr>
+        `).join("");
+      } else if (dom === "pitching") {
+        const pool = qualMode === "qualified"
+          ? pitchers.filter(p => roleFilter === "RP" ? p.is_reliever_qualified : p.is_qualified)
+          : (qualMode === "half" ? pitchers.filter(p => p.is_reliever_qualified || p.is_half_qualified) : pitchers);
+        headersHtml = `
+          <th>#</th><th>Pitcher</th><th>Club</th><th>Role</th><th>G</th><th>GS</th><th>W</th><th>L</th><th>SV</th><th>IP</th>
+          <th>ERA</th><th>WHIP</th><th>FIP</th><th>xFIP</th><th>SIERA</th><th>ERA+</th><th>FIP-</th><th>K</th><th>K-BB%</th><th>Velo</th><th>WPA</th><th>RA9-WAR</th><th>WAR</th>
+        `;
+        rowsHtml = pool.slice(0, 220).map((p, i) => `
+          <tr onclick="openPlayerModal(${p.player_id})" class="cursor-pointer">
+            <td class="bnn-muted">${i + 1}</td>
+            <td class="font-sans font-extrabold">${p.name}</td>
+            <td><div class="flex items-center gap-1"><img src="${teamLogoUrl(p.team_logo)}" class="w-3.5 h-3.5 object-contain" alt=""><span>${p.team_abbr}</span></div></td>
+            <td>${p.role}</td>
+            <td>${p.g}</td><td>${p.gs}</td><td class="font-bold text-emerald-400">${p.w}</td><td>${p.l}</td><td class="font-bold text-amber-400">${p.sv}</td>
+            <td>${p.ip_display}</td>
+            <td class="font-bold text-amber-400">${Number(p.era || 0).toFixed(2)}</td><td>${Number(p.whip || 0).toFixed(2)}</td>
+            <td class="font-bold text-sky-400">${Number(p.fip || 0).toFixed(2)}</td><td>${Number(p.xfip || 0).toFixed(2)}</td><td>${Number(p.siera || 0).toFixed(2)}</td>
+            <td class="font-bold text-emerald-400">${p.era_plus}</td><td>${p.fip_minus}</td>
+            <td class="font-bold">${p.k}</td><td class="font-bold text-rose-400">${Number(p.k_minus_bb || 0).toFixed(1)}%</td>
+            <td>${Number(p.velocity_mph || 0).toFixed(1)}</td><td>${Number(p.wpa || 0).toFixed(2)}</td>
+            <td>${Number(p.ra9war || 0).toFixed(1)}</td><td class="font-black text-sky-400">${Number(p.war || 0).toFixed(1)}</td>
+          </tr>
+        `).join("");
+      } else {
+        const pool = qualMode === "qualified" ? fielders.filter(f => f.is_qualified) : fielders;
+        headersHtml = `
+          <th>#</th><th>Fielder</th><th>Club</th><th>Pos</th><th>G</th><th>GS</th><th>Inn</th><th>TC</th><th>PO</th><th>A</th><th>E</th><th>DP</th><th>FLD%</th><th>RF/9</th><th>ZR</th><th>Framing</th><th>Arm</th><th>Def Runs</th>
+        `;
+        rowsHtml = pool.slice(0, 220).map((f, i) => `
+          <tr onclick="openPlayerModal(${f.player_id})" class="cursor-pointer">
+            <td class="bnn-muted">${i + 1}</td>
+            <td class="font-sans font-extrabold">${f.name}</td>
+            <td><div class="flex items-center gap-1"><img src="${teamLogoUrl(f.team_logo)}" class="w-3.5 h-3.5 object-contain" alt=""><span>${f.team_abbr}</span></div></td>
+            <td>${f.position}</td>
+            <td>${f.fld_g}</td><td>${f.fld_gs}</td><td>${Number(f.fld_ip || 0).toFixed(1)}</td><td>${f.tc}</td><td>${f.po}</td><td>${f.a}</td><td>${f.e}</td><td>${f.dp}</td>
+            <td class="font-bold">${fmtAvg(f.fld_pct)}</td><td>${Number(f.rf9 || 0).toFixed(2)}</td>
+            <td class="font-bold ${f.zr >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${f.zr > 0 ? "+" : ""}${Number(f.zr || 0).toFixed(2)}</td>
+            <td>${f.framing > 0 ? "+" : ""}${Number(f.framing || 0).toFixed(2)}</td>
+            <td>${f.arm > 0 ? "+" : ""}${Number(f.arm || 0).toFixed(2)}</td>
+            <td class="font-black text-sky-400">${f.def_runs > 0 ? "+" : ""}${Number(f.def_runs || 0).toFixed(2)}</td>
+          </tr>
+        `).join("");
+      }
+
+      centerDomainHtml = `
+        <div class="bnn-card p-3.5 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-1.5 font-mono text-xs">
+              <button onclick="setLeadersOption('leadersTableDomain','batting')" class="px-2.5 py-1 rounded font-extrabold ${dom === 'batting' ? 'bg-rose-600 text-white' : 'bnn-subcard border bnn-border bnn-muted'}">Batting</button>
+              <button onclick="setLeadersOption('leadersTableDomain','pitching')" class="px-2.5 py-1 rounded font-extrabold ${dom === 'pitching' ? 'bg-amber-400 text-slate-950' : 'bnn-subcard border bnn-border bnn-muted'}">Pitching</button>
+              <button onclick="setLeadersOption('leadersTableDomain','fielding')" class="px-2.5 py-1 rounded font-extrabold ${dom === 'fielding' ? 'bg-emerald-500 text-slate-950' : 'bnn-subcard border bnn-border bnn-muted'}">Fielding</button>
+            </div>
+            <div class="flex items-center gap-2 text-[11px] font-mono bnn-muted">
+              <span>Click column header to sort</span>
+              <button onclick="exportLeadersCsv('${dom === 'pitching' ? 'pitchers' : (dom === 'fielding' ? 'fielders' : 'batters')}')" class="px-2 py-0.5 rounded bnn-subcard border bnn-border font-bold hover:border-sky-400"><i class="bi bi-download mr-1"></i>CSV</button>
+            </div>
+          </div>
+          <div class="overflow-x-auto max-h-[70vh]">
+            <table class="saber-table leaders-agate-table">
+              <thead><tr>${headersHtml}</tr></thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+          </div>
+        </div>
       `;
-      rowsHtml = pool.slice(0, 250).map((f, i) => `
-        <tr onclick="openPlayerModal(${f.player_id})" class="cursor-pointer">
-          <td class="text-slate-400 font-mono">${i + 1}</td>
-          <td class="font-bold text-white">${f.name}</td>
-          <td><div class="flex items-center gap-1.5"><img src="${teamLogoUrl(f.team_logo)}" class="w-4 h-4 object-contain"><span>${f.team_abbr}</span></div></td>
-          <td>${f.position}</td>
-          <td>${f.fld_g}</td><td>${f.fld_gs}</td><td>${f.fld_ip.toFixed(1)}</td><td>${f.tc}</td><td>${f.po}</td><td>${f.a}</td><td>${f.e}</td><td>${f.dp}</td>
-          <td class="font-bold text-white">${fmtAvg(f.fld_pct)}</td><td>${f.rf9.toFixed(2)}</td>
-          <td class="font-bold ${f.zr >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${f.zr > 0 ? '+' : ''}${f.zr.toFixed(2)}</td>
-          <td>${f.framing > 0 ? '+' : ''}${f.framing.toFixed(2)}</td>
-          <td>${f.arm > 0 ? '+' : ''}${f.arm.toFixed(2)}</td>
-          <td class="font-black text-sky-400">${f.def_runs > 0 ? '+' : ''}${f.def_runs.toFixed(2)}</td>
-        </tr>
-      `).join("");
+    } else {
+      const domainMeta = {
+        batting: { cats: BATTING_LEADER_CATEGORIES, groups: ["Sabermetric", "Slash & Rate", "Counting"], accent: "#FB7185", qLbl: `${qual.qual_pa || 0} PA` },
+        pitching: { cats: PITCHING_LEADER_CATEGORIES.map(c => ({ ...c, pool: "pitchers" })), groups: ["Sabermetric", "Rate & Command", "Counting & Bullpen"], accent: "#FBBF24", qLbl: roleFilter === "RP" ? `${qual.qual_reliever_ip || 0} IP (RP)` : `${qual.qual_ip || 0} IP` },
+        fielding: { cats: FIELDING_LEADER_CATEGORIES, groups: ["Advanced Defense", "Rate & Range", "Counting Defense"], accent: "#34D399", qLbl: `${qual.qual_fld_g || 0} G` },
+        statcast: { cats: STATCAST_LEADER_CATEGORIES, groups: ["Batter Statcast", "Baserunning & Speed", "Pitcher Statcast"], accent: "#38BDF8", qLbl: `${qual.qual_pa || 0} PA / ${qual.qual_ip || 0} IP` },
+      }[catTab] || { cats: BATTING_LEADER_CATEGORIES, groups: ["Sabermetric", "Slash & Rate", "Counting"], accent: "#FB7185", qLbl: `${qual.qual_pa || 0} PA` };
+
+      const activeGroups = groupFilter === "ALL" ? domainMeta.groups : domainMeta.groups.filter(g => g === groupFilter);
+
+      centerDomainHtml = `
+        <div class="space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2 px-1">
+            <div class="flex flex-wrap items-center gap-1 text-[10.5px] font-mono">
+              <span class="bnn-muted font-bold mr-1">LENS:</span>
+              <button onclick="setLeadersOption('leadersGroupFilter','ALL')" class="px-2 py-0.5 rounded font-bold border ${groupFilter === 'ALL' ? 'bg-white text-slate-950 border-white' : 'bnn-subcard bnn-border bnn-muted'}">All (${domainMeta.cats.length})</button>
+              ${domainMeta.groups.map(grp => `
+                <button onclick="setLeadersOption('leadersGroupFilter','${grp}')" class="px-2 py-0.5 rounded font-bold border ${groupFilter === grp ? 'bg-sky-500 text-slate-950 border-sky-400' : 'bnn-subcard bnn-border bnn-muted'}">${grp}</button>
+              `).join("")}
+            </div>
+            <span class="text-[10.5px] font-mono bnn-muted">Rate Gate: <strong>${domainMeta.qLbl}</strong></span>
+          </div>
+
+          ${activeGroups.map(grp => {
+            const gCats = domainMeta.cats.filter(c => c.group === grp);
+            return `
+              <div class="space-y-2.5">
+                <div class="flex items-center justify-between border-b bnn-border pb-1.5">
+                  <h4 class="text-xs font-black uppercase tracking-wider flex items-center gap-1.5" style="color:${domainMeta.accent}">
+                    <i class="bi bi-trophy-fill"></i> ${grp} Podiums (${gCats.length})
+                  </h4>
+                  <span class="text-[10px] font-mono bnn-muted">Top-10 Relative Bar Distribution</span>
+                </div>
+                <div class="leaders-podium-grid">
+                  ${gCats.map(c => {
+                    const cardPool = c.pool === "pitchers" ? pitchers : (catTab === "fielding" ? fielders : batters);
+                    const qLabel = c.pool === "pitchers"
+                      ? (roleFilter === "RP" ? `${qual.qual_reliever_ip || 0} IP` : `${qual.qual_ip || 0} IP`)
+                      : (catTab === "fielding" ? `${qual.qual_fld_g || 0} G` : `${qual.qual_pa || 0} PA`);
+                    return renderLeaderCardHtml(c, cardPool, qLabel, qualMode, domainMeta.accent);
+                  }).join("")}
+                </div>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      `;
     }
 
-    bodyHtml = `
-      <div class="glass-card p-4 space-y-3">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <div class="flex items-center gap-2">
-            <button onclick="setLeadersOption('leadersTableDomain','batting')" class="px-3 py-1.5 rounded-xl text-xs font-extrabold ${dom === 'batting' ? 'bg-sky-500 text-slate-950' : 'bg-slate-900 text-slate-300 border border-slate-700'}">Batting Table</button>
-            <button onclick="setLeadersOption('leadersTableDomain','pitching')" class="px-3 py-1.5 rounded-xl text-xs font-extrabold ${dom === 'pitching' ? 'bg-amber-400 text-slate-950' : 'bg-slate-900 text-slate-300 border border-slate-700'}">Pitching Table</button>
-            <button onclick="setLeadersOption('leadersTableDomain','fielding')" class="px-3 py-1.5 rounded-xl text-xs font-extrabold ${dom === 'fielding' ? 'bg-emerald-400 text-slate-950' : 'bg-slate-900 text-slate-300 border border-slate-700'}">Fielding Table</button>
+    // Right Rail: Hardware Ledger + Cutline & Rule 9.22(a) Watch
+    const hw = data.hardware_ledger || { mode: "projected", major: [], gold_glove: [], silver_slugger: [] };
+    const hwTab = AppState.leadersHardwareTab || "major";
+    const filterBySl = arr => (slFilter === "ALL" ? arr : arr.filter(x => !x.sub_league_id || String(x.sub_league_id) === String(slFilter)));
+    const hwRows = hwTab === "gg"
+      ? filterBySl(hw.gold_glove || [])
+      : (hwTab === "ss" ? filterBySl(hw.silver_slugger || []) : filterBySl(hw.major || []));
+
+    const cut = data.cutline_watch || { batters: [], pitchers: [], qual_pa: qual.qual_pa, qual_ip: qual.qual_ip };
+    const cutBat = filterBySl(cut.batters || []).slice(0, 5);
+    const cutPit = filterBySl(cut.pitchers || []).slice(0, 4);
+
+    const tcExplorerHtml = buildLeadersTripleCrownExplorerHtml(tcList);
+    const duelCardHtml = buildLeadersContenderDuelCardHtml(batters, pitchers);
+
+    archetypeBodyHtml = `
+      <!-- =============================================================== -->
+      <!-- LEVEL 1: 4 PROMINENT COLOR-CODED HERO KPI CALLOUT CARDS         -->
+      <!-- =============================================================== -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+
+        <!-- HERO 01: OVERALL POSITION-PLAYER MVP PACESETTER (CRIMSON) -->
+        <div onclick="${mvp1 ? `openPlayerModal(${mvp1.player_id})` : ""}" class="stretch-hero-kpi stretch-kpi-crimson cursor-pointer">
+          <div class="h-1.5 w-full bg-gradient-to-r from-red-600 via-rose-500 to-amber-400"></div>
+          <div class="p-3.5 space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="inline-flex items-center gap-1.5 text-[10.5px] font-mono font-extrabold uppercase tracking-wider text-rose-400">
+                <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+                01 · MVP PACESETTER
+              </span>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-mono font-black bg-rose-600 text-white shadow-sm">
+                ${mvp1 ? `${mvp1.sub_league_abbr || "MLB"} #1 · +${mvpGap.toFixed(1)} WAR` : "NO DATA"}
+              </span>
+            </div>
+            ${mvp1 ? `
+              <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <img src="${playerPicUrl(mvp1.player_id)}" class="w-10 h-12 rounded-lg object-cover bg-slate-950 border border-rose-500/60 shrink-0" onerror="this.style.display='none'" alt="">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-1.5">
+                      <img src="${teamLogoUrl(mvp1.team_logo)}" class="w-4 h-4 object-contain shrink-0" alt="">
+                      <span class="text-sm font-black tracking-tight truncate">${mvp1.name}</span>
+                    </div>
+                    <div class="text-[10.5px] font-mono bnn-muted truncate">${mvp1.team_abbr} · ${mvp1.position} · ${fmtAvg(mvp1.avg)}/${fmtAvg(mvp1.obp)}/${fmtAvg(mvp1.slg)}</div>
+                    <div class="text-[10.5px] font-mono text-rose-300 font-bold">${mvp1.hr} HR · xwOBA ${fmtAvg(mvp1.xwoba)} · WPA ${Number(mvp1.wpa || 0) > 0 ? "+" : ""}${Number(mvp1.wpa || 0).toFixed(2)}</div>
+                  </div>
+                </div>
+                <div class="text-right shrink-0">
+                  <div class="text-2xl font-black font-mono text-rose-400 leading-none">${Number(mvp1.war || 0).toFixed(1)}</div>
+                  <div class="text-[9.5px] font-mono font-bold bnn-muted mt-0.5">WAR · ${mvp1.wrc_plus} wRC+</div>
+                </div>
+              </div>
+              <div class="space-y-1">
+                <div class="h-1.5 rounded-full bg-black/30 overflow-hidden flex">
+                  <div class="bg-rose-500 h-full" style="width:${Math.min(92, Math.max(52, 55 + mvpGap * 14)).toFixed(0)}%"></div>
+                </div>
+                <div class="flex justify-between text-[9.5px] font-mono bnn-muted">
+                  <span>MVP Idx: <strong class="text-rose-400">${Number(mvp1.mvp_score || 0).toFixed(1)}</strong></span>
+                  <span>${mvp2 ? `#2 ${mvp2.name.split(" ").slice(-1)[0]} (${Number(mvp2.war || 0).toFixed(1)} WAR)` : ""}</span>
+                </div>
+              </div>
+            ` : `<div class="py-4 text-xs font-mono bnn-muted">No batters match filter</div>`}
           </div>
-          <div class="text-xs text-slate-400 font-mono">Click any column header to sort • Click any player row for full Scouting Dossier</div>
         </div>
-        <div class="overflow-x-auto max-h-[72vh]">
-          <table class="saber-table">
-            <thead><tr>${headersHtml}</tr></thead>
-            <tbody>${rowsHtml}</tbody>
-          </table>
+
+        <!-- HERO 02: CY YOUNG & PITCHING DOMINANCE LEADER (AMBER) -->
+        <div onclick="${cy1 ? `openPlayerModal(${cy1.player_id})` : ""}" class="stretch-hero-kpi stretch-kpi-amber cursor-pointer">
+          <div class="h-1.5 w-full bg-gradient-to-r from-amber-500 via-yellow-400 to-orange-400"></div>
+          <div class="p-3.5 space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="inline-flex items-center gap-1.5 text-[10.5px] font-mono font-extrabold uppercase tracking-wider text-amber-400">
+                <i class="bi bi-fire"></i> 02 · CY YOUNG DOMINANCE
+              </span>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-mono font-black bg-amber-400 text-slate-950 shadow-sm">
+                ${cy1 ? `${cy1.role || "SP"} · ${cy1.era_plus} ERA+` : "NO DATA"}
+              </span>
+            </div>
+            ${cy1 ? `
+              <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <img src="${playerPicUrl(cy1.player_id)}" class="w-10 h-12 rounded-lg object-cover bg-slate-950 border border-amber-400/60 shrink-0" onerror="this.style.display='none'" alt="">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-1.5">
+                      <img src="${teamLogoUrl(cy1.team_logo)}" class="w-4 h-4 object-contain shrink-0" alt="">
+                      <span class="text-sm font-black tracking-tight truncate">${cy1.name}</span>
+                    </div>
+                    <div class="text-[10.5px] font-mono bnn-muted truncate">${cy1.team_abbr} · ${cy1.w}-${cy1.l} · ${cy1.ip_display} IP · ${cy1.k} K</div>
+                    <div class="text-[10.5px] font-mono text-amber-300 font-bold">ERA ${Number(cy1.era || 0).toFixed(2)} · SIERA ${Number(cy1.siera || 0).toFixed(2)} · K-BB ${Number(cy1.k_minus_bb || 0).toFixed(1)}%</div>
+                  </div>
+                </div>
+                <div class="text-right shrink-0">
+                  <div class="text-2xl font-black font-mono text-amber-400 leading-none">${Number(cy1.war || 0).toFixed(1)}</div>
+                  <div class="text-[9.5px] font-mono font-bold bnn-muted mt-0.5">WAR · ${Number(cy1.fip || 0).toFixed(2)} FIP</div>
+                </div>
+              </div>
+              <div class="space-y-1">
+                <div class="h-1.5 rounded-full bg-black/30 overflow-hidden flex">
+                  <div class="bg-amber-400 h-full" style="width:${Math.min(92, Math.max(52, 55 + cyGap * 15)).toFixed(0)}%"></div>
+                </div>
+                <div class="flex justify-between text-[9.5px] font-mono bnn-muted">
+                  <span>Cy Idx: <strong class="text-amber-400">${Number(cy1.cy_score || 0).toFixed(1)}</strong></span>
+                  <span>${cy2 ? `#2 ${cy2.name.split(" ").slice(-1)[0]} (${Number(cy2.war || 0).toFixed(1)} WAR)` : ""}</span>
+                </div>
+              </div>
+            ` : `<div class="py-4 text-xs font-mono bnn-muted">No pitchers match filter</div>`}
+          </div>
         </div>
+
+        <!-- HERO 03: TRIPLE CROWN & HISTORIC CHASE RADAR (EMERALD) -->
+        <div class="stretch-hero-kpi stretch-kpi-emerald">
+          <div class="h-1.5 w-full bg-gradient-to-r from-emerald-500 via-teal-400 to-sky-400"></div>
+          <div class="p-3.5 space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="inline-flex items-center gap-1.5 text-[10.5px] font-mono font-extrabold uppercase tracking-wider text-emerald-400">
+                <i class="bi bi-stars"></i> 03 · TRIPLE CROWN RADAR
+              </span>
+              <div class="inline-flex rounded bg-black/30 p-0.5 border border-emerald-500/30 text-[9.5px] font-mono">
+                <button onclick="setLeadersOption('leadersTcHeroMode','batting')" class="px-1.5 py-0.2 rounded font-extrabold ${tcMode === 'batting' ? 'bg-emerald-500 text-slate-950' : 'bnn-muted'}">Bat</button>
+                <button onclick="setLeadersOption('leadersTcHeroMode','pitching')" class="px-1.5 py-0.2 rounded font-extrabold ${tcMode === 'pitching' ? 'bg-emerald-500 text-slate-950' : 'bnn-muted'}">Pit</button>
+              </div>
+            </div>
+            ${bestTcScope && bestTcScope.threat ? (() => {
+              const th = bestTcScope.threat;
+              const legs = tcMode === "pitching"
+                ? [
+                    { lbl: "ERA", val: Number(th.era || 0).toFixed(2), rnk: th.era_rank, pct: th.era_rank === 1 ? 100 : Math.max(48, Math.round((Number(th.era_ldr || 2.5) / Math.max(0.5, Number(th.era || 3.5))) * 100)) },
+                    { lbl: "W", val: th.w, rnk: th.w_rank, pct: Math.min(100, Math.round((Number(th.w || 0) / Math.max(1, Number(th.w_ldr || 1))) * 100)) },
+                    { lbl: "K", val: th.k, rnk: th.k_rank, pct: Math.min(100, Math.round((Number(th.k || 0) / Math.max(1, Number(th.k_ldr || 1))) * 100)) },
+                  ]
+                : [
+                    { lbl: "AVG", val: fmtAvg(th.avg), rnk: th.avg_rank, pct: Math.min(100, Math.round((Number(th.avg || 0) / Math.max(0.001, Number(th.avg_ldr || 0.300))) * 100)) },
+                    { lbl: "HR", val: th.hr, rnk: th.hr_rank, pct: Math.min(100, Math.round((Number(th.hr || 0) / Math.max(1, Number(th.hr_ldr || 1))) * 100)) },
+                    { lbl: "RBI", val: th.rbi, rnk: th.rbi_rank, pct: Math.min(100, Math.round((Number(th.rbi || 0) / Math.max(1, Number(th.rbi_ldr || 1))) * 100)) },
+                  ];
+              return `
+                <div onclick="openPlayerModal(${th.player_id})" class="cursor-pointer flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <img src="${teamLogoUrl(th.team_logo)}" class="w-6 h-6 object-contain shrink-0" alt="">
+                    <div class="min-w-0">
+                      <div class="text-sm font-black truncate hover:underline">${th.name}</div>
+                      <div class="text-[10.5px] font-mono bnn-muted">${bestTcScope.scope.scope_abbr || bestTcScope.scope.scope} · ${th.team_abbr} · ${th.top3_legs}/3 Top-3 Legs</div>
+                    </div>
+                  </div>
+                  <span class="px-2 py-0.5 rounded font-mono font-black text-xs ${th.crowns_led === 3 ? 'bg-emerald-400 text-slate-950' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'}">
+                    ${th.crowns_led}/3 CROWNS
+                  </span>
+                </div>
+                <div class="grid grid-cols-3 gap-1.5 font-mono text-[10px]">
+                  ${legs.map(lg => `
+                    <div class="bnn-subcard p-1.5 rounded">
+                      <div class="flex justify-between font-bold">
+                        <span class="bnn-muted">${lg.lbl}</span>
+                        <span class="${lg.rnk === 1 ? 'text-emerald-400 font-black' : 'text-amber-300'}">#${lg.rnk}</span>
+                      </div>
+                      <div class="font-black text-[11px] mt-0.5">${lg.val}</div>
+                      <div class="h-1 rounded bg-black/35 overflow-hidden mt-1">
+                        <div class="${lg.rnk === 1 ? 'bg-emerald-400' : 'bg-amber-400'} h-full" style="width:${lg.pct}%"></div>
+                      </div>
+                    </div>
+                  `).join("")}
+                </div>
+              `;
+            })() : `<div class="py-4 text-xs font-mono bnn-muted">No Triple Crown threat data</div>`}
+          </div>
+        </div>
+
+        <!-- HERO 04: STATCAST & DEFENSIVE UNICORN CALLOUT (COBALT) -->
+        <div class="stretch-hero-kpi stretch-kpi-cobalt">
+          <div class="h-1.5 w-full bg-gradient-to-r from-sky-500 via-blue-500 to-indigo-500"></div>
+          <div class="p-3.5 space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="inline-flex items-center gap-1.5 text-[10.5px] font-mono font-extrabold uppercase tracking-wider text-sky-400">
+                <i class="bi bi-bullseye"></i> 04 · 99TH-PCT UNICORN
+              </span>
+              <div class="inline-flex rounded bg-black/30 p-0.5 border border-sky-500/30 text-[9.5px] font-mono">
+                <button onclick="setLeadersOption('leadersUnicornMode','statcast')" class="px-1.5 py-0.2 rounded font-extrabold ${uniMode === 'statcast' ? 'bg-sky-400 text-slate-950' : 'bnn-muted'}">Statcast</button>
+                <button onclick="setLeadersOption('leadersUnicornMode','defense')" class="px-1.5 py-0.2 rounded font-extrabold ${uniMode === 'defense' ? 'bg-sky-400 text-slate-950' : 'bnn-muted'}">Defense</button>
+              </div>
+            </div>
+            ${uniPlayer ? `
+              <div onclick="openPlayerModal(${uniPlayer.player_id})" class="cursor-pointer flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <img src="${playerPicUrl(uniPlayer.player_id)}" class="w-10 h-12 rounded-lg object-cover bg-slate-950 border border-sky-400/60 shrink-0" onerror="this.style.display='none'" alt="">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-1.5">
+                      <img src="${teamLogoUrl(uniPlayer.team_logo)}" class="w-4 h-4 object-contain shrink-0" alt="">
+                      <span class="text-sm font-black tracking-tight truncate">${uniPlayer.name}</span>
+                    </div>
+                    <div class="text-[10.5px] font-mono bnn-muted truncate">${uniPlayer.team_abbr} · ${uniPlayer.position} · Age ${uniPlayer.age}</div>
+                    <div class="text-[10.5px] font-mono text-sky-300 font-bold">
+                      ${uniMode === "defense"
+                        ? `ZR ${Number(uniPlayer.zr || 0) > 0 ? "+" : ""}${Number(uniPlayer.zr || 0).toFixed(1)} · Frm ${Number(uniPlayer.framing || 0) > 0 ? "+" : ""}${Number(uniPlayer.framing || 0).toFixed(1)} · Arm ${Number(uniPlayer.arm || 0).toFixed(1)}`
+                        : `Brl ${Number(uniPlayer.barrel_pct || 0).toFixed(1)}% · EV ${Number(uniPlayer.avg_ev || 0).toFixed(1)} mph · HH ${Number(uniPlayer.hard_hit_pct || 0).toFixed(1)}%`}
+                    </div>
+                  </div>
+                </div>
+                <div class="text-right shrink-0">
+                  <div class="text-2xl font-black font-mono text-sky-400 leading-none">
+                    ${uniMode === "defense"
+                      ? `${Number(uniPlayer.def_runs || 0) > 0 ? "+" : ""}${Number(uniPlayer.def_runs || 0).toFixed(1)}`
+                      : fmtAvg(uniPlayer.xwoba)}
+                  </div>
+                  <div class="text-[9.5px] font-mono font-bold bnn-muted mt-0.5">${uniMode === "defense" ? "DEF RUNS" : "xwOBA (#1)"}</div>
+                </div>
+              </div>
+              <div class="flex items-center justify-between text-[9.5px] font-mono pt-0.5">
+                <span class="px-1.5 py-0.2 rounded bg-red-600/90 text-white font-black">99TH PCT SAVANT OUTLIER</span>
+                <span class="bnn-muted">${uniMode === "defense" ? `FLD% ${fmtAvg(uniPlayer.fld_pct)}` : `Sprint ${Number(uniPlayer.avg_sprint || 0).toFixed(1)} ft/s`}</span>
+              </div>
+            ` : `<div class="py-4 text-xs font-mono bnn-muted">No unicorn candidate</div>`}
+          </div>
+        </div>
+      </div>
+
+      <!-- =============================================================== -->
+      <!-- ADAPTIVE 16:9 3-COL / 21:9 ULTRAWIDE 4-COL PORTAL GRID          -->
+      <!-- =============================================================== -->
+      <div class="bnn-leaders-grid">
+
+        <!-- ============================================================= -->
+        <!-- COL 1 (LEFT MARGIN): COMPOSITE AWARD RACE WATCHLISTS          -->
+        <!-- ============================================================= -->
+        <aside class="bnn-leaders-col-left space-y-3.5">
+          <div class="bnn-card p-3 space-y-2.5">
+            <div class="border-b bnn-border pb-2">
+              <div class="flex items-center justify-between">
+                <span class="text-[10.5px] font-mono font-extrabold uppercase tracking-wider text-rose-400">AWARD RACE WATCHLISTS</span>
+                <span class="text-[9.5px] font-mono bnn-muted">COMPOSITE IDX</span>
+              </div>
+              <div class="text-xs font-black mt-0.5">${wlTitle}</div>
+            </div>
+
+            <!-- 5 Watchlist Pills -->
+            <div class="grid grid-cols-5 gap-1 text-[10px] font-mono">
+              ${[
+                { id: "mvp", lbl: "MVP" },
+                { id: "cy", lbl: "CY" },
+                { id: "reliever", lbl: "REL" },
+                { id: "rookie", lbl: "ROY" },
+                { id: "platinum", lbl: "DEF" },
+              ].map(t => `
+                <button onclick="setLeadersOption('leadersWatchlistTab','${t.id}')" class="py-1 rounded font-extrabold border transition ${wlTab === t.id ? 'bg-amber-400 text-slate-950 border-amber-300' : 'bnn-subcard bnn-border bnn-muted'}">${t.lbl}</button>
+              `).join("")}
+            </div>
+
+            <!-- Top-8 Ranked Contenders -->
+            <div class="space-y-1.5">
+              ${wlList.length ? wlList.map((pl, idx) => {
+                const sc = Number(pl[wlScoreKey] || 0);
+                const pct = Math.max(15, Math.min(100, (sc / maxWlScore) * 100));
+                const subLine = wlTab === "cy"
+                  ? `${Number(pl.war || 0).toFixed(1)} WAR · ${Number(pl.era || 0).toFixed(2)} ERA · ${pl.k} K`
+                  : (wlTab === "reliever"
+                    ? `${pl.sv} SV · ${Number(pl.era || 0).toFixed(2)} ERA · ${Number(pl.k_minus_bb || 0).toFixed(1)}% K-BB`
+                    : (wlTab === "platinum"
+                      ? `${Number(pl.def_runs || 0) > 0 ? "+" : ""}${Number(pl.def_runs || 0).toFixed(1)} DEF · ${Number(pl.zr || 0).toFixed(1)} ZR`
+                      : (pl._pool === "pitchers"
+                        ? `${Number(pl.war || 0).toFixed(1)} WAR · ${Number(pl.era || 0).toFixed(2)} ERA`
+                        : `${Number(pl.war || 0).toFixed(1)} WAR · ${pl.wrc_plus} wRC+ · ${pl.hr} HR`)));
+                const duelPool = pl._pool || wlPoolTag;
+                return `
+                  <div onclick="openPlayerModal(${pl.player_id})" class="bnn-subcard p-2 rounded cursor-pointer bnn-row-hover space-y-1">
+                    <div class="flex items-center justify-between gap-1.5">
+                      <div class="flex items-center gap-1.5 min-w-0">
+                        <span class="w-4 text-[10.5px] font-mono font-black ${idx === 0 ? 'text-amber-400' : 'bnn-muted'}">${idx + 1}.</span>
+                        <img src="${teamLogoUrl(pl.team_logo)}" class="w-3.5 h-3.5 object-contain shrink-0" alt="">
+                        <span class="text-xs font-extrabold truncate">${pl.name}</span>
+                        <span class="text-[9.5px] font-mono bnn-muted shrink-0">${pl.position || pl.role}</span>
+                      </div>
+                      <span class="text-xs font-mono font-black shrink-0" style="color:${wlAccent}">${sc.toFixed(1)}</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[10px] font-mono bnn-muted">
+                      <span class="truncate">${pl.team_abbr} · ${subLine}</span>
+                      <div class="flex items-center gap-1 shrink-0 ml-1">
+                        <button onclick="dockLeadersPlayer(${pl.player_id}, event)" class="px-1.5 py-0.2 rounded bg-black/25 border bnn-border text-[9px] hover:text-sky-400" title="Open in Ultrawide Scout Dock">Dock</button>
+                        ${wlTab !== "platinum" ? `<button onclick="pinLeadersDuel('${idx === 0 ? 'A' : 'B'}', ${pl.player_id}, '${duelPool}', event)" class="px-1.5 py-0.2 rounded bg-black/25 border bnn-border text-[9px] hover:text-amber-400" title="Pin to Contender Duel">VS</button>` : ""}
+                      </div>
+                    </div>
+                    <div class="h-1 rounded-full bg-black/30 overflow-hidden">
+                      <div class="h-full rounded-full" style="width:${pct.toFixed(0)}%; background:${wlAccent}"></div>
+                    </div>
+                  </div>
+                `;
+              }).join("") : `<div class="py-6 text-center text-xs font-mono bnn-muted">No contenders match filter</div>`}
+            </div>
+          </div>
+        </aside>
+
+        <!-- ============================================================= -->
+        <!-- COL 2 (CENTER STAGE): VISUAL SUITE + 5-DOMAIN PODIUM CARDS    -->
+        <!-- ============================================================= -->
+        <main class="bnn-leaders-col-center space-y-3.5">
+          <!-- Top of Center Stage: Interactive Multi-Mode Leaderboard Visual Suite -->
+          ${buildLeadersVisualSuiteHtml(batters, pitchers, qual, isLight)}
+
+          <!-- 5-Domain Switcher Strip -->
+          <div class="bnn-card p-2.5 flex flex-wrap items-center justify-between gap-2">
+            <div class="flex flex-wrap items-center gap-1.5 font-mono text-[11px]">
+              <button onclick="setLeadersOption('leadersCategoryTab','batting')" class="px-3 py-1.5 rounded-lg font-extrabold uppercase transition flex items-center gap-1.5 ${catTab === 'batting' ? 'bg-rose-600 text-white shadow' : 'bnn-subcard border bnn-border bnn-muted'}">
+                <i class="bi bi-trophy-fill"></i> Batting (${BATTING_LEADER_CATEGORIES.length})
+              </button>
+              <button onclick="setLeadersOption('leadersCategoryTab','pitching')" class="px-3 py-1.5 rounded-lg font-extrabold uppercase transition flex items-center gap-1.5 ${catTab === 'pitching' ? 'bg-amber-400 text-slate-950 shadow' : 'bnn-subcard border bnn-border bnn-muted'}">
+                <i class="bi bi-fire"></i> Pitching (${PITCHING_LEADER_CATEGORIES.length})
+              </button>
+              <button onclick="setLeadersOption('leadersCategoryTab','fielding')" class="px-3 py-1.5 rounded-lg font-extrabold uppercase transition flex items-center gap-1.5 ${catTab === 'fielding' ? 'bg-emerald-500 text-slate-950 shadow' : 'bnn-subcard border bnn-border bnn-muted'}">
+                <i class="bi bi-shield-fill-check"></i> Defense (${FIELDING_LEADER_CATEGORIES.length})
+              </button>
+              <button onclick="setLeadersOption('leadersCategoryTab','statcast')" class="px-3 py-1.5 rounded-lg font-extrabold uppercase transition flex items-center gap-1.5 ${catTab === 'statcast' ? 'bg-sky-400 text-slate-950 shadow' : 'bnn-subcard border bnn-border bnn-muted'}">
+                <i class="bi bi-bullseye"></i> Statcast (${STATCAST_LEADER_CATEGORIES.length})
+              </button>
+              <button onclick="setLeadersOption('leadersCategoryTab','table')" class="px-3 py-1.5 rounded-lg font-extrabold uppercase transition flex items-center gap-1.5 ${catTab === 'table' ? 'bg-white text-slate-950 shadow' : 'bnn-subcard border bnn-border bnn-muted'}">
+                <i class="bi bi-table"></i> Master Table
+              </button>
+            </div>
+          </div>
+
+          <!-- Broadcast Spotlight Podium Cards Grid / Master Table -->
+          ${centerDomainHtml}
+        </main>
+
+        <!-- ============================================================= -->
+        <!-- COL 3 (RIGHT MARGIN): HARDWARE LEDGER + CUTLINE RULE 9.22(a)  -->
+        <!-- ============================================================= -->
+        <aside class="bnn-leaders-col-right space-y-3.5">
+          <!-- Official / Projected Hardware Ledger -->
+          <div class="bnn-card p-3 space-y-2.5">
+            <div class="flex items-center justify-between border-b bnn-border pb-2">
+              <div>
+                <div class="text-[10.5px] font-mono font-extrabold uppercase tracking-wider text-amber-400">SEASON HARDWARE LEDGER</div>
+                <div class="text-[10px] bnn-muted">MVP · Cy Young · ROY · Gold Glove · Silver Slugger</div>
+              </div>
+              <span class="px-2 py-0.5 rounded text-[9.5px] font-mono font-black ${hw.mode === 'official' ? 'bg-emerald-500 text-slate-950' : 'bg-amber-500/20 text-amber-300 border border-amber-400/40'}">
+                ${hw.mode === "official" ? "OFFICIAL WINNERS" : "PROJECTED"}
+              </span>
+            </div>
+
+            <div class="grid grid-cols-3 gap-1 text-[10px] font-mono">
+              <button onclick="setLeadersOption('leadersHardwareTab','major')" class="py-1 rounded font-extrabold border ${hwTab === 'major' ? 'bg-amber-400 text-slate-950 border-amber-300' : 'bnn-subcard bnn-border bnn-muted'}">Major</button>
+              <button onclick="setLeadersOption('leadersHardwareTab','gg')" class="py-1 rounded font-extrabold border ${hwTab === 'gg' ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'bnn-subcard bnn-border bnn-muted'}">Gold Glove</button>
+              <button onclick="setLeadersOption('leadersHardwareTab','ss')" class="py-1 rounded font-extrabold border ${hwTab === 'ss' ? 'bg-sky-400 text-slate-950 border-sky-300' : 'bnn-subcard bnn-border bnn-muted'}">Silver Slug</button>
+            </div>
+
+            <div class="space-y-1.5 max-h-[340px] overflow-y-auto pr-0.5">
+              ${hwRows.length ? hwRows.map(item => `
+                <div onclick="openPlayerModal(${item.player_id})" class="bnn-subcard p-2 rounded cursor-pointer bnn-row-hover flex items-center justify-between gap-2">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-1.5 text-[10px] font-mono">
+                      <span class="px-1.5 py-0.2 rounded font-black ${item.status === 'OFFICIAL' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}">
+                        ${item.sub_league_abbr ? `${item.sub_league_abbr} ` : ""}${item.award_code || item.position}
+                      </span>
+                      <span class="font-sans font-extrabold text-xs truncate">${item.name}</span>
+                    </div>
+                    <div class="text-[10px] font-mono bnn-muted truncate mt-0.5">
+                      ${item.team_abbr}${item.position && item.award_code ? ` · ${item.position}` : ""} · ${item.stat_line || ""}
+                    </div>
+                  </div>
+                  <img src="${teamLogoUrl(item.team_logo)}" class="w-5 h-5 object-contain shrink-0" alt="">
+                </div>
+              `).join("") : `<div class="py-4 text-center text-xs font-mono bnn-muted">No hardware rows</div>`}
+            </div>
+          </div>
+
+          <!-- Qualification Cutline & MLB Rule 9.22(a) Watch -->
+          <div class="bnn-card p-3 space-y-2.5">
+            <div class="border-b bnn-border pb-2">
+              <div class="flex items-center justify-between">
+                <span class="text-[10.5px] font-mono font-extrabold uppercase tracking-wider text-sky-400">QUALIFICATION CUTLINE WATCH</span>
+                <span class="text-[9.5px] font-mono bnn-muted">85%–99.9% GATE</span>
+              </div>
+              <div class="text-[10px] bnn-muted mt-0.5">Elite rate outliers shy of ${qual.qual_pa || 0} PA / ${qual.qual_ip || 0} IP + <strong>Rule 9.22(a)</strong> Hitless-AB Audit</div>
+            </div>
+
+            ${cutBat.length || cutPit.length ? `
+              <div class="space-y-1.5 text-[10.5px] font-mono">
+                ${cutBat.map(cb => `
+                  <div onclick="openPlayerModal(${cb.player_id})" class="bnn-subcard p-2 rounded cursor-pointer bnn-row-hover border-l-2 ${cb.wins_rule922_title ? 'border-l-emerald-400' : 'border-l-sky-500'}">
+                    <div class="flex items-center justify-between">
+                      <span class="font-sans font-extrabold text-xs truncate">${cb.name} <span class="font-mono text-[10px] bnn-muted">(${cb.team_abbr} · ${cb.position})</span></span>
+                      <span class="text-amber-400 font-bold">-${cb.pa_short} PA</span>
+                    </div>
+                    <div class="flex items-center justify-between bnn-muted mt-0.5">
+                      <span>${cb.pa}/${cut.qual_pa} PA (${cb.pct_of_qual}%)</span>
+                      <span><strong class="text-emerald-400">${cb.wrc_plus} wRC+</strong> · ${fmtAvg(cb.avg)} AVG</span>
+                    </div>
+                    <div class="mt-0.5 text-[9.5px] ${cb.wins_rule922_title ? 'text-emerald-400 font-extrabold' : 'bnn-muted'}">
+                      Rule 9.22(a) (+${cb.pa_short} 0-for): <strong>${fmtAvg(cb.rule922_avg)} AVG</strong>
+                      ${cb.wins_rule922_title ? " ★ WINS BATTING TITLE!" : ""}
+                    </div>
+                  </div>
+                `).join("")}
+
+                ${cutPit.map(cp => `
+                  <div onclick="openPlayerModal(${cp.player_id})" class="bnn-subcard p-2 rounded cursor-pointer bnn-row-hover border-l-2 border-l-amber-400">
+                    <div class="flex items-center justify-between">
+                      <span class="font-sans font-extrabold text-xs truncate">${cp.name} <span class="font-mono text-[10px] bnn-muted">(${cp.team_abbr} · ${cp.role})</span></span>
+                      <span class="text-amber-400 font-bold">-${cp.ip_short} IP</span>
+                    </div>
+                    <div class="flex items-center justify-between bnn-muted mt-0.5">
+                      <span>${cp.ip_display}/${cut.qual_ip} IP (${cp.pct_of_qual}%)</span>
+                      <span><strong class="text-amber-300">${Number(cp.era || 0).toFixed(2)} ERA</strong> · ${cp.era_plus} ERA+ · ${Number(cp.fip || 0).toFixed(2)} FIP</span>
+                    </div>
+                  </div>
+                `).join("")}
+              </div>
+            ` : `<div class="py-4 text-center text-[11px] font-mono bnn-muted">No rate outliers currently sitting between 85%–99.9% of qualification cutline.</div>`}
+          </div>
+
+          <!-- Standard 16:9 Stack Only (Unstacks to 4th Col on 21:9 Ultrawide) -->
+          <div class="bnn-leaders-std-only space-y-3.5">
+            ${tcExplorerHtml}
+            ${duelCardHtml}
+          </div>
+        </aside>
+
+        <!-- ============================================================= -->
+        <!-- COL 4 (21:9 ULTRAWIDE DEDICATED COCKPIT COLUMN)               -->
+        <!-- ============================================================= -->
+        <aside class="bnn-leaders-col-uw">
+          ${tcExplorerHtml}
+          ${duelCardHtml}
+        </aside>
+
       </div>
     `;
   }
 
-  // Triple Crown & Awards Bar
-  const tcList = data.triple_crown || [];
-  const awards = data.season_awards || [];
+  // =========================================================================
+  // RENDER FULL BNN SHELL (TOP QUALIFICATION TICKER + SCOREBUG MASTHEAD + BODY)
+  // =========================================================================
+  const totalCats = BATTING_LEADER_CATEGORIES.length + PITCHING_LEADER_CATEGORIES.length + FIELDING_LEADER_CATEGORIES.length + STATCAST_LEADER_CATEGORIES.length;
 
   container.innerHTML = `
-    <div class="animate-view space-y-5">
-      <!-- Top Command Banner -->
-      <div class="glass-card p-5 border-l-4 border-l-amber-400">
-        <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
-          <div>
-            <div class="flex flex-wrap items-center gap-2 mb-1">
-              <span class="px-2.5 py-0.5 rounded-full text-xs font-extrabold uppercase bg-amber-500/20 text-amber-300 border border-amber-400/40">
-                <i class="bi bi-award-fill mr-1"></i> Official League Leaders Hub
-              </span>
-              <span class="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-slate-900 text-sky-300 border border-slate-700">
-                Season ${data.season_year} • ${data.league_name}
-              </span>
-            </div>
-            <h2 class="text-2xl sm:text-3xl font-black text-white tracking-tight">Qualified Statistical Leaders (${BATTING_LEADER_CATEGORIES.length + PITCHING_LEADER_CATEGORIES.length + FIELDING_LEADER_CATEGORIES.length + STATCAST_LEADER_CATEGORIES.length} Categories)</h2>
-            <div class="text-xs text-slate-300 font-mono mt-1 flex flex-wrap gap-4">
-              <span><i class="bi bi-check2-circle text-emerald-400 mr-1"></i>Batters: <b class="text-white">${qual.bat_rule_desc}</b></span>
-              <span><i class="bi bi-check2-circle text-amber-400 mr-1"></i>Starters: <b class="text-white">${qual.pit_rule_desc}</b></span>
-              <span><i class="bi bi-check2-circle text-sky-400 mr-1"></i>Relievers: <b class="text-white">${qual.rel_rule_desc}</b></span>
-              <span><i class="bi bi-check2-circle text-purple-400 mr-1"></i>Defense: <b class="text-white">${qual.fld_rule_desc}</b></span>
-            </div>
-          </div>
+    <div id="leaders-bnn-root" class="animate-view ${themeCls} ${vpClass} -mx-2 sm:-mx-4 -mt-2 pb-10">
+      <div class="bnn-shell min-h-screen">
 
-          <!-- Qualification Mode Switcher -->
-          <div class="flex flex-wrap items-center gap-2">
-            <div class="bg-slate-950 p-1 rounded-xl border border-slate-800 flex items-center gap-1">
-              <button onclick="setLeadersOption('leadersQualMode','qualified')" class="px-3 py-1.5 rounded-lg text-xs font-extrabold transition ${qualMode === 'qualified' ? 'bg-amber-400 text-slate-950 shadow' : 'text-slate-300 hover:text-white'}">
-                Official Qualified
-              </button>
-              <button onclick="setLeadersOption('leadersQualMode','half')" class="px-3 py-1.5 rounded-lg text-xs font-extrabold transition ${qualMode === 'half' ? 'bg-sky-400 text-slate-950 shadow' : 'text-slate-300 hover:text-white'}">
-                50% Qualifier
-              </button>
-              <button onclick="setLeadersOption('leadersQualMode','all')" class="px-3 py-1.5 rounded-lg text-xs font-extrabold transition ${qualMode === 'all' ? 'bg-emerald-400 text-slate-950 shadow' : 'text-slate-300 hover:text-white'}">
-                All Players
-              </button>
+        <!-- =============================================================== -->
+        <!-- 1. TOP STRIP: OFFICIAL MLB/OOTP QUALIFICATION & FILTER TICKER   -->
+        <!-- =============================================================== -->
+        <section class="bnn-card border-t-0 border-x-0 px-3 py-2">
+          <div class="bnn-stretch-container flex flex-wrap items-center justify-between gap-2.5">
+            <!-- Active Qualification Gates -->
+            <div class="flex flex-wrap items-center gap-2 text-[11px] font-mono">
+              <span class="inline-flex items-center gap-1.5 pr-2.5 border-r bnn-border font-extrabold uppercase text-amber-400">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                ${data.season_year} ${data.league_abbr || "MLB"} GATES (${qual.team_games || 162} G)
+              </span>
+              <span class="px-2 py-0.5 rounded bnn-subcard border bnn-border" title="3.1 Plate Appearances per Team Game">
+                BAT: <strong class="text-rose-400">${qual.qual_pa || 0} PA</strong> <span class="bnn-muted hidden sm:inline">(3.1/G)</span>
+              </span>
+              <span class="px-2 py-0.5 rounded bnn-subcard border bnn-border" title="1.0 Innings Pitched per Team Game">
+                SP: <strong class="text-amber-400">${qual.qual_ip || 0} IP</strong> <span class="bnn-muted hidden sm:inline">(1.0/G)</span>
+              </span>
+              <span class="px-2 py-0.5 rounded bnn-subcard border bnn-border" title="0.33 Innings Pitched per Team Game">
+                RP: <strong class="text-sky-400">${qual.qual_reliever_ip || 0} IP</strong> <span class="bnn-muted hidden sm:inline">(0.33/G)</span>
+              </span>
+              <span class="px-2 py-0.5 rounded bnn-subcard border bnn-border" title="0.50 Games per Team Game">
+                DEF: <strong class="text-emerald-400">${qual.qual_fld_g || 0} G</strong> <span class="bnn-muted hidden sm:inline">(0.50/G)</span>
+              </span>
             </div>
-          </div>
-        </div>
 
-        <!-- Triple Crown Watch Cards -->
-        ${tcList.length ? `
-          <div class="grid grid-cols-1 lg:grid-cols-${Math.min(3, tcList.length)} gap-3 mt-4 pt-4 border-t border-slate-800/80">
-            ${tcList.map(tc => `
-              <div class="bg-slate-950/75 border border-slate-800 rounded-xl p-3 flex flex-col justify-between gap-2">
-                <div class="flex items-center justify-between">
-                  <span class="text-[11px] font-black uppercase tracking-wider text-amber-300"><i class="bi bi-stars mr-1"></i>${tc.scope} — Triple Crown Watch</span>
-                  <div class="flex gap-1">
-                    ${tc.batting.is_triple_crown ? `<span class="px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-black text-[10px]">BATTING TRIPLE CROWN!</span>` : ''}
-                    ${tc.pitching.is_triple_crown ? `<span class="px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-black text-[10px]">PITCHING TRIPLE CROWN!</span>` : ''}
-                  </div>
+            <!-- Global Sub-League, Team, Position, Role & Qualification Controls -->
+            <div class="flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
+              ${subLeagues.length > 1 ? `
+                <div class="inline-flex items-center rounded-lg bg-black/25 p-0.5 border bnn-border">
+                  <button onclick="setLeadersOption('leadersSubLeague','ALL')" class="px-2 py-0.5 rounded font-extrabold ${slFilter === 'ALL' ? 'bg-amber-400 text-slate-950' : 'bnn-muted'}">ALL</button>
+                  ${subLeagues.map(sl => `
+                    <button onclick="setLeadersOption('leadersSubLeague','${sl.sub_league_id}')" class="px-2 py-0.5 rounded font-extrabold ${String(slFilter) === String(sl.sub_league_id) ? 'bg-amber-400 text-slate-950' : 'bnn-muted'}" title="${sl.name}">${sl.abbr || sl.name}</button>
+                  `).join("")}
                 </div>
-                <div class="grid grid-cols-2 gap-2 text-[11px] font-mono">
-                  <div class="bg-slate-900/80 p-2 rounded-lg border border-slate-800/80 space-y-0.5">
-                    <div class="text-[10px] text-sky-300 font-bold uppercase mb-1">Batting Crown</div>
-                    ${tc.batting.avg ? `<div class="flex justify-between"><span class="text-slate-400">AVG:</span><span class="text-white font-bold truncate ml-1">${tc.batting.avg.name} (${fmtAvg(tc.batting.avg.value)})</span></div>` : ''}
-                    ${tc.batting.hr ? `<div class="flex justify-between"><span class="text-slate-400">HR:</span><span class="text-white font-bold truncate ml-1">${tc.batting.hr.name} (${tc.batting.hr.value})</span></div>` : ''}
-                    ${tc.batting.rbi ? `<div class="flex justify-between"><span class="text-slate-400">RBI:</span><span class="text-white font-bold truncate ml-1">${tc.batting.rbi.name} (${tc.batting.rbi.value})</span></div>` : ''}
-                  </div>
-                  <div class="bg-slate-900/80 p-2 rounded-lg border border-slate-800/80 space-y-0.5">
-                    <div class="text-[10px] text-amber-300 font-bold uppercase mb-1">Pitching Crown</div>
-                    ${tc.pitching.era ? `<div class="flex justify-between"><span class="text-slate-400">ERA:</span><span class="text-white font-bold truncate ml-1">${tc.pitching.era.name} (${Number(tc.pitching.era.value).toFixed(2)})</span></div>` : ''}
-                    ${tc.pitching.w ? `<div class="flex justify-between"><span class="text-slate-400">W:</span><span class="text-white font-bold truncate ml-1">${tc.pitching.w.name} (${tc.pitching.w.value})</span></div>` : ''}
-                    ${tc.pitching.k ? `<div class="flex justify-between"><span class="text-slate-400">K:</span><span class="text-white font-bold truncate ml-1">${tc.pitching.k.name} (${tc.pitching.k.value})</span></div>` : ''}
-                  </div>
-                </div>
+              ` : ""}
+
+              <select onchange="setLeadersOption('leadersTeam', this.value)" class="bnn-subcard border bnn-border rounded-lg px-2 py-1 font-bold">
+                <option value="">All Clubs (${teams.length})</option>
+                ${teams.map(t => `<option value="${t.team_id}" ${Number(teamFilter) === Number(t.team_id) ? "selected" : ""}>${t.abbr} — ${t.name}</option>`).join("")}
+              </select>
+
+              <select onchange="setLeadersOption('leadersPos', this.value)" class="bnn-subcard border bnn-border rounded-lg px-2 py-1 font-bold">
+                <option value="">All Pos</option>
+                ${["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"].map(pos => `<option value="${pos}" ${posFilter === pos ? "selected" : ""}>${pos}</option>`).join("")}
+              </select>
+
+              <select onchange="setLeadersOption('leadersPitcherRole', this.value)" class="bnn-subcard border bnn-border rounded-lg px-2 py-1 font-bold">
+                <option value="ALL" ${roleFilter === "ALL" ? "selected" : ""}>All Arms</option>
+                <option value="SP" ${roleFilter === "SP" ? "selected" : ""}>Starters (SP)</option>
+                <option value="RP" ${roleFilter === "RP" ? "selected" : ""}>Relievers (RP)</option>
+              </select>
+
+              <div class="inline-flex items-center rounded-lg bg-black/25 p-0.5 border bnn-border">
+                <button onclick="setLeadersOption('leadersQualMode','qualified')" class="px-2 py-0.5 rounded font-extrabold ${qualMode === 'qualified' ? 'bg-emerald-500 text-slate-950' : 'bnn-muted'}" title="Official MLB/OOTP Qualified">Qualified</button>
+                <button onclick="setLeadersOption('leadersQualMode','half')" class="px-2 py-0.5 rounded font-extrabold ${qualMode === 'half' ? 'bg-sky-400 text-slate-950' : 'bnn-muted'}" title="50% Qualification Threshold">50% Gate</button>
+                <button onclick="setLeadersOption('leadersQualMode','all')" class="px-2 py-0.5 rounded font-extrabold ${qualMode === 'all' ? 'bg-rose-500 text-white' : 'bnn-muted'}" title="All Players (Min 1 PA / 1 IP)">All</button>
               </div>
-            `).join("")}
-          </div>
-        ` : ''}
-      </div>
-
-      <!-- Category Domain & Filter Bar -->
-      <div class="glass-card p-3.5 flex flex-wrap items-center justify-between gap-3">
-        <div class="flex flex-wrap items-center gap-1.5">
-          <button onclick="setLeadersOption('leadersCategoryTab','batting')" class="px-3.5 py-2 rounded-xl text-xs font-extrabold uppercase tracking-wider transition flex items-center gap-1.5 ${catTab === 'batting' ? 'bg-sky-500 text-slate-950 shadow-lg' : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-600'}">
-            <i class="bi bi-trophy-fill"></i> Batting (${BATTING_LEADER_CATEGORIES.length})
-          </button>
-          <button onclick="setLeadersOption('leadersCategoryTab','pitching')" class="px-3.5 py-2 rounded-xl text-xs font-extrabold uppercase tracking-wider transition flex items-center gap-1.5 ${catTab === 'pitching' ? 'bg-amber-400 text-slate-950 shadow-lg' : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-600'}">
-            <i class="bi bi-fire"></i> Pitching (${PITCHING_LEADER_CATEGORIES.length})
-          </button>
-          <button onclick="setLeadersOption('leadersCategoryTab','fielding')" class="px-3.5 py-2 rounded-xl text-xs font-extrabold uppercase tracking-wider transition flex items-center gap-1.5 ${catTab === 'fielding' ? 'bg-emerald-400 text-slate-950 shadow-lg' : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-600'}">
-            <i class="bi bi-shield-fill-check"></i> Fielding & Defense (${FIELDING_LEADER_CATEGORIES.length})
-          </button>
-          <button onclick="setLeadersOption('leadersCategoryTab','statcast')" class="px-3.5 py-2 rounded-xl text-xs font-extrabold uppercase tracking-wider transition flex items-center gap-1.5 ${catTab === 'statcast' ? 'bg-purple-400 text-slate-950 shadow-lg' : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-600'}">
-            <i class="bi bi-bullseye"></i> Statcast & Speed (${STATCAST_LEADER_CATEGORIES.length})
-          </button>
-          <button onclick="setLeadersOption('leadersCategoryTab','table')" class="px-3.5 py-2 rounded-xl text-xs font-extrabold uppercase tracking-wider transition flex items-center gap-1.5 ${catTab === 'table' ? 'bg-white text-slate-950 shadow-lg' : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-600'}">
-            <i class="bi bi-table"></i> Sortable Master Table
-          </button>
-        </div>
-
-        <!-- Sub-League, Team, Position & Role Filters -->
-        <div class="flex flex-wrap items-center gap-2">
-          ${subLeagues.length > 1 ? `
-            <div class="flex items-center bg-slate-950 border border-slate-800 rounded-xl p-1 gap-1">
-              <button onclick="setLeadersOption('leadersSubLeague','ALL')" class="px-2.5 py-1 rounded-lg text-xs font-bold ${slFilter === 'ALL' ? 'bg-slate-200 text-slate-950' : 'text-slate-300'}">All</button>
-              ${subLeagues.map(sl => `
-                <button onclick="setLeadersOption('leadersSubLeague','${sl.sub_league_id}')" class="px-2.5 py-1 rounded-lg text-xs font-bold ${String(slFilter) === String(sl.sub_league_id) ? 'bg-slate-200 text-slate-950' : 'text-slate-300'}" title="${sl.name}">${sl.abbr || sl.name}</button>
-              `).join("")}
             </div>
-          ` : ''}
+          </div>
+        </section>
 
-          <select onchange="setLeadersOption('leadersTeam', this.value)" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-bold text-white">
-            <option value="">All Teams (${teams.length})</option>
-            ${teams.map(t => `<option value="${t.team_id}" ${Number(teamFilter) === Number(t.team_id) ? 'selected' : ''}>${t.abbr} — ${t.name}</option>`).join("")}
-          </select>
+        <!-- =============================================================== -->
+        <!-- 2. LOCKED-IN BNN.COM | OOTP+ SCOREBUG HEADER & 4-ARCHETYPE BAR  -->
+        <!-- =============================================================== -->
+        <header class="bg-gradient-to-r from-[#0F172A] via-[#1E293B] to-[#0B132B] text-white px-4 py-2 shadow-md border-b border-white/15">
+          <div class="bnn-stretch-container flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-4">
+              <!-- Locked-in Logo: [B][N][N] .COM / OOTP+ Broadcast Scorebug Tile SVG -->
+              <svg width="185" height="40" viewBox="0 0 240 54" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="BNN.COM OOTP+ Broadcast Logo" class="shrink-0">
+                <g transform="skewX(-10) translate(12, 8)">
+                  <rect x="0" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
+                  <text x="17" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">B</text>
+                  <rect x="38" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
+                  <text x="55" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">N</text>
+                  <rect x="76" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
+                  <text x="93" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">N</text>
+                  <rect x="114" y="0" width="68" height="23" rx="3" fill="#090D14" stroke="#FFFFFF" stroke-width="1.2"/>
+                  <text x="148" y="16.5" text-anchor="middle" fill="#FFFFFF" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="16">.COM</text>
+                  <rect x="114" y="25" width="68" height="11" rx="2" fill="#F59E0B"/>
+                  <text x="148" y="33.2" text-anchor="middle" fill="#090D14" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="8.5" letter-spacing="1.2">OOTP+</text>
+                </g>
+              </svg>
 
-          ${catTab === "pitching" ? `
-            <select onchange="setLeadersOption('leadersPitcherRole', this.value)" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-bold text-white">
-              <option value="ALL" ${roleFilter === 'ALL' ? 'selected' : ''}>All Pitchers</option>
-              <option value="SP" ${roleFilter === 'SP' ? 'selected' : ''}>Starters (SP)</option>
-              <option value="RP" ${roleFilter === 'RP' ? 'selected' : ''}>Relievers (RP / CL)</option>
-            </select>
-          ` : `
-            <select onchange="setLeadersOption('leadersPos', this.value)" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-bold text-white">
-              <option value="">All Positions</option>
-              ${["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"].map(pos => `<option value="${pos}" ${posFilter === pos ? 'selected' : ''}>${pos}</option>`).join("")}
-            </select>
-          `}
+              <div class="hidden xl:flex items-center gap-3 text-xs font-extrabold tracking-wide uppercase">
+                <button onclick="switchTab('frontpage')" class="text-white/75 hover:text-white transition">01. Front Page</button>
+                <button onclick="switchTab('stretch')" class="text-white/75 hover:text-white transition">02. The Stretch</button>
+                <button onclick="switchTab('world')" class="text-white/75 hover:text-white transition">03. World</button>
+                <button onclick="switchTab('overview')" class="text-white/75 hover:text-white transition">04. Standings</button>
+                <button onclick="switchTab('teamhub')" class="text-white/75 hover:text-white transition">05. Team Hub</button>
+                <span class="text-amber-300 border-b-2 border-amber-300 pb-0.5">06. League Leaders (${totalCats})</span>
+              </div>
+            </div>
+
+            <!-- Right Controls: 4-Archetype Switcher, Viewport Simulator & Dark/Light Theme -->
+            <div class="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+              <div class="inline-flex items-center rounded-lg bg-black/45 p-0.5 border border-white/20">
+                <button onclick="setLeadersViewMode('portal')" class="px-2 py-0.5 rounded font-bold transition ${viewMode === 'portal' ? 'bg-amber-400 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">
+                  1. Broadcast Portal ★
+                </button>
+                <button onclick="setLeadersViewMode('savant')" class="px-2 py-0.5 rounded font-bold transition ${viewMode === 'savant' ? 'bg-red-600 text-white font-black' : 'text-slate-300 hover:text-white'}">
+                  2. Savant Sliders
+                </button>
+                <button onclick="setLeadersViewMode('broadsheet')" class="px-2 py-0.5 rounded font-bold transition ${viewMode === 'broadsheet' ? 'bg-amber-400 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">
+                  3. Black-Ink Broadsheet
+                </button>
+                <button onclick="setLeadersViewMode('workbench')" class="px-2 py-0.5 rounded font-bold transition ${viewMode === 'workbench' ? 'bg-sky-400 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">
+                  4. Query Workbench
+                </button>
+              </div>
+
+              <!-- Viewport Ergonomics Simulator -->
+              <div class="inline-flex items-center rounded-lg bg-black/45 p-0.5 border border-white/20">
+                <button onclick="setLeadersViewportMode('auto')" class="px-2 py-0.5 rounded font-bold transition ${vpMode === 'auto' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'}" title="Auto-detect 16:9 vs 21:9 Ultrawide">
+                  Auto
+                </button>
+                <button onclick="setLeadersViewportMode('standard')" class="px-2 py-0.5 rounded font-bold transition ${vpMode === 'standard' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'}" title="Standard 16:9 UHD (1580px 3-Col)">
+                  16:9 (3-Col)
+                </button>
+                <button onclick="setLeadersViewportMode('ultrawide')" class="px-2 py-0.5 rounded font-bold transition ${vpMode === 'ultrawide' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'}" title="21:9 Ultrawide (Full-Bleed 4-Col Zero-Scroll Cockpit)">
+                  21:9 (4-Col)
+                </button>
+              </div>
+
+              <!-- Dark vs Light Theme -->
+              <div class="inline-flex items-center rounded-lg bg-black/45 p-0.5 border border-white/20">
+                <button onclick="setLeadersTheme('dark')" class="px-2 py-0.5 rounded font-bold transition ${!isLight ? 'bg-white text-slate-900' : 'text-slate-300 hover:text-white'}">
+                  🌙 Dark
+                </button>
+                <button onclick="setLeadersTheme('light')" class="px-2 py-0.5 rounded font-bold transition ${isLight ? 'bg-amber-400 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">
+                  ☀️ Light
+                </button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <!-- =============================================================== -->
+        <!-- 3. MAIN LEAGUE LEADERS HUB BODY                                 -->
+        <!-- =============================================================== -->
+        <div class="p-3.5 sm:p-4 bnn-stretch-container w-full space-y-4">
+          ${archetypeBodyHtml}
         </div>
-      </div>
 
-      ${bodyHtml}
+      </div>
     </div>
   `;
 
-  if (catTab === "table") {
+  if (viewMode === "portal" && catTab === "table") {
     initSortableTables(container);
   }
 }
