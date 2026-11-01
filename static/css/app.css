@@ -1058,6 +1058,163 @@ select option {
  * TAB 06: LEAGUE LEADERS HUB — PODIUMS, SAVANT SLIDERS, BROADSHEET & 4-COL GRID
  * ============================================================================ */
 
+/* ============================================================================
+ * TAB 05: TEAM FRANCHISE HUB — BNN.COM WAR ROOM & 4-ARCHETYPE SYSTEM
+ * ============================================================================ */
+
+/* Adaptive 16:9 3-Col vs 21:9 Ultrawide 4-Col Unstacked Cockpit Grid */
+.bnn-teamhub-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 0.9rem;
+  align-items: start;
+}
+.bnn-th-col-left { grid-column: span 3 / span 3; }
+.bnn-th-col-center { grid-column: span 6 / span 6; }
+.bnn-th-col-right { grid-column: span 3 / span 3; }
+.bnn-th-col-uw { display: none; }
+.bnn-th-hide-on-uw { display: block; }
+
+.bnn-vp-ultrawide .bnn-teamhub-grid {
+  grid-template-columns: 18fr 43fr 20fr 19fr !important;
+  gap: 0.85rem !important;
+}
+.bnn-vp-ultrawide .bnn-th-col-left,
+.bnn-vp-ultrawide .bnn-th-col-center,
+.bnn-vp-ultrawide .bnn-th-col-right {
+  grid-column: auto !important;
+}
+.bnn-vp-ultrawide .bnn-th-col-uw {
+  display: flex !important;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.bnn-vp-ultrawide .bnn-th-hide-on-uw {
+  display: none !important;
+}
+
+@media (min-width: 2150px) {
+  .bnn-vp-auto .bnn-teamhub-grid {
+    grid-template-columns: 18fr 43fr 20fr 19fr !important;
+    gap: 0.85rem !important;
+  }
+  .bnn-vp-auto .bnn-th-col-left,
+  .bnn-vp-auto .bnn-th-col-center,
+  .bnn-vp-auto .bnn-th-col-right {
+    grid-column: auto !important;
+  }
+  .bnn-vp-auto .bnn-th-col-uw {
+    display: flex !important;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+  .bnn-vp-auto .bnn-th-hide-on-uw {
+    display: none !important;
+  }
+}
+
+@media (max-width: 1120px) {
+  .bnn-teamhub-grid,
+  .bnn-vp-ultrawide .bnn-teamhub-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .bnn-th-col-left,
+  .bnn-th-col-center,
+  .bnn-th-col-right {
+    grid-column: span 1 / span 1 !important;
+  }
+}
+
+/* Franchise Identity Bar with Dynamic --team-primary Accent */
+.bnn-th-identity-bar {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.875rem;
+  background:
+    radial-gradient(circle at 0% 50%, color-mix(in srgb, var(--team-primary, #1e3a8a) 38%, transparent) 0%, transparent 52%),
+    linear-gradient(135deg, #131822 0%, #0F141D 100%);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+}
+
+.bnn-portal-light .bnn-th-identity-bar {
+  background:
+    radial-gradient(circle at 0% 50%, color-mix(in srgb, var(--team-primary, #1e3a8a) 16%, transparent) 0%, transparent 50%),
+    linear-gradient(135deg, #FFFFFF 0%, #F8FAFC 100%);
+  border: 1px solid #CBD5E1;
+  box-shadow: 0 3px 12px rgba(15, 23, 42, 0.06);
+}
+
+/* Broadcast Stadium-Turf Graphical Field Depth Diamond */
+.bnn-diamond-stage {
+  position: relative;
+  width: 100%;
+  height: 640px;
+  border-radius: 0.875rem;
+  overflow: hidden;
+  user-select: none;
+  background: radial-gradient(circle at 50% 82%, #0c2e1c 0%, #071912 58%, #070b11 100%);
+  border: 1px solid rgba(56, 189, 248, 0.24);
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.55);
+}
+
+.bnn-portal-light .bnn-diamond-stage {
+  background: radial-gradient(circle at 50% 82%, #14532d 0%, #0f3d23 62%, #0f172a 100%);
+  border: 1px solid #94A3B8;
+}
+
+.bnn-diamond-node {
+  position: absolute;
+  z-index: 20;
+  width: 146px;
+  border-radius: 0.65rem;
+  padding: 6px 7px;
+  background: rgba(11, 15, 23, 0.93);
+  backdrop-filter: blur(8px);
+  border: 1.5px solid rgba(148, 163, 184, 0.45);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+  transition: transform 0.14s ease, box-shadow 0.14s ease, border-color 0.14s ease;
+  color: #F8FAFC;
+}
+
+.bnn-diamond-node:hover {
+  transform: translate(-50%, -50%) scale(1.045) !important;
+  z-index: 30;
+}
+
+.bnn-diamond-node.is-selected {
+  box-shadow: 0 0 0 2px #38BDF8, 0 10px 26px rgba(14, 165, 233, 0.38);
+  z-index: 28;
+}
+
+/* RosterResource / FanGraphs 15x5 Contract Control Matrix Cells */
+.bnn-rr-cell {
+  border-radius: 0.5rem;
+  padding: 5px 7px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+.bnn-rr-cell:hover {
+  border-color: rgba(56, 189, 248, 0.65);
+}
+.bnn-rr-signed { background: rgba(51, 65, 85, 0.45); border-color: rgba(148, 163, 184, 0.35); }
+.bnn-rr-extended { background: rgba(16, 185, 129, 0.18); border-color: rgba(52, 211, 153, 0.55); }
+.bnn-rr-option { background: rgba(245, 158, 11, 0.16); border-color: rgba(251, 191, 36, 0.52); }
+.bnn-rr-arb { background: rgba(14, 165, 233, 0.16); border-color: rgba(56, 189, 248, 0.48); }
+.bnn-rr-prearb { background: rgba(16, 185, 129, 0.13); border-color: rgba(16, 185, 129, 0.42); }
+.bnn-rr-pipeline { background: rgba(139, 92, 246, 0.17); border-color: rgba(167, 139, 250, 0.52); }
+.bnn-rr-vacant { background: rgba(244, 63, 94, 0.14); border-color: rgba(251, 113, 133, 0.5); border-style: dashed; }
+
+.bnn-portal-light .bnn-rr-signed { background: #F1F5F9; border-color: #CBD5E1; }
+.bnn-portal-light .bnn-rr-extended { background: #D1FAE5; border-color: #34D399; }
+.bnn-portal-light .bnn-rr-option { background: #FEF3C7; border-color: #F59E0B; }
+.bnn-portal-light .bnn-rr-arb { background: #E0F2FE; border-color: #38BDF8; }
+.bnn-portal-light .bnn-rr-prearb { background: #ECFDF5; border-color: #6EE7B7; }
+.bnn-portal-light .bnn-rr-pipeline { background: #EDE9FE; border-color: #A78BFA; }
+.bnn-portal-light .bnn-rr-vacant { background: #FFE4E6; border-color: #FB7185; border-style: dashed; }
+
+
 /* Adaptive 16:9 UHD 3-Column (1580px) vs. 21:9 Ultrawide 4-Column Cockpit */
 .bnn-leaders-grid {
   display: grid;

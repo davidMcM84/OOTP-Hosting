@@ -3484,8 +3484,44 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
     org_prospects = []
     bat_ratings_map = {}
     pit_ratings_map = {}
+    split_bat_stats = {}  # pid -> {2: row_vs_lhp, 3: row_vs_rhp}
+    target_sched_games = max((safe_int(s.get("g"), 0) for s in standings), default=162)
+    if target_sched_games < 140:
+        target_sched_games = 162 if safe_int(active_team.get("level"), 1) == 1 else max(140, target_sched_games)
 
     if conn:
+        if table_exists(conn, "leagues"):
+            try:
+                row_sg = conn.execute(
+                    "SELECT rules_schedule_games_per_team FROM leagues WHERE league_id = ?",
+                    (league_id,),
+                ).fetchone()
+                if row_sg and safe_int(row_sg[0]) >= 30:
+                    target_sched_games = max(target_sched_games if target_sched_games > safe_int(row_sg[0]) else 0, safe_int(row_sg[0]))
+            except Exception:
+                pass
+
+        if table_exists(conn, "players_career_batting_stats"):
+            try:
+                for r in conn.execute(
+                    """
+                    SELECT player_id, split_id, SUM(pa) as pa, SUM(ab) as ab, SUM(h) as h,
+                           SUM(d) as d, SUM(t) as t, SUM(hr) as hr, SUM(bb) as bb,
+                           SUM(ibb) as ibb, SUM(hp) as hp, SUM(sf) as sf, SUM(k) as k
+                    FROM players_career_batting_stats
+                    WHERE year = ? AND split_id IN (2, 3)
+                    GROUP BY player_id, split_id
+                    """,
+                    (season_year,),
+                ):
+                    sd = dict(r)
+                    spid = safe_int(sd.get("player_id"))
+                    spl = safe_int(sd.get("split_id"))
+                    if safe_int(sd.get("pa")) > 0:
+                        split_bat_stats.setdefault(spid, {})[spl] = sd
+            except Exception:
+                pass
+
         if table_exists(conn, "players_fielding"):
             for r in conn.execute("SELECT * FROM players_fielding"):
                 d = dict(r)
@@ -3632,12 +3668,23 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
         if pct_val >= 75:
             return "A", "#22c55e", "All-Star Unit"
         if pct_val >= 62:
-            return "B+", "#dbdbdb", "Above-Average"
+            return "B+", "#38bdf8", "Above-Average"
         if pct_val >= 45:
-            return "B", "#999999", "Solid Regular"
+            return "B", "#94a3b8", "Solid Regular"
         if pct_val >= 30:
             return "C", "#f59e0b", "Depth / Platoon"
         return "D", "#f43f5e", "Upgrade Target"
+
+    def action_tag_from_pct(pct_val: int) -> str:
+        if pct_val >= 85:
+            return "Cornerstone Lock"
+        if pct_val >= 72:
+            return "All-Star Core"
+        if pct_val >= 55:
+            return "Solid Starter"
+        if pct_val >= 35:
+            return "Platoon Watch"
+        return "Urgent Upgrade"
 
     def build_pos_recommendation(pos_str: str, pct_val: int, war_diff_val: float, st_name: str):
         if pct_val >= 75:
@@ -3647,6 +3694,130 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
         if pct_val >= 32:
             return f"Below-average output ({war_diff_val:+.1f} WAR vs Lg). Evaluate trade/FA platoon or internal call-up."
         return f"High-priority upgrade need ({war_diff_val:+.1f} WAR vs Lg). Target impact {pos_str} via trade or free agency."
+
+    lg_woba_env = safe_float(overview.get("environment", {}).get("league_woba"), 0.320) or 0.320
+    park_pf_avg = safe_float(active_team.get("park", {}).get("avg"), 1.0) or 1.0
+
+    def _split_row_wrc_plus(srow: dict) -> tuple[int, int]:
+        spa = safe_int(srow.get("pa"), 0)
+        if spa <= 0:
+            return 100, 0
+        sab = safe_int(srow.get("ab"), 0)
+        sh = safe_int(srow.get("h"), 0)
+        sd2 = safe_int(srow.get("d"), 0)
+        st3 = safe_int(srow.get("t"), 0)
+        shr = safe_int(srow.get("hr"), 0)
+        ss1 = max(0, sh - sd2 - st3 - shr)
+        subb = max(0, safe_int(srow.get("bb"), 0) - safe_int(srow.get("ibb"), 0))
+        shp = safe_int(srow.get("hp"), 0)
+        ssf = safe_int(srow.get("sf"), 0)
+        denom = max(1, sab + subb + shp + ssf)
+        swoba = (0.69 * subb + 0.72 * shp + 0.88 * ss1 + 1.25 * sd2 + 1.58 * st3 + 2.03 * shr) / denom
+        swrc_p = int(round(100.0 * (swoba / lg_woba_env) / park_pf_avg))
+        return max(25, min(240, swrc_p)), spa
+
+    def _compute_batter_platoon(b_obj: dict) -> dict:
+        pid_b = safe_int(b_obj.get("player_id"))
+        base_wrc = safe_int(b_obj.get("wrc_plus"), 100)
+        bats_h = b_obj.get("bats", "R")
+        br_row = bat_ratings_map.get(pid_b, {})
+
+        vsr_con = safe_int(br_row.get("batting_ratings_vsr_contact"), 0)
+        vsr_pow = safe_int(br_row.get("batting_ratings_vsr_power"), 0)
+        vsr_eye = safe_int(br_row.get("batting_ratings_vsr_eye"), 0)
+        vsl_con = safe_int(br_row.get("batting_ratings_vsl_contact"), 0)
+        vsl_pow = safe_int(br_row.get("batting_ratings_vsl_power"), 0)
+        vsl_eye = safe_int(br_row.get("batting_ratings_vsl_eye"), 0)
+
+        if vsr_con > 0 and vsl_con > 0:
+            rtg_r = 0.45 * vsr_con + 0.35 * vsr_pow + 0.20 * vsr_eye
+            rtg_l = 0.45 * vsl_con + 0.35 * vsl_pow + 0.20 * vsl_eye
+            rtg_diff = (rtg_r - rtg_l) * 1.35
+            prior_vsr = int(round(base_wrc + rtg_diff * 0.32))
+            prior_vsl = int(round(base_wrc - rtg_diff * 0.68))
+        else:
+            # Standard handedness platoon prior when split ratings are absent
+            if bats_h == "L":
+                prior_vsr, prior_vsl = base_wrc + 8, base_wrc - 18
+            elif bats_h == "R":
+                prior_vsr, prior_vsl = base_wrc - 5, base_wrc + 12
+            else:
+                prior_vsr, prior_vsl = base_wrc + 1, base_wrc - 2
+
+        sp_rows = split_bat_stats.get(pid_b, {})
+        pa_l, pa_r = 0, 0
+        if 3 in sp_rows:
+            obs_r, pa_r = _split_row_wrc_plus(sp_rows[3])
+            w_r = min(0.75, pa_r / 180.0)
+            vs_rhp = int(round(w_r * obs_r + (1.0 - w_r) * prior_vsr))
+        else:
+            vs_rhp = prior_vsr
+
+        if 2 in sp_rows:
+            obs_l, pa_l = _split_row_wrc_plus(sp_rows[2])
+            w_l = min(0.70, pa_l / 110.0)
+            vs_lhp = int(round(w_l * obs_l + (1.0 - w_l) * prior_vsl))
+        else:
+            vs_lhp = prior_vsl
+
+        vs_rhp = max(35, min(225, vs_rhp))
+        vs_lhp = max(35, min(225, vs_lhp))
+        p_gap = vs_rhp - vs_lhp
+        weak_side = min(vs_rhp, vs_lhp)
+        if abs(p_gap) >= 24 and weak_side <= 88:
+            vuln = f"Severe vs {'LHP' if vs_lhp < vs_rhp else 'RHP'}"
+        elif abs(p_gap) >= 15 and weak_side <= 96:
+            vuln = f"Platoon Watch vs {'LHP' if vs_lhp < vs_rhp else 'RHP'}"
+        else:
+            vuln = "Balanced Everyday"
+        return {
+            "vs_rhp_wrc_plus": vs_rhp,
+            "vs_lhp_wrc_plus": vs_lhp,
+            "vs_rhp_pa": pa_r,
+            "vs_lhp_pa": pa_l,
+            "platoon_gap": p_gap,
+            "platoon_flag": vuln,
+        }
+
+    def _compute_pitcher_process(p_obj: dict, lev_role: str = "") -> dict:
+        ip_v = safe_float(p_obj.get("ip"), 0.0)
+        pitches_v = safe_int(p_obj.get("pi"), 0) or int(round(ip_v * 16.2))
+        oa_p = safe_int(p_obj.get("oa"), 50)
+        rtg_stu = safe_int(p_obj.get("rtg_stuff"), 0) or safe_int(pit_ratings_map.get(p_obj["player_id"], {}).get("pitching_ratings_overall_stuff"), oa_p)
+        rtg_mov = safe_int(p_obj.get("rtg_movement"), 0) or safe_int(pit_ratings_map.get(p_obj["player_id"], {}).get("pitching_ratings_overall_movement"), oa_p)
+        rtg_ctl = safe_int(p_obj.get("rtg_control"), 0) or safe_int(pit_ratings_map.get(p_obj["player_id"], {}).get("pitching_ratings_overall_control"), oa_p)
+        k_pct_v = safe_float(p_obj.get("k_pct"), 0.0) or round(min(42.0, safe_float(p_obj.get("k9"), 8.2) * 2.65), 1)
+        bb_pct_v = safe_float(p_obj.get("bb_pct"), 0.0) or round(min(22.0, safe_float(p_obj.get("bb9"), 3.1) * 2.65), 1)
+        k_bb_v = round(safe_float(p_obj.get("k_minus_bb"), k_pct_v - bb_pct_v), 1)
+        fip_v = safe_float(p_obj.get("fip"), 4.00)
+        xfip_v = safe_float(p_obj.get("xfip"), fip_v)
+        siera_v = safe_float(p_obj.get("siera"), round(0.5 * fip_v + 0.5 * xfip_v, 2))
+        stuff_plus = max(65, min(148, int(round(100 + (rtg_stu - 50) * 1.45 + max(-8.0, min(12.0, (k_pct_v - 21.5) * 0.55))))))
+        location_plus = max(65, min(142, int(round(100 + (rtg_ctl - 50) * 1.35 + max(-8.0, min(10.0, (8.2 - bb_pct_v) * 0.85))))))
+        pitching_plus = max(68, min(145, int(round(0.45 * stuff_plus + 0.30 * location_plus + 0.25 * (100 + (rtg_mov - 50) * 1.35)))))
+        psera_v = round(max(2.05, min(6.25, 0.55 * siera_v + 0.45 * (4.15 - (pitching_plus - 100) * 0.036))), 2)
+        if pitches_v >= 400:
+            s_stat, s_conf, s_bdg = "Stabilized", True, f"{pitches_v}P (Locked)"
+        elif pitches_v >= 80:
+            s_stat, s_conf, s_bdg = "Stuff+ Locked", True, f"{pitches_v}P (Stuff+ OK)"
+        else:
+            s_stat, s_conf, s_bdg = "Low Sample", False, f"{pitches_v}P (<80p Gate)"
+        return {
+            **p_obj,
+            "stuff_plus": stuff_plus,
+            "location_plus": location_plus,
+            "pitching_plus": pitching_plus,
+            "fip": round(fip_v, 2),
+            "xfip": round(xfip_v, 2),
+            "siera": round(siera_v, 2),
+            "psera": psera_v,
+            "k_minus_bb": k_bb_v,
+            "pitches_thrown": pitches_v,
+            "sample_status": s_stat,
+            "sample_confident": s_conf,
+            "sample_badge": s_bdg,
+            "leverage_role": lev_role or p_obj.get("role", "RP"),
+        }
 
     scarcity_order = [
         ("C", 2, "Catcher"),
@@ -3687,6 +3858,7 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
         for bp in backup_pool:
             if bp["player_id"] not in seen_b:
                 seen_b.add(bp["player_id"])
+                bp_plat = _compute_batter_platoon(bp)
                 backups.append({
                     "player_id": bp["player_id"],
                     "name": bp["name"],
@@ -3697,10 +3869,12 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
                     "avg": bp["avg"],
                     "ops": bp["ops"],
                     "wrc_plus": bp["wrc_plus"],
+                    "xwoba": bp.get("xwoba", 0.320),
                     "war": bp["war"],
                     "zr": bp["zr"],
                     "oa": bp["oa"],
                     "pot": bp["pot"],
+                    **bp_plat,
                 })
             if len(backups) >= 2:
                 break
@@ -3720,6 +3894,8 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
         blended_pct = int(round(0.65 * pct_rank + 0.35 * talent_pct)) if unit_pa >= 80 else talent_pct
         blended_pct = max(5, min(99, blended_pct))
         grade, color_hex, status_tag = grade_from_pct(blended_pct)
+        act_tag = action_tag_from_pct(blended_pct)
+        st_plat = _compute_batter_platoon(starter) if starter else {}
 
         depth_chart_nodes[pos_str] = {
             "position": pos_str,
@@ -3739,12 +3915,14 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
                 "sb": starter["sb"],
                 "wrc_plus": starter["wrc_plus"],
                 "xwoba": starter["xwoba"],
+                "barrel_pct": safe_float(starter.get("barrel_pct"), 6.5),
                 "war": starter["war"],
                 "zr": starter["zr"],
                 "oa": starter["oa"],
                 "pot": starter["pot"],
                 "salary": starter["salary"],
                 "is_injured": starter["is_injured"],
+                **st_plat,
             } if starter else None,
             "backups": backups,
             "unit_war": unit_war,
@@ -3757,6 +3935,8 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
             "grade": grade,
             "color": color_hex,
             "status_tag": status_tag,
+            "action_tag": act_tag,
+            "top_heir": None,
         }
 
     # Pitching Staff Depth Chart: Starting Rotation (SP1-SP5) & Bullpen (CL, SU, MR)
@@ -3764,9 +3944,13 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
     if len(sp_cands) < 5:
         extra_sp = sorted([p for p in team_pitchers if p not in sp_cands], key=lambda x: (x["ip"], x["war"]), reverse=True)
         sp_cands.extend(extra_sp[: 5 - len(sp_cands)])
-    rotation = sp_cands[:5]
-    rot_ids = {p["player_id"] for p in rotation}
-    bullpen = sorted([p for p in team_pitchers if p["player_id"] not in rot_ids], key=lambda x: (x["sv"] * 0.5 + x["war"] * 3.0 + x["oa"] * 0.06 + x["ip"] * 0.04), reverse=True)[:7]
+    raw_rotation = sp_cands[:5]
+    rot_ids = {p["player_id"] for p in raw_rotation}
+    raw_bullpen = sorted([p for p in team_pitchers if p["player_id"] not in rot_ids], key=lambda x: (x["sv"] * 0.5 + x["war"] * 3.0 + x["oa"] * 0.06 + x["ip"] * 0.04), reverse=True)[:7]
+
+    bp_role_tags = ["CL", "SU1", "SU2", "MR1", "MR2", "MR3", "LR"]
+    rotation = [_compute_pitcher_process(p, f"SP{i + 1}") for i, p in enumerate(raw_rotation)]
+    bullpen = [_compute_pitcher_process(p, bp_role_tags[i] if i < len(bp_role_tags) else f"RP{i + 1}") for i, p in enumerate(raw_bullpen)]
 
     sp_team_wars = {t_obj["team_id"]: 0.0 for t_obj in standings}
     rp_team_wars = {t_obj["team_id"]: 0.0 for t_obj in standings}
@@ -3788,10 +3972,16 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
     sp_pct = max(5, min(99, int(round((sum(1 for v in sp_peers if v <= sp_war) / max(1, len(sp_peers))) * 100.0))))
     rp_pct = max(5, min(99, int(round((sum(1 for v in rp_peers if v <= rp_war) / max(1, len(rp_peers))) * 100.0))))
 
-    sp_fip = round(sum(p["fip"] * p["ip"] for p in rotation) / max(1.0, sum(p["ip"] for p in rotation)), 2) if rotation else 4.20
-    rp_fip = round(sum(p["fip"] * p["ip"] for p in bullpen) / max(1.0, sum(p["ip"] for p in bullpen)), 2) if bullpen else 4.10
-    sp_era_plus = int(round(sum(p["era_plus"] * p["ip"] for p in rotation) / max(1.0, sum(p["ip"] for p in rotation)))) if rotation else 100
-    rp_era_plus = int(round(sum(p["era_plus"] * p["ip"] for p in bullpen) / max(1.0, sum(p["ip"] for p in bullpen)))) if bullpen else 100
+    sp_ip_sum = max(1.0, sum(max(1.0, p["ip"]) for p in rotation))
+    rp_ip_sum = max(1.0, sum(max(1.0, p["ip"]) for p in bullpen))
+    sp_fip = round(sum(p["fip"] * max(1.0, p["ip"]) for p in rotation) / sp_ip_sum, 2) if rotation else 4.20
+    rp_fip = round(sum(p["fip"] * max(1.0, p["ip"]) for p in bullpen) / rp_ip_sum, 2) if bullpen else 4.10
+    sp_psera = round(sum(p["psera"] * max(1.0, p["ip"]) for p in rotation) / sp_ip_sum, 2) if rotation else 4.15
+    rp_psera = round(sum(p["psera"] * max(1.0, p["ip"]) for p in bullpen) / rp_ip_sum, 2) if bullpen else 4.05
+    sp_stuff_plus = int(round(sum(p["stuff_plus"] * max(1.0, p["ip"]) for p in rotation) / sp_ip_sum)) if rotation else 100
+    rp_stuff_plus = int(round(sum(p["stuff_plus"] * max(1.0, p["ip"]) for p in bullpen) / rp_ip_sum)) if bullpen else 100
+    sp_era_plus = int(round(sum(p["era_plus"] * max(1.0, p["ip"]) for p in rotation) / sp_ip_sum)) if rotation else 100
+    rp_era_plus = int(round(sum(p["era_plus"] * max(1.0, p["ip"]) for p in bullpen) / rp_ip_sum)) if bullpen else 100
 
     sp_grade, sp_color, sp_tag = grade_from_pct(sp_pct)
     rp_grade, rp_color, rp_tag = grade_from_pct(rp_pct)
@@ -3819,12 +4009,15 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
             "color": node["color"],
             "status_color": node["color"],
             "status_tag": node["status_tag"],
+            "action_tag": node["action_tag"],
             "recommendation": rec_text,
             "starter_name": st_name,
             "starter_id": st["player_id"] if st else 0,
             "starter_oa": st["oa"] if st else 40,
+            "starter_pot": st["pot"] if st else 45,
             "primary_metric": f"{node['unit_wrc_plus']} wRC+",
             "def_metric": f"{node['unit_zr']:+.1f} ZR",
+            "top_heir": None,
         })
 
     sp_diff = round(sp_war - lg_sp_war, 1)
@@ -3839,18 +4032,24 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
         "lg_avg_war": lg_sp_war,
         "war_diff": sp_diff,
         "wrc_plus": sp_era_plus,
+        "stuff_plus": sp_stuff_plus,
+        "fip": sp_fip,
+        "psera": sp_psera,
         "zr": 0.0,
         "percentile": sp_pct,
         "grade": sp_grade,
         "color": sp_color,
         "status_color": sp_color,
         "status_tag": sp_tag,
+        "action_tag": action_tag_from_pct(sp_pct),
         "recommendation": build_pos_recommendation("SP", sp_pct, sp_diff, sp_leader_name),
         "starter_name": f"Ace: {sp_leader_name}",
         "starter_id": rotation[0]["player_id"] if rotation else 0,
         "starter_oa": rotation[0]["oa"] if rotation else 50,
-        "primary_metric": f"{sp_fip:.2f} FIP ({sp_era_plus} ERA+)",
-        "def_metric": f"{len(rotation)} Starters",
+        "starter_pot": rotation[0]["pot"] if rotation else 50,
+        "primary_metric": f"{sp_stuff_plus} Stuff+ · {sp_fip:.2f} FIP",
+        "def_metric": f"{sp_psera:.2f} pSERA",
+        "top_heir": None,
     })
 
     rp_diff = round(rp_war - lg_rp_war, 1)
@@ -3865,25 +4064,148 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
         "lg_avg_war": lg_rp_war,
         "war_diff": rp_diff,
         "wrc_plus": rp_era_plus,
+        "stuff_plus": rp_stuff_plus,
+        "fip": rp_fip,
+        "psera": rp_psera,
         "zr": 0.0,
         "percentile": rp_pct,
         "grade": rp_grade,
         "color": rp_color,
         "status_color": rp_color,
         "status_tag": rp_tag,
+        "action_tag": action_tag_from_pct(rp_pct),
         "recommendation": build_pos_recommendation("RP", rp_pct, rp_diff, rp_leader_name),
         "starter_name": f"CL: {rp_leader_name}",
         "starter_id": bullpen[0]["player_id"] if bullpen else 0,
         "starter_oa": bullpen[0]["oa"] if bullpen else 50,
-        "primary_metric": f"{rp_fip:.2f} FIP ({rp_era_plus} ERA+)",
-        "def_metric": f"{sum(p['sv'] for p in bullpen)} SV",
+        "starter_pot": bullpen[0]["pot"] if bullpen else 50,
+        "primary_metric": f"{rp_stuff_plus} Stuff+ · {rp_fip:.2f} FIP",
+        "def_metric": f"{rp_psera:.2f} pSERA",
+        "top_heir": None,
     })
 
     sorted_by_strength = sorted(positional_strengths, key=lambda x: (x["percentile"], x["war_diff"]), reverse=True)
     top_strengths = sorted_by_strength[:3]
     upgrade_targets = list(reversed(sorted_by_strength[-3:]))
 
-    # 2B. Build League-Wide Team Statistical Rankings (Offense, Pitching, Defense & Efficiency)
+    # League-Equilibrium $/WAR Market Valuation & Team-Wide Process Aggregations (for BaseRuns, $/WAR & 27 Rankings)
+    budget = active_team.get("budget") or max(120000000.0, active_team.get("payroll", 100000000.0) * 1.15)
+    curr_payroll = active_team.get("payroll") or 0.0
+    valid_payrolls = [safe_float(t_o.get("payroll"), 0.0) for t_o in standings if safe_float(t_o.get("payroll"), 0.0) > 0]
+    valid_budgets = [safe_float(t_o.get("budget"), 0.0) for t_o in standings if safe_float(t_o.get("budget"), 0.0) > 0]
+    if valid_payrolls:
+        lg_med_payroll = float(np.median(valid_payrolls))
+    elif valid_budgets:
+        lg_med_payroll = float(np.median(valid_budgets)) * 0.78
+    else:
+        lg_med_payroll = max(120000000.0, curr_payroll if curr_payroll > 0 else budget * 0.75)
+    market_dollar_per_war = round(max(1000.0, lg_med_payroll / 19.5), 0)
+
+    # Aggregate PA-weighted batting Statcast & IP-weighted pitching process across every team in standings
+    team_bat_proc = {t_o["team_id"]: {"pa": 0, "xwoba_sum": 0.0, "brl_sum": 0.0, "hh_sum": 0.0, "ev_sum": 0.0, "bb": 0.0, "k": 0.0} for t_o in standings}
+    for b_it in all_batters:
+        btid = b_it["team_id"]
+        if btid in team_bat_proc:
+            wt = max(1, safe_int(b_it.get("pa"), 0))
+            agg = team_bat_proc[btid]
+            agg["pa"] += wt
+            agg["xwoba_sum"] += safe_float(b_it.get("xwoba"), 0.320) * wt
+            agg["brl_sum"] += safe_float(b_it.get("barrel_pct"), 6.5) * wt
+            agg["hh_sum"] += safe_float(b_it.get("hard_hit_pct"), 36.0) * wt
+            agg["ev_sum"] += safe_float(b_it.get("avg_ev"), 88.5) * wt
+            agg["bb"] += safe_float(b_it.get("bb"), safe_float(b_it.get("bb_pct"), 8.5) * wt / 100.0)
+            agg["k"] += safe_float(b_it.get("k"), safe_float(b_it.get("k_pct"), 21.5) * wt / 100.0)
+
+    team_pit_proc = {t_o["team_id"]: {"ip": 0.0, "xfip_sum": 0.0, "siera_sum": 0.0, "kbb_sum": 0.0, "stu_sum": 0.0, "gb_sum": 0.0} for t_o in standings}
+    for p_it in all_pitchers:
+        ptid = p_it["team_id"]
+        if ptid in team_pit_proc:
+            wt_ip = max(0.5, safe_float(p_it.get("ip"), 0.0))
+            agg_p = team_pit_proc[ptid]
+            fip_i = safe_float(p_it.get("fip"), 4.10)
+            xfip_i = safe_float(p_it.get("xfip"), fip_i)
+            siera_i = safe_float(p_it.get("siera"), 0.5 * (fip_i + xfip_i))
+            kp_i = safe_float(p_it.get("k_pct"), 0.0) or (safe_float(p_it.get("k9"), 8.2) * 2.65)
+            bbp_i = safe_float(p_it.get("bb_pct"), 0.0) or (safe_float(p_it.get("bb9"), 3.1) * 2.65)
+            kbb_i = safe_float(p_it.get("k_minus_bb"), kp_i - bbp_i)
+            rstu_i = safe_int(p_it.get("rtg_stuff"), 0) or safe_int(p_it.get("oa"), 50)
+            stup_i = max(65, min(148, 100.0 + (rstu_i - 50) * 1.45 + max(-8.0, min(12.0, (kp_i - 21.5) * 0.55))))
+            agg_p["ip"] += wt_ip
+            agg_p["xfip_sum"] += xfip_i * wt_ip
+            agg_p["siera_sum"] += siera_i * wt_ip
+            agg_p["kbb_sum"] += kbb_i * wt_ip
+            agg_p["stu_sum"] += stup_i * wt_ip
+            agg_p["gb_sum"] += safe_float(p_it.get("gb_pct"), 43.0) * wt_ip
+
+    for t_o in standings:
+        tid_o = t_o["team_id"]
+        ba_o = team_bat_proc[tid_o]
+        pa_d = max(1.0, float(ba_o["pa"]))
+        t_o["xwoba"] = round(ba_o["xwoba_sum"] / pa_d, 3) if ba_o["pa"] > 0 else safe_float(t_o.get("woba"), 0.320)
+        t_o["barrel_pct"] = round(ba_o["brl_sum"] / pa_d, 1) if ba_o["pa"] > 0 else 6.8
+        t_o["hard_hit_pct"] = round(ba_o["hh_sum"] / pa_d, 1) if ba_o["pa"] > 0 else 36.5
+        t_o["avg_ev"] = round(ba_o["ev_sum"] / pa_d, 1) if ba_o["pa"] > 0 else 88.5
+        t_o["bb_k"] = round(ba_o["bb"] / max(1.0, ba_o["k"]), 2) if ba_o["pa"] > 0 else 0.40
+
+        pa_p = team_pit_proc[tid_o]
+        ip_d = max(1.0, float(pa_p["ip"]))
+        fip_base = safe_float(t_o.get("fip"), 4.20)
+        t_o["xfip"] = round(pa_p["xfip_sum"] / ip_d, 2) if pa_p["ip"] > 0 else fip_base
+        t_o["siera"] = round(pa_p["siera_sum"] / ip_d, 2) if pa_p["ip"] > 0 else fip_base
+        t_o["pit_k_minus_bb"] = round(pa_p["kbb_sum"] / ip_d, 1) if pa_p["ip"] > 0 else 13.5
+        t_o["stuff_plus"] = int(round(pa_p["stu_sum"] / ip_d)) if pa_p["ip"] > 0 else 100
+        t_o["gb_pct"] = round(pa_p["gb_sum"] / ip_d, 1) if pa_p["ip"] > 0 else 43.0
+
+        # Raw uncalibrated BaseRuns RS & RA (normalized to league zero-sum conservation below)
+        t_o["_raw_bsr_rs"] = safe_float(t_o.get("bsr_rs"), safe_float(t_o.get("rs"), 0.0))
+        ra_raw_o = safe_float(t_o.get("ra"), 0.0)
+        era_raw_o = safe_float(t_o.get("era"), 4.20)
+        proc_era_o = 0.55 * fip_base + 0.45 * t_o["siera"]
+        if ra_raw_o > 0 and era_raw_o > 0:
+            t_o["_raw_bsr_ra"] = ra_raw_o * max(0.74, min(1.30, (0.65 * proc_era_o + 0.35 * era_raw_o) / max(0.5, era_raw_o)))
+        else:
+            t_o["_raw_bsr_ra"] = ra_raw_o
+
+    # Zero-sum league conservation: scale BaseRuns RS & RA so league totals match actual RS & RA (mean BaseRuns Win% = .500)
+    tot_actual_rs = sum(safe_float(t_o.get("rs"), 0.0) for t_o in standings)
+    tot_actual_ra = sum(safe_float(t_o.get("ra"), 0.0) for t_o in standings)
+    tot_raw_bsr_rs = sum(safe_float(t_o.get("_raw_bsr_rs"), 0.0) for t_o in standings)
+    tot_raw_bsr_ra = sum(safe_float(t_o.get("_raw_bsr_ra"), 0.0) for t_o in standings)
+    rs_norm_mult = (tot_actual_rs / tot_raw_bsr_rs) if (tot_actual_rs > 0 and tot_raw_bsr_rs > 0) else 1.0
+    ra_norm_mult = (tot_actual_ra / tot_raw_bsr_ra) if (tot_actual_ra > 0 and tot_raw_bsr_ra > 0) else 1.0
+
+    for t_o in standings:
+        dec_g = safe_int(t_o.get("w"), 0) + safe_int(t_o.get("l"), 0)
+        pyth_g = dec_g if dec_g > 0 else safe_int(t_o.get("g"), 0)
+        bsr_rs_o = round(t_o.pop("_raw_bsr_rs", 0.0) * rs_norm_mult, 1)
+        bsr_ra_o = round(t_o.pop("_raw_bsr_ra", 0.0) * ra_norm_mult, 1)
+        if bsr_rs_o > 0 and bsr_ra_o > 0 and pyth_g > 0:
+            bsr_pct_o = (bsr_rs_o ** 1.83) / ((bsr_rs_o ** 1.83) + (bsr_ra_o ** 1.83))
+            bsr_w_o = round(bsr_pct_o * pyth_g, 1)
+            bsr_l_o = round((1.0 - bsr_pct_o) * pyth_g, 1)
+        else:
+            bsr_pct_o = safe_float(t_o.get("pyth_pct"), 0.500)
+            bsr_w_o = round(bsr_pct_o * pyth_g, 1)
+            bsr_l_o = round((1.0 - bsr_pct_o) * pyth_g, 1)
+
+        t_o["bsr_rs"] = bsr_rs_o
+        t_o["bsr_ra"] = bsr_ra_o
+        t_o["baseruns_pct"] = round(bsr_pct_o, 3)
+        t_o["baseruns_w"] = bsr_w_o
+        t_o["baseruns_l"] = bsr_l_o
+        t_o["baseruns_str"] = f"{bsr_w_o:.1f}-{bsr_l_o:.1f}"
+        t_o["seq_luck"] = round(safe_float(t_o.get("w"), 0) - safe_float(t_o.get("pyth_w"), 0), 1)
+        t_o["cluster_luck"] = round(safe_float(t_o.get("pyth_w"), 0) - bsr_w_o, 1)
+        t_o["baseruns_luck"] = round(safe_float(t_o.get("w"), 0) - bsr_w_o, 1)
+
+        # Full-season paced $/WAR efficiency ($M per 1.0 full-season paced WAR)
+        sched_scale_o = (target_sched_games / max(18.0, float(pyth_g))) if pyth_g > 0 else 1.0
+        paced_tot_war_o = max(3.0, safe_float(t_o.get("total_war"), 0.0) * min(3.6, max(1.0, sched_scale_o)))
+        pay_o = safe_float(t_o.get("payroll"), 0.0) or lg_med_payroll
+        t_o["paced_total_war"] = round(paced_tot_war_o, 1)
+        t_o["dollars_per_war_m"] = round((pay_o / paced_tot_war_o) / 1e6, 2)
+
+    # 2B. Build League-Wide Team Statistical Rankings (27 Process-First Metrics: 10 Offense, 10 Pitching, 7 Defense & Value)
     total_teams_cnt = max(1, len(standings))
 
     def _compute_team_stat_rank(
@@ -3940,49 +4262,49 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
         }
 
     ranking_metrics = [
-        # Offense & Batting
-        _compute_team_stat_rank("rs", "Runs Scored (RS)", "RS", "Offense", lambda t: t.get("rs", 0), lambda v: f"{int(round(v))}", True),
+        # Offense & Contact Process (10)
         _compute_team_stat_rank("wrc_plus", "Team wRC+", "wRC+", "Offense", lambda t: t.get("wrc_plus", 100), lambda v: f"{int(round(v))}", True),
+        _compute_team_stat_rank("xwoba", "Expected wOBA (xwOBA)", "xwOBA", "Offense", lambda t: t.get("xwoba", 0.320), lambda v: f"{v:.3f}".lstrip("0") if v < 1 else f"{v:.3f}", True),
         _compute_team_stat_rank("woba", "Weighted On-Base (wOBA)", "wOBA", "Offense", lambda t: t.get("woba", 0.320), lambda v: f"{v:.3f}".lstrip("0") if v < 1 else f"{v:.3f}", True),
-        _compute_team_stat_rank("ops", "On-Base + Slugging (OPS)", "OPS", "Offense", lambda t: t.get("ops", 0.730), lambda v: f"{v:.3f}".lstrip("0") if v < 1 else f"{v:.3f}", True),
+        _compute_team_stat_rank("barrel_pct", "Statcast Barrel %", "Barrel%", "Offense", lambda t: t.get("barrel_pct", 6.8), lambda v: f"{v:.1f}%", True),
+        _compute_team_stat_rank("bb_k", "Plate Discipline (BB/K)", "BB/K", "Offense", lambda t: t.get("bb_k", 0.40), lambda v: f"{v:.2f}", True),
         _compute_team_stat_rank("obp", "On-Base Percentage (OBP)", "OBP", "Offense", lambda t: t.get("obp", 0.320), lambda v: f"{v:.3f}".lstrip("0") if v < 1 else f"{v:.3f}", True),
         _compute_team_stat_rank("slg", "Slugging Percentage (SLG)", "SLG", "Offense", lambda t: t.get("slg", 0.410), lambda v: f"{v:.3f}".lstrip("0") if v < 1 else f"{v:.3f}", True),
-        _compute_team_stat_rank("avg", "Batting Average (AVG)", "AVG", "Offense", lambda t: t.get("avg", 0.255), lambda v: f"{v:.3f}".lstrip("0") if v < 1 else f"{v:.3f}", True),
+        _compute_team_stat_rank("rs", "Runs Scored (RS)", "RS", "Offense", lambda t: t.get("rs", 0), lambda v: f"{int(round(v))}", True),
         _compute_team_stat_rank("hr", "Home Runs (HR)", "HR", "Offense", lambda t: t.get("hr", 0), lambda v: f"{int(round(v))}", True),
-        _compute_team_stat_rank("sb", "Stolen Bases (SB)", "SB", "Offense", lambda t: t.get("sb", 0), lambda v: f"{int(round(v))}", True),
         _compute_team_stat_rank("bat_war", "Position Player WAR", "Bat WAR", "Offense", lambda t: t.get("bat_war", 0.0), lambda v: f"{v:.1f}", True),
-        # Pitching & Staff
-        _compute_team_stat_rank("ra", "Runs Allowed (RA)", "RA", "Pitching", lambda t: t.get("ra", 0), lambda v: f"{int(round(v))}", False),
-        _compute_team_stat_rank("era", "Team Earned Run Avg (ERA)", "ERA", "Pitching", lambda t: t.get("era", 4.20), lambda v: f"{v:.2f}", False),
+        # Pitching & Arsenal Process (10)
         _compute_team_stat_rank("fip", "Fielding Indep. Pitching (FIP)", "FIP", "Pitching", lambda t: t.get("fip", 4.20), lambda v: f"{v:.2f}", False),
+        _compute_team_stat_rank("xfip", "Expected FIP (xFIP)", "xFIP", "Pitching", lambda t: t.get("xfip", 4.20), lambda v: f"{v:.2f}", False),
+        _compute_team_stat_rank("siera", "Skill-Interactive ERA (SIERA)", "SIERA", "Pitching", lambda t: t.get("siera", 4.15), lambda v: f"{v:.2f}", False),
+        _compute_team_stat_rank("stuff_plus", "Staff Stuff+ Index", "Stuff+", "Pitching", lambda t: t.get("stuff_plus", 100), lambda v: f"{int(round(v))}", True),
+        _compute_team_stat_rank("pit_k_minus_bb", "Pitching K-BB%", "K-BB%", "Pitching", lambda t: t.get("pit_k_minus_bb", 13.5), lambda v: f"{v:.1f}%", True),
         _compute_team_stat_rank("era_plus", "Park-Adjusted ERA+", "ERA+", "Pitching", lambda t: t.get("era_plus", 100), lambda v: f"{int(round(v))}", True),
+        _compute_team_stat_rank("era", "Team Earned Run Avg (ERA)", "ERA", "Pitching", lambda t: t.get("era", 4.20), lambda v: f"{v:.2f}", False),
         _compute_team_stat_rank("whip", "Walks + Hits / IP (WHIP)", "WHIP", "Pitching", lambda t: t.get("whip", 1.30), lambda v: f"{v:.2f}", False),
-        _compute_team_stat_rank("k_pit", "Pitching Strikeouts (SO)", "SO", "Pitching", lambda t: t.get("k_pit", 0), lambda v: f"{int(round(v))}", True),
-        _compute_team_stat_rank("sv", "Bullpen Saves (SV)", "SV", "Pitching", lambda t: t.get("sv", 0), lambda v: f"{int(round(v))}", True),
         _compute_team_stat_rank("sp_war", "Starting Rotation WAR", "SP WAR", "Pitching", lambda t: sp_team_wars.get(t["team_id"], 0.0), lambda v: f"{v:.1f}", True),
         _compute_team_stat_rank("rp_war", "Bullpen Relief WAR", "RP WAR", "Pitching", lambda t: rp_team_wars.get(t["team_id"], 0.0), lambda v: f"{v:.1f}", True),
-        _compute_team_stat_rank("pit_war", "Total Pitching WAR", "Pit WAR", "Pitching", lambda t: t.get("pit_war", 0.0), lambda v: f"{v:.1f}", True),
-        # Defense & Club Value
+        # Defense, True-Talent & Capital Value (7)
+        _compute_team_stat_rank("total_war", "Total Team WAR", "Tot WAR", "Defense & Value", lambda t: t.get("total_war", 0.0), lambda v: f"{v:.1f}", True),
+        _compute_team_stat_rank("baseruns_pct", "BaseRuns True-Talent Win%", "BaseRuns%", "Defense & Value", lambda t: t.get("baseruns_pct", 0.500), lambda v: f"{v:.3f}".lstrip("0") if v < 1 else f"{v:.3f}", True),
         _compute_team_stat_rank("zr", "Defensive Zone Rating (ZR)", "Def ZR", "Defense & Value", lambda t: t.get("zr", 0.0), lambda v: f"{v:+.1f}", True),
         _compute_team_stat_rank("framing", "Catcher Framing Runs", "Framing", "Defense & Value", lambda t: t.get("framing", 0.0), lambda v: f"{v:+.1f}", True),
         _compute_team_stat_rank("def_eff", "Defensive Efficiency (DER)", "Def Eff", "Defense & Value", lambda t: t.get("def_eff", 0.690), lambda v: f"{v:.3f}".lstrip("0") if v < 1 else f"{v:.3f}", True),
-        _compute_team_stat_rank("def_pct", "Fielding Percentage (FLD%)", "FLD%", "Defense & Value", lambda t: t.get("def_pct", 0.985), lambda v: f"{v:.3f}".lstrip("0") if v < 1 else f"{v:.3f}", True),
         _compute_team_stat_rank("run_diff", "Run Differential (R Diff)", "R Diff", "Defense & Value", lambda t: t.get("run_diff", 0), lambda v: f"{int(round(v)):+d}", True),
-        _compute_team_stat_rank("pyth_pct", "Pythagorean Win %", "Pyth%", "Defense & Value", lambda t: t.get("pyth_pct", 0.500), lambda v: f"{v:.3f}".lstrip("0") if v < 1 else f"{v:.3f}", True),
-        _compute_team_stat_rank("total_war", "Total Team WAR", "Tot WAR", "Defense & Value", lambda t: t.get("total_war", 0.0), lambda v: f"{v:.1f}", True),
+        _compute_team_stat_rank("dollars_per_war", "Payroll $/WAR Efficiency", "$/WAR", "Defense & Value", lambda t: t.get("dollars_per_war_m", 8.5), lambda v: f"${v:.1f}M", False),
     ]
 
     metrics_by_key = {m["key"]: m for m in ranking_metrics}
     # Compute composite pillar ranks across all teams in the league
     off_scores = {
         t_obj["team_id"]: (
-            t_obj.get("wrc_plus", 100) * 0.4 + t_obj.get("bat_war", 0.0) * 2.5 + t_obj.get("rs", 0) * 0.08
+            t_obj.get("wrc_plus", 100) * 0.45 + (t_obj.get("xwoba", 0.320) * 1000) * 0.15 + t_obj.get("bat_war", 0.0) * 2.5
         )
         for t_obj in standings
     }
     pit_scores = {
         t_obj["team_id"]: (
-            t_obj.get("era_plus", 100) * 0.4 + t_obj.get("pit_war", 0.0) * 2.5 - t_obj.get("ra", 0) * 0.08
+            t_obj.get("era_plus", 100) * 0.35 + t_obj.get("stuff_plus", 100) * 0.25 + (4.50 - t_obj.get("fip", 4.20)) * 12.0 + t_obj.get("pit_war", 0.0) * 2.2
         )
         for t_obj in standings
     }
@@ -4019,9 +4341,6 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
 
     # 3. Build Detailed 5-Year Franchise Roadmap, Projected Starters & Positional Gap Engine
     years_header = [season_year + i for i in range(5)]
-    budget = active_team.get("budget") or max(120000000.0, active_team.get("payroll", 100000000.0) * 1.15)
-    curr_payroll = active_team.get("payroll") or 0.0
-    market_dollar_per_war = round(max(10000.0, budget * 0.05), 0)  # Scales dynamically (~$8.0M/WAR on $160M budget)
 
     def _compute_def_spectrum(pid_val: int, primary_pos: str) -> list:
         fr = fld_pos_ratings.get(pid_val, {})
@@ -4199,6 +4518,9 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
     arb_sal_by_yr = [0.0] * 5
     pre_arb_sal_by_yr = [0.0] * 5
 
+    team_dec_games = max(0, safe_int(active_team.get("w"), 0) + safe_int(active_team.get("l"), 0))
+    sched_war_mult = min(3.4, max(1.0, float(target_sched_games) / max(18.0, float(team_dec_games)))) if team_dec_games >= 14 else 1.0
+
     for pl in combined_roster:
         pid = pl["player_id"]
         c_row = contracts_full.get(pid, {})
@@ -4223,7 +4545,17 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
             age_phase = "Decline Watch"
             phase_color = "rose"
 
-        base_war = round(max(0.3, pl["war"] if pl["war"] > 0.2 else (oa0 - 38) * 0.12), 1)
+        ytd_war_val = round(safe_float(pl.get("war"), 0.0), 1)
+        talent_war_prior = max(0.3, (oa0 - 38) * 0.12)
+        if team_dec_games >= 14 and safe_float(pl.get("pa_or_ip"), 0.0) > 0:
+            pace_raw_war = ytd_war_val * sched_war_mult
+            vol_denom = 320.0 if not pl["is_pitcher"] else (95.0 if (pl.get("gs", 0) >= 3 or pl.get("position") == "SP") else 38.0)
+            obs_weight = min(0.80, max(0.15, safe_float(pl.get("pa_or_ip"), 0.0) / vol_denom))
+            base_war = round(max(0.3, obs_weight * pace_raw_war + (1.0 - obs_weight) * talent_war_prior), 1)
+        else:
+            base_war = round(max(0.3, ytd_war_val if ytd_war_val > talent_war_prior else talent_war_prior), 1)
+        pl["ytd_war"] = ytd_war_val
+        pl["pace_war"] = base_war
         year_cells = []
         fa_year = None
         total_controlled_war = 0.0
@@ -5549,10 +5881,326 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
     stabilized_bat_cnt = sum(1 for b in combined_roster if not b["is_pitcher"] and b.get("pa_or_ip", 0) >= 150)
     total_bat_cnt = max(1, sum(1 for b in combined_roster if not b["is_pitcher"]))
 
+    # Backfill top organizational heir onto depth_chart_nodes and positional_strengths
+    for p_key, p_node in depth_chart_nodes.items():
+        h_cands = heirs_by_pos.get(p_key, [])
+        if h_cands:
+            h0 = h_cands[0]
+            p_node["top_heir"] = {
+                "player_id": h0["player_id"],
+                "name": h0["name"],
+                "pos": h0["pos"],
+                "oa": h0["oa"],
+                "pot": h0["pot"],
+                "eta_year": h0["eta_year"],
+                "readiness_pct": h0["readiness_pct"],
+                "proj_process_label": h0["proj_process_label"],
+                "blocking_status": h0["blocking_status"],
+            }
+            p_node["pipeline_heirs"] = h_cands[:3]
+        else:
+            p_node["pipeline_heirs"] = []
+
+    for u_item in positional_strengths:
+        u_pos = u_item["position"]
+        h_cands = heirs_by_pos.get(u_pos, [])
+        if h_cands:
+            h0 = h_cands[0]
+            u_item["top_heir"] = {
+                "player_id": h0["player_id"],
+                "name": h0["name"],
+                "pos": h0["pos"],
+                "oa": h0["oa"],
+                "pot": h0["pot"],
+                "eta_year": h0["eta_year"],
+                "readiness_pct": h0["readiness_pct"],
+                "proj_process_label": h0["proj_process_label"],
+                "blocking_status": h0["blocking_status"],
+            }
+
+    # Build 6-Tool Team Percentile Radar & Run-Creation vs Run-Prevention Profile
+    def _rk_pct(k_name: str, fallback: int = 50) -> int:
+        return int(metrics_by_key.get(k_name, {}).get("percentile", fallback))
+
+    six_tool_profile = {
+        "axes": [
+            {
+                "key": "contact",
+                "label": "Contact (xwOBA)",
+                "percentile": int(round(0.55 * _rk_pct("xwoba") + 0.45 * _rk_pct("wrc_plus"))),
+                "value_fmt": f"{metrics_by_key['xwoba']['value_fmt']} xwOBA ({metrics_by_key['wrc_plus']['value_fmt']} wRC+)",
+            },
+            {
+                "key": "power",
+                "label": "Power (Barrel%)",
+                "percentile": int(round(0.60 * _rk_pct("barrel_pct") + 0.40 * _rk_pct("slg"))),
+                "value_fmt": f"{metrics_by_key['barrel_pct']['value_fmt']} Brl ({metrics_by_key['hr']['value_fmt']} HR)",
+            },
+            {
+                "key": "discipline",
+                "label": "Discipline (BB/K)",
+                "percentile": int(round(0.60 * _rk_pct("bb_k") + 0.40 * _rk_pct("obp"))),
+                "value_fmt": f"{metrics_by_key['bb_k']['value_fmt']} BB/K ({metrics_by_key['obp']['value_fmt']} OBP)",
+            },
+            {
+                "key": "run_prev",
+                "label": "Run Prev (FIP/xFIP)",
+                "percentile": int(round(0.45 * _rk_pct("fip") + 0.30 * _rk_pct("xfip") + 0.25 * _rk_pct("siera"))),
+                "value_fmt": f"{metrics_by_key['fip']['value_fmt']} FIP / {metrics_by_key['siera']['value_fmt']} SIERA",
+            },
+            {
+                "key": "arsenal",
+                "label": "Arsenal (Stuff+/K-BB)",
+                "percentile": int(round(0.55 * _rk_pct("stuff_plus") + 0.45 * _rk_pct("pit_k_minus_bb"))),
+                "value_fmt": f"{metrics_by_key['stuff_plus']['value_fmt']} Stuff+ ({metrics_by_key['pit_k_minus_bb']['value_fmt']} K-BB)",
+            },
+            {
+                "key": "defense",
+                "label": "Defense (ZR+Frm)",
+                "percentile": int(round(0.55 * _rk_pct("zr") + 0.25 * _rk_pct("framing") + 0.20 * _rk_pct("def_eff"))),
+                "value_fmt": f"{metrics_by_key['zr']['value_fmt']} ZR · {metrics_by_key['framing']['value_fmt']} Frm",
+            },
+        ],
+        "rc_vs_rp": [
+            {
+                "team_id": t_o["team_id"],
+                "abbr": t_o["abbr"],
+                "full_name": t_o["full_name"],
+                "is_active": t_o["team_id"] == team_id,
+                "wrc_plus": int(round(safe_float(t_o.get("wrc_plus"), 100))),
+                "fip": round(safe_float(t_o.get("fip"), 4.20), 2),
+                "baseruns_pct": round(safe_float(t_o.get("baseruns_pct"), 0.500), 3),
+                "total_war": round(safe_float(t_o.get("total_war"), 0.0), 1),
+            }
+            for t_o in standings
+        ],
+    }
+
+    # Build Savant / Statcast Club Dossier (Park Geometry, Park-Roster Synergy, Savant Sliders & Platoon Vulnerability Audit)
+    pk = active_team.get("park", {}) or {}
+    pk_dists = pk.get("distances") if isinstance(pk.get("distances"), list) and len(pk.get("distances", [])) == 7 else [330, 368, 386, 405, 386, 368, 330]
+    pk_walls = pk.get("wall_heights") if isinstance(pk.get("wall_heights"), list) and len(pk.get("wall_heights", [])) == 7 else [8, 8, 8, 8, 8, 8, 8]
+    all_parks_list = [
+        t_o.get("park", {}).get("distances")
+        for t_o in standings
+        if isinstance(t_o.get("park", {}).get("distances"), list) and len(t_o.get("park", {}).get("distances", [])) == 7
+    ]
+    if all_parks_list:
+        lg_avg_dists = [int(round(float(np.mean([d_arr[idx_d] for d_arr in all_parks_list])))) for idx_d in range(7)]
+    else:
+        lg_avg_dists = [331, 368, 387, 404, 387, 368, 331]
+
+    pf_avg_idx = int(round(safe_float(pk.get("avg"), 1.0) * 100))
+    pf_hr_idx = int(round(safe_float(pk.get("hr"), 1.0) * 100))
+    pf_hr_l_idx = int(round(safe_float(pk.get("hr_l", pk.get("hr", 1.0)), 1.0) * 100))
+    pf_hr_r_idx = int(round(safe_float(pk.get("hr_r", pk.get("hr", 1.0)), 1.0) * 100))
+    pf_2b_idx = int(round(safe_float(pk.get("d"), 1.0) * 100))
+    pf_3b_idx = int(round(safe_float(pk.get("t"), 1.0) * 100))
+
+    lhb_pa = sum(max(1, safe_int(b.get("pa"), 0)) for b in team_batters if b.get("bats") in ("L", "S"))
+    tot_bat_pa_w = max(1, sum(max(1, safe_int(b.get("pa"), 0)) for b in team_batters))
+    lhb_share_pct = round(100.0 * lhb_pa / tot_bat_pa_w, 1)
+    staff_gb_pct = safe_float(active_team.get("gb_pct"), 43.0)
+    of_zr_sum = round(sum(depth_chart_nodes.get(op, {}).get("unit_zr", 0.0) for op in ("LF", "CF", "RF")), 1)
+
+    # Calculate Roster-to-Park Synergy Score (0-99)
+    syn_score = 68.0
+    if pf_hr_l_idx >= 104:
+        syn_score += (lhb_share_pct - 42.0) * 0.45
+    elif pf_hr_r_idx >= 104:
+        syn_score += ((100.0 - lhb_share_pct) - 52.0) * 0.40
+    if pf_hr_idx >= 104:
+        syn_score += (staff_gb_pct - 42.5) * 1.15
+    if (pk_dists[2] + pk_dists[3] + pk_dists[4]) / 3.0 >= 392 or pf_2b_idx >= 104:
+        syn_score += of_zr_sum * 1.35
+    else:
+        syn_score += of_zr_sum * 0.65
+    syn_score_int = max(25, min(98, int(round(syn_score))))
+    syn_grade, syn_col, _ = grade_from_pct(syn_score_int)
+
+    fit_notes = [
+        (
+            f"Handedness Power Fit: {lhb_share_pct:.0f}% LHB/Switch PA share vs. LHB HR Factor {pf_hr_l_idx} / RHB HR Factor {pf_hr_r_idx} "
+            f"({'Optimal RF porch/pull alignment' if (pf_hr_l_idx >= 104 and lhb_share_pct >= 45) else ('RHB pull leverage active' if (pf_hr_r_idx >= 104 and lhb_share_pct <= 45) else 'Neutral handedness balance')})."
+        ),
+        (
+            f"Batted-Ball Suppression: Pitching staff {staff_gb_pct:.1f}% GB rate in a {pf_hr_idx} HR-factor environment "
+            f"({'Strong groundball insulation against home HR inflation' if (pf_hr_idx >= 103 and staff_gb_pct >= 43.5) else ('Flyball HR exposure watch' if (pf_hr_idx >= 105 and staff_gb_pct < 42.0) else 'Aligned run-prevention geometry')})."
+        ),
+        (
+            f"Outfield Turf Coverage: Outfield unit {of_zr_sum:+.1f} combined ZR across {pk_dists[2]}-{pk_dists[3]}-{pk_dists[4]} ft alleys "
+            f"({'Elite range erasing gap XBH' if of_zr_sum >= 4.0 else ('Corner/alley range deficit exposed' if of_zr_sum <= -3.0 else 'Adequate alley coverage')})."
+        ),
+    ]
+
+    # Build Platoon Vulnerability Audit table across starters + key bench bats
+    bench_rhb = sorted(
+        [b for b in team_batters if b["player_id"] not in used_starter_ids and b.get("bats") in ("R", "S")],
+        key=lambda x: (x["oa"], x["wrc_plus"]),
+        reverse=True,
+    )
+    bench_lhb = sorted(
+        [b for b in team_batters if b["player_id"] not in used_starter_ids and b.get("bats") in ("L", "S")],
+        key=lambda x: (x["oa"], x["wrc_plus"]),
+        reverse=True,
+    )
+    platoon_audit = []
+    for pos_str, _, pos_label in pos_codes:
+        st_b = depth_chart_nodes.get(pos_str, {}).get("starter")
+        if not st_b:
+            continue
+        v_r = safe_int(st_b.get("vs_rhp_wrc_plus"), st_b["wrc_plus"])
+        v_l = safe_int(st_b.get("vs_lhp_wrc_plus"), st_b["wrc_plus"])
+        p_gap = v_r - v_l
+        bk_first = (depth_chart_nodes.get(pos_str, {}).get("backups") or [None])[0]
+        if v_l < 90 and (v_r - v_l) >= 18:
+            partner = bk_first["name"] if (bk_first and bk_first.get("bats") in ("R", "S")) else (bench_rhb[0]["name"] if bench_rhb else "Acquire RHB Masher")
+            rec_plat = f"Shield vs LHP → Platoon w/ {partner}"
+        elif v_r < 90 and (v_l - v_r) >= 18:
+            partner = bk_first["name"] if (bk_first and bk_first.get("bats") in ("L", "S")) else (bench_lhb[0]["name"] if bench_lhb else "Acquire LHB Bat")
+            rec_plat = f"Shield vs RHP → Platoon w/ {partner}"
+        else:
+            rec_plat = "Everyday 600-PA Anchor"
+        platoon_audit.append({
+            "player_id": st_b["player_id"],
+            "name": st_b["name"],
+            "pos": pos_str,
+            "bats": st_b["bats"],
+            "pa": st_b["pa"],
+            "oa": st_b["oa"],
+            "pot": st_b["pot"],
+            "wrc_plus": st_b["wrc_plus"],
+            "xwoba": st_b["xwoba"],
+            "vs_rhp_wrc_plus": v_r,
+            "vs_lhp_wrc_plus": v_l,
+            "platoon_gap": p_gap,
+            "platoon_flag": st_b.get("platoon_flag", "Balanced Everyday"),
+            "recommendation": rec_plat,
+        })
+
+    savant_slider_keys = [
+        "wrc_plus", "xwoba", "barrel_pct", "bb_k", "bat_war",
+        "stuff_plus", "fip", "xfip", "siera", "pit_k_minus_bb",
+        "zr", "framing",
+    ]
+    savant_dossier_sliders = [metrics_by_key[sk] for sk in savant_slider_keys if sk in metrics_by_key]
+
+    savant_dossier = {
+        "park_profile": {
+            "name": pk.get("name", "Club Ballpark"),
+            "capacity": safe_int(pk.get("capacity"), 40000),
+            "turf_label": "Artificial Turf" if safe_int(pk.get("turf"), 0) else "Natural Grass",
+            "type_label": "Retractable / Dome" if safe_int(pk.get("type"), 0) >= 1 else "Open-Air Stadium",
+            "distances": pk_dists,
+            "wall_heights": pk_walls,
+            "league_avg_distances": lg_avg_dists,
+            "factors": {
+                "overall": pf_avg_idx,
+                "hr": pf_hr_idx,
+                "hr_lhb": pf_hr_l_idx,
+                "hr_rhb": pf_hr_r_idx,
+                "doubles": pf_2b_idx,
+                "triples": pf_3b_idx,
+            },
+            "synergy": {
+                "score": syn_score_int,
+                "grade": syn_grade,
+                "color": syn_col,
+                "lhb_share_pct": lhb_share_pct,
+                "staff_gb_pct": staff_gb_pct,
+                "of_zr": of_zr_sum,
+                "notes": fit_notes,
+            },
+        },
+        "statcast_sliders": savant_dossier_sliders,
+        "platoon_audit": platoon_audit,
+    }
+
+    # Pre-package Level-1 Hero KPI Strip payload (4 Prominent Callout Cards)
+    yr0_proj = yearly_projections[0] if yearly_projections else {}
+    ph0 = payroll_horizon[0] if payroll_horizon else {}
+    ph1 = payroll_horizon[1] if len(payroll_horizon) > 1 else ph0
+    top_corn = top_strengths[0] if top_strengths else {}
+    top_vuln = upgrade_targets[0] if upgrade_targets else {}
+    walk_yr_ufas = sum(1 for pl_i in full_roster_proj[:26] if pl_i.get("fa_year") == season_year + 1 and pl_i.get("oa", 0) >= 48)
+
+    hero_kpis = {
+        "true_talent": {
+            "actual_record": active_team.get("record_str", f"{active_team.get('w', 0)}-{active_team.get('l', 0)}"),
+            "actual_pct": active_team.get("pct", 0.500),
+            "pyth_record": f"{active_team.get('pyth_w', 0):.1f}-{active_team.get('pyth_l', 0):.1f}",
+            "pyth_pct": active_team.get("pyth_pct", 0.500),
+            "baseruns_record": active_team.get("baseruns_str", f"{active_team.get('pyth_w', 0):.1f}-{active_team.get('pyth_l', 0):.1f}"),
+            "baseruns_pct": active_team.get("baseruns_pct", active_team.get("pyth_pct", 0.500)),
+            "seq_luck": active_team.get("seq_luck", 0.0),
+            "cluster_luck": active_team.get("cluster_luck", 0.0),
+            "baseruns_luck": active_team.get("baseruns_luck", 0.0),
+            "playoff_prob": active_team.get("playoff_prob", 50.0),
+            "total_war": active_team.get("total_war", 0.0),
+            "paced_total_war": yr0_proj.get("projected_team_war", active_team.get("paced_total_war", 40.0)),
+            "projected_full_wins": yr0_proj.get("projected_wins", 81),
+            "target_sched_games": target_sched_games,
+            "total_war_rank": total_war_rank,
+            "total_teams": total_teams_cnt,
+            "window_label": window_label,
+            "window_color": window_color,
+        },
+        "cornerstone_unit": {
+            "pos": top_corn.get("position", "RF"),
+            "label": top_corn.get("label", "Cornerstone"),
+            "grade": top_corn.get("grade", "A"),
+            "percentile": top_corn.get("percentile", 85),
+            "unit_war": top_corn.get("unit_war", 0.0),
+            "lg_avg_war": top_corn.get("lg_avg_war", 1.8),
+            "war_diff": top_corn.get("war_diff", 0.0),
+            "starter_name": top_corn.get("starter_name", "Core Anchor"),
+            "starter_id": top_corn.get("starter_id", 0),
+            "starter_oa": top_corn.get("starter_oa", 60),
+            "starter_pot": top_corn.get("starter_pot", 60),
+            "primary_metric": top_corn.get("primary_metric", ""),
+            "def_metric": top_corn.get("def_metric", ""),
+            "action_tag": top_corn.get("action_tag", "Cornerstone Lock"),
+        },
+        "urgent_vulnerability": {
+            "pos": top_vuln.get("position", "3B"),
+            "label": top_vuln.get("label", "Upgrade Need"),
+            "grade": top_vuln.get("grade", "D"),
+            "percentile": top_vuln.get("percentile", 20),
+            "unit_war": top_vuln.get("unit_war", 0.0),
+            "lg_avg_war": top_vuln.get("lg_avg_war", 1.8),
+            "war_diff": top_vuln.get("war_diff", 0.0),
+            "starter_name": top_vuln.get("starter_name", "Incumbent"),
+            "starter_id": top_vuln.get("starter_id", 0),
+            "starter_oa": top_vuln.get("starter_oa", 45),
+            "primary_metric": top_vuln.get("primary_metric", ""),
+            "action_tag": top_vuln.get("action_tag", "Urgent Upgrade"),
+            "top_heir": top_vuln.get("top_heir"),
+            "walk_year_ufas": walk_yr_ufas,
+        },
+        "capital_flexibility": {
+            "payroll": round(curr_payroll, 0),
+            "budget": round(budget, 0),
+            "cap_space": round(max(0.0, budget - curr_payroll), 0),
+            "pct_committed": ph0.get("pct_committed", 75.0),
+            "dollars_per_war_m": active_team.get("dollars_per_war_m", 8.5),
+            "dollars_per_war_rank": metrics_by_key.get("dollars_per_war", {}).get("rank", 1),
+            "market_dollar_per_war_m": round(market_dollar_per_war / 1e6, 2),
+            "yr0_surplus_m": yr0_proj.get("team_surplus_millions", 0.0),
+            "yr1_space_m": round(ph1.get("projected_space", 0.0) / 1e6, 1),
+            "pct_guaranteed": ph0.get("pct_guaranteed", 60.0),
+            "pct_option": ph0.get("pct_option", 5.0),
+            "pct_arb": ph0.get("pct_arb", 10.0),
+        },
+    }
+
     return {
         "team": active_team,
         "season_year": season_year,
         "league_id": league_id,
+        "target_sched_games": target_sched_games,
+        "hero_kpis": hero_kpis,
+        "six_tool_profile": six_tool_profile,
+        "savant_dossier": savant_dossier,
         "graphical_depth_chart": {
             "positions": depth_chart_nodes,
             "rotation": rotation,
@@ -5562,22 +6210,28 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
                 "lg_avg_war": lg_sp_war,
                 "war_diff": sp_diff,
                 "fip": sp_fip,
+                "psera": sp_psera,
+                "stuff_plus": sp_stuff_plus,
                 "era_plus": sp_era_plus,
                 "percentile": sp_pct,
                 "grade": sp_grade,
                 "color": sp_color,
                 "status_tag": sp_tag,
+                "action_tag": action_tag_from_pct(sp_pct),
             },
             "rp_summary": {
                 "unit_war": rp_war,
                 "lg_avg_war": lg_rp_war,
                 "war_diff": rp_diff,
                 "fip": rp_fip,
+                "psera": rp_psera,
+                "stuff_plus": rp_stuff_plus,
                 "era_plus": rp_era_plus,
                 "percentile": rp_pct,
                 "grade": rp_grade,
                 "color": rp_color,
                 "status_tag": rp_tag,
+                "action_tag": action_tag_from_pct(rp_pct),
             },
         },
         "positional_strengths": {
@@ -5604,7 +6258,7 @@ def get_team_dashboard(save_slug: str, team_id: int = None, league_id: int = Non
                 "total_team_pitches": total_team_pitches,
                 "bat_stabilized_ratio": f"{stabilized_bat_cnt}/{total_bat_cnt} Hitters ≥150 PA",
                 "pit_stabilized_ratio": f"{stabilized_pit_cnt}/{total_pit_cnt} Pitchers ≥80 P (Stuff+ Gate)",
-                "market_valuation_basis": f"${market_dollar_per_war/1e6:.1f}M / 1.0 WAR",
+                "market_valuation_basis": f"${market_dollar_per_war/1e6:.1f}M / 1.0 WAR (Lg Eq.)",
                 "aging_model": "Piecewise Sabermetric Aging + Scouting Prior Regression",
             },
             "strategic_moves": {
