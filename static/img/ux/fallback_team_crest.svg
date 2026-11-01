@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none">
+  <defs>
+    <linearGradient id="tcBg" x1="0" y1="0" x2="80" y2="80" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0E1733"/>
+      <stop offset="100%" stop-color="#070D1F"/>
+    </linearGradient>
+    <linearGradient id="tcPlat" x1="12" y1="10" x2="68" y2="70" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F8FAFC"/>
+      <stop offset="50%" stop-color="#CBD5E1"/>
+      <stop offset="100%" stop-color="#64748B"/>
+    </linearGradient>
+    <clipPath id="tcInner">
+      <path d="M16 14 H64 V46.5 L40 67 L16 46.5 Z"/>
+    </clipPath>
+  </defs>
+  <path d="M11 9 H69 V49 L40 73 L11 49 Z" fill="url(#tcPlat)"/>
+  <path d="M14 12 H66 V47.5 L40 69.5 L14 47.5 Z" fill="url(#tcBg)"/>
+  <g clip-path="url(#tcInner)">
+    <!-- Top Royal & Crimson Broadcast Ribbon -->
+    <rect x="15" y="13" width="25" height="5" fill="#1D4ED8"/>
+    <rect x="40" y="13" width="25" height="5" fill="#E11D48"/>
+    <!-- Subtle Diamond Watermark -->
+    <path d="M40 24 L56 40 L40 56 L24 40 Z" stroke="#334155" stroke-width="1.6" fill="none"/>
+  </g>
+  <text x="40" y="45" text-anchor="middle" fill="#F8FAFC" font-family="Inter, system-ui, sans-serif" font-weight="900" font-size="18" letter-spacing="0.8">MLB</text>
+</svg>

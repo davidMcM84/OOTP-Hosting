@@ -245,9 +245,10 @@ def rewrite_ootp_html_content(html_text: str, save_slug: str, rel_path: str, pri
     badge_label = "OOTP 27 ALMANAC ARCHIVE" if rel_path.strip("/").startswith("almanac_") else "OOTP 27 BNN REPORT"
 
     toolbar = f"""
-    <div style="background:linear-gradient(90deg,#0a0a0a,#1f1f20);color:#dbdbdb;padding:8px 16px;font-family:system-ui,-apple-system,sans-serif;font-size:12px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #5f6062;position:sticky;top:0;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.5);">
-        <div style="display:flex;align-items:center;gap:12px;">
-            <span style="background:#dbdbdb;color:#0a0a0a;font-weight:800;padding:2px 8px;border-radius:4px;letter-spacing:0.5px;">{badge_label}</span>
+    <div style="background:linear-gradient(90deg,#070D1F,#141B2D);color:#dbdbdb;padding:8px 16px;font-family:system-ui,-apple-system,sans-serif;font-size:12px;display:flex;align-items:center;justify-content:space-between;border-top:2px solid #1D4ED8;border-bottom:2px solid #E11D48;position:sticky;top:0;z-index:9999;box-shadow:0 4px 14px rgba(0,0,0,0.65);">
+        <div style="display:flex;align-items:center;gap:10px;">
+            <img src="/static/favicons/favicon.svg" alt="OOTP+" style="width:22px;height:22px;border-radius:5px;vertical-align:middle;" />
+            <span style="background:#070D1F;color:#F8FAFC;border:1px solid #94A3B8;font-weight:800;padding:2px 8px;border-radius:4px;letter-spacing:0.5px;">{badge_label}</span>
             <a href="{depth_prefix}index.html" style="color:#999999;text-decoration:none;font-weight:600;">BNN Index</a>
             <span style="color:#373839;">|</span>
             <a href="{depth_prefix}leagues/league_{primary_league_id}_home.html" style="color:#dbdbdb;text-decoration:none;font-weight:600;">League Home</a>
@@ -306,6 +307,8 @@ def generate_dynamic_bnn_html(save_slug: str, rel_path: str) -> str | None:
 <head>
 <title>{title}</title>
 <meta charset="utf-8">
+<link rel="icon" type="image/svg+xml" href="/static/favicons/favicon.svg">
+<link rel="shortcut icon" href="/static/favicons/favicon.ico">
 <link rel="stylesheet" type="text/css" href="{pfx}styles.css">
 <style>
   body.ext_bg {{ background-color: #0a0a0a; color: #dbdbdb; font-family: Tahoma, Geneva, sans-serif; margin: 0; }}

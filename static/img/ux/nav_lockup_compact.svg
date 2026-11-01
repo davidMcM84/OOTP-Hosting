@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 210 48" fill="none">
+  <defs>
+    <linearGradient id="nlSilver" x1="4" y1="4" x2="44" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F8FAFC"/>
+      <stop offset="50%" stop-color="#CBD5E1"/>
+      <stop offset="100%" stop-color="#94A3B8"/>
+    </linearGradient>
+    <clipPath id="nlClip">
+      <path d="M10 9.5 H34 V25 L22 36 L10 25 Z"/>
+    </clipPath>
+  </defs>
+  <!-- Set 2 Broadcast Shield -->
+  <path d="M7 7 H37 V26.5 L22 39.5 L7 26.5 Z" fill="url(#nlSilver)"/>
+  <path d="M8.8 8.8 H35.2 V25.6 L22 37.2 L8.8 25.6 Z" fill="#070D1F"/>
+  <g clip-path="url(#nlClip)">
+    <rect x="9" y="9" width="13" height="28" fill="#1D4ED8"/>
+    <rect x="22" y="9" width="13" height="28" fill="#E11D48"/>
+    <path d="M12.5 23 A9.8 9.8 0 0 1 31.5 23 L27.8 23 L22 17.2 L16.2 23 Z" fill="#FFFFFF"/>
+    <path d="M22 16.5 L29 23.5 L22 30.5 L15 23.5 Z" stroke="#FFFFFF" stroke-width="1.8" fill="none"/>
+  </g>
+  <path d="M22 19.8 V27.2 M18.3 23.5 H25.7" stroke="#22D3EE" stroke-width="3.2" stroke-opacity="0.55" stroke-linecap="square"/>
+  <path d="M22 19.8 V27.2 M18.3 23.5 H25.7" stroke="#FFFFFF" stroke-width="2" stroke-linecap="square"/>
+  <!-- OOTP+ Broadcast Wordmark -->
+  <text x="46" y="32" fill="#F8FAFC" font-family="Inter, Space Grotesk, system-ui, sans-serif" font-weight="900" font-size="27" letter-spacing="-0.6">OOTP</text>
+  <!-- Silver-Edged Broadcast Red + -->
+  <path d="M134 15 H140 V21 H146 V27 H140 V33 H134 V27 H128 V21 H134 Z" fill="#E11D48" stroke="#CBD5E1" stroke-width="1.2"/>
+</svg>

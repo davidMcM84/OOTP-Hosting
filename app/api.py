@@ -286,8 +286,11 @@ async def serve_ootp_asset(request):
     save_slug = request.path_params.get("save_slug") or get_active_save_slug()
     asset_type = request.path_params.get("asset_type")
     filename = request.path_params.get("filename", "")
-    html_dir = get_save_html_dir(save_slug)
-    folder_path = get_save_folder_path(save_slug)
+    try:
+        html_dir = get_save_html_dir(save_slug)
+        folder_path = get_save_folder_path(save_slug)
+    except sqlite3.OperationalError:
+        html_dir = folder_path = None
 
     if asset_type == "import_export" and folder_path and filename:
         ie_cand = (folder_path / "import_export" / filename).resolve()
@@ -305,20 +308,49 @@ async def serve_ootp_asset(request):
         if cand.is_file():
             return FileResponse(str(cand))
 
-    # Generate high-craft SVG fallback in the White-on-Black palette
-    label = Path(filename).stem[:3].upper() if filename else "MLB"
+    # Generate high-craft Set 2 Broadcast Network SVG fallback
+    raw_stem = Path(filename).stem.replace("_", "").replace("-", "") if filename else "MLB"
+    label = (raw_stem[:3].upper() or "MLB").replace("&", "").replace("<", "").replace(">", "")
     if asset_type == "player_pic":
-        svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 135">
-        <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0a0a0a"/><stop offset="100%" stop-color="#1f1f20"/></linearGradient></defs>
-        <rect width="90" height="135" rx="10" fill="url(#g)" stroke="#5f6062" stroke-width="2"/>
-        <circle cx="45" cy="46" r="20" fill="#373839"/>
-        <path d="M15 122 C15 86 75 86 75 122 Z" fill="#373839"/>
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 135" fill="none">
+        <defs>
+          <linearGradient id="pcBg" x1="0" y1="0" x2="90" y2="135" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#0E1733"/><stop offset="100%" stop-color="#060A18"/>
+          </linearGradient>
+          <clipPath id="pcClip"><rect x="2" y="2" width="86" height="131" rx="9"/></clipPath>
+        </defs>
+        <rect x="1.5" y="1.5" width="87" height="132" rx="9.5" fill="url(#pcBg)" stroke="#94A3B8" stroke-opacity="0.45" stroke-width="1.5"/>
+        <g clip-path="url(#pcClip)">
+          <rect x="0" y="0" width="45" height="5" fill="#1D4ED8"/>
+          <rect x="45" y="0" width="45" height="5" fill="#E11D48"/>
+          <path d="M23 18 H67 V48 L45 67 L23 48 Z" stroke="#1E293B" stroke-width="1.8" fill="none"/>
+          <circle cx="45" cy="46" r="14.5" fill="#475569"/>
+          <path d="M30.5 42 C31.5 31.5, 58.5 31.5, 59.5 42 Z" fill="#1E293B"/>
+          <path d="M30 41.5 H64 C65.5 41.5, 65.5 44, 62 44.2 H30 Z" fill="#CBD5E1" fill-opacity="0.75"/>
+          <path d="M12 135 C13 96, 30 85, 45 85 C60 85, 77 96, 78 135 Z" fill="#1E293B" stroke="#475569" stroke-width="1.4"/>
+          <path d="M36 86 L45 103 L54 86" stroke="#E11D48" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <line x1="45" y1="103" x2="45" y2="135" stroke="#334155" stroke-width="1.5"/>
+        </g>
         </svg>"""
     else:
-        svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
-        <defs><linearGradient id="tg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#1f1f20"/><stop offset="100%" stop-color="#0a0a0a"/></linearGradient></defs>
-        <circle cx="40" cy="40" r="36" fill="url(#tg)" stroke="#5f6062" stroke-width="3"/>
-        <text x="40" y="46" text-anchor="middle" fill="#dbdbdb" font-family="system-ui,sans-serif" font-weight="800" font-size="18">{label}</text>
+        svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none">
+        <defs>
+          <linearGradient id="tcBg" x1="0" y1="0" x2="80" y2="80" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#0E1733"/><stop offset="100%" stop-color="#070D1F"/>
+          </linearGradient>
+          <linearGradient id="tcPlat" x1="12" y1="10" x2="68" y2="70" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#F8FAFC"/><stop offset="50%" stop-color="#CBD5E1"/><stop offset="100%" stop-color="#64748B"/>
+          </linearGradient>
+          <clipPath id="tcInner"><path d="M16 14 H64 V46.5 L40 67 L16 46.5 Z"/></clipPath>
+        </defs>
+        <path d="M11 9 H69 V49 L40 73 L11 49 Z" fill="url(#tcPlat)"/>
+        <path d="M14 12 H66 V47.5 L40 69.5 L14 47.5 Z" fill="url(#tcBg)"/>
+        <g clip-path="url(#tcInner)">
+          <rect x="15" y="13" width="25" height="5" fill="#1D4ED8"/>
+          <rect x="40" y="13" width="25" height="5" fill="#E11D48"/>
+          <path d="M40 24 L56 40 L40 56 L24 40 Z" stroke="#334155" stroke-width="1.6" fill="none"/>
+        </g>
+        <text x="40" y="45" text-anchor="middle" fill="#F8FAFC" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="17" letter-spacing="0.8">{label}</text>
         </svg>"""
     return Response(svg, media_type="image/svg+xml")
 
@@ -368,8 +400,31 @@ async def api_setup_shortcut(request):
     return JSONResponse(create_desktop_shortcut_action())
 
 
+async def serve_root_favicon(request):
+    ico = STATIC_DIR / "favicons" / "favicon.ico"
+    if ico.is_file():
+        return FileResponse(str(ico), media_type="image/x-icon")
+    return FileResponse(str(STATIC_DIR / "ootp27_hub.ico"), media_type="image/x-icon")
+
+
+async def serve_apple_touch_icon(request):
+    return FileResponse(str(STATIC_DIR / "favicons" / "apple-touch-icon.png"), media_type="image/png")
+
+
+async def serve_webmanifest(request):
+    return FileResponse(str(STATIC_DIR / "favicons" / "site.webmanifest"), media_type="application/manifest+json")
+
+
+async def serve_browserconfig(request):
+    return FileResponse(str(STATIC_DIR / "favicons" / "browserconfig.xml"), media_type="application/xml")
+
+
 routes = [
     Route("/", index_page),
+    Route("/favicon.ico", serve_root_favicon),
+    Route("/apple-touch-icon.png", serve_apple_touch_icon),
+    Route("/site.webmanifest", serve_webmanifest),
+    Route("/browserconfig.xml", serve_browserconfig),
     Route("/api/setup/status", api_setup_status),
     Route("/api/setup/config", api_setup_config, methods=["POST"]),
     Route("/api/setup/browse", api_setup_browse, methods=["POST"]),
