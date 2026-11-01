@@ -89,11 +89,12 @@ OOTP Hosting/
 ├── docs/                         # Screen-by-screen functional documentation & architecture guides
 ├── screenshots/                  # High-resolution screenshots of every OOTP+ screen, sub-view & modal
 ├── static/
-│   ├── css/app.css               # Broadcast dark/light styles, glassmorphism & ultrawide density rules
-│   ├── img/                      # Official OOTP+ brand logo (PNG) and header emblem (SVG)
+│   ├── css/app.css               # Broadcast dark/light styles, glassmorphism & Set 2 brand tokens
+│   ├── favicons/                 # Optical favicons (16-64px, .ico, SVG), PWA manifest, maskable & OG card
+│   ├── img/                      # Official Set 2 OOTP+ brand logos, high-DPI icons & UX SVG components (ux/)
 │   ├── js/app.js                 # Frontend SPA controller, 14 hub renderers, modals & table sorting
 │   ├── js/charts.js              # Chart.js visualizers, SVG ballpark spray charts & expansion maps
-│   └── ootp27_hub.ico            # Windows desktop shortcut icon
+│   └── ootp27_hub.ico            # Multi-size (16-256px) Set 2 Windows desktop shortcut icon
 ├── templates/
 │   └── index.html                # Responsive HTML5 shell, Command Bar, Scout Dock & modals
 ├── create_shortcut.ps1           # PowerShell script to generate Windows Desktop shortcut

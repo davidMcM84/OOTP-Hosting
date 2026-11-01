@@ -33,7 +33,7 @@ function savantColor(pct) {
 
 function renderSavantPercentileSliders(percentiles) {
   if (!percentiles || !percentiles.length) {
-    return `<div class="text-slate-400 text-xs py-4 text-center">No percentile data available for this player yet.</div>`;
+    return `<div class="text-slate-400 text-xs py-4 text-center"><img src="/static/img/ux/empty_statcast_radar.svg" alt="" class="w-32 mx-auto mb-2 select-none" />No percentile data available for this player yet.</div>`;
   }
   return percentiles.map(item => {
     const c = savantColor(item.pct);

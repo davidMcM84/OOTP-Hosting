@@ -625,10 +625,12 @@ async function switchTab(tabName) {
 function renderNoCsvPrompt() {
   const s = AppState.overview.save_meta || {};
   return `
-    <div class="glass-card p-8 my-6 max-w-3xl mx-auto text-center animate-view">
-      <div class="w-16 h-16 rounded-2xl bg-sky-500/20 border border-sky-400/40 flex items-center justify-center mx-auto mb-4 text-sky-400 text-3xl">
-        <i class="bi bi-database-exclamation"></i>
+    <div class="glass-card overflow-hidden my-6 max-w-3xl mx-auto text-center animate-view">
+      <div class="bn-accent-ribbon"></div>
+      <div class="p-8 pb-0">
+        <img src="/static/img/ux/empty_csv_sync.svg" alt="CSV to SQLite WAL Sync" class="w-44 mx-auto mb-3 select-none" />
       </div>
+      <div class="px-8 pb-8">
       <h2 class="text-2xl font-extrabold text-white mb-2">${s.save_name || 'Selected Save'} — HTML Reports Ready, CSV Dump Needed for SQLite</h2>
       <p class="text-slate-300 text-sm mb-6">
         This save currently has <b>${s.html_count || 0} native OOTP 27 HTML reports</b> available in the BNN Portal, but hasn't had its CSV tables exported to <code>import_export/csv</code> or <code>dump/</code> yet.
@@ -642,6 +644,7 @@ function renderNoCsvPrompt() {
       <div class="flex justify-center gap-3">
         ${s.html_count > 0 ? `<button onclick="switchTab('bnn')" class="px-5 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-sm transition"><i class="bi bi-globe2 mr-1.5"></i>Browse ${s.html_count} Native OOTP 27 HTML Reports</button>` : ""}
         <button onclick="onSaveChanged('american_baseball_system')" class="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-sm border border-slate-600 transition">Switch to American Baseball System.lg</button>
+      </div>
       </div>
     </div>
   `;
@@ -6621,7 +6624,7 @@ async function renderPlayerIntoSideDock(playerId) {
   const dockBody = document.getElementById("ultrawide-side-dock-body");
   if (!dockBody) return;
 
-  dockBody.innerHTML = `<div class="p-8 text-center text-sky-400 font-bold text-xs"><i class="bi bi-arrow-repeat animate-spin mr-2"></i>Loading Player into Ultrawide Scout Dock...</div>`;
+  dockBody.innerHTML = `<div class="p-8 text-center text-sky-400 font-bold text-xs"><img src="/static/img/ux/loader_crest.svg" alt="" class="w-12 h-12 mx-auto mb-2.5 select-none" />Loading Player into Ultrawide Scout Dock...</div>`;
   try {
     const prof = await fetchJSON(`/api/player/${playerId}?save=${AppState.activeSave}`);
     dockBody.innerHTML = buildPlayerDossierHtml(prof, "dock", true);
@@ -8188,7 +8191,7 @@ window.openSetupWizardModal = async function(step = null) {
   modal.classList.remove("hidden");
   body.innerHTML = `
     <div class="p-8 text-center">
-      <div class="spinner-border text-amber-400 mb-3" role="status"></div>
+      <img src="/static/img/ux/loader_crest.svg" alt="" class="w-14 h-14 mx-auto mb-3 select-none" />
       <div class="text-xs font-bold text-white">Inspecting Python Environment, OOTP 27 Paths & SQLite Databases...</div>
     </div>
   `;
@@ -9246,23 +9249,7 @@ function renderBnnPortalFrontPage(container, fp, activeHead) {
           <!-- Left: Logo 3 ([B][N][N] .COM / OOTP+) + Quick Section Links -->
           <div class="flex flex-wrap items-center gap-4">
             <div class="flex items-center gap-2.5 select-none">
-              <svg width="212" height="34" viewBox="0 0 232 36" fill="none" xmlns="http://www.w3.org/2000/svg" class="shrink-0">
-                <g transform="skewX(-10)">
-                  <rect x="6" y="3" width="28" height="30" rx="4" fill="#CC0000"/>
-                  <rect x="7" y="4" width="26" height="28" rx="3" fill="#FFFFFF"/>
-                  <text x="20" y="25" text-anchor="middle" fill="#0B0E14" font-family="Inter, Impact, sans-serif" font-weight="900" font-size="21">B</text>
-                  <rect x="37" y="3" width="28" height="30" rx="4" fill="#CC0000"/>
-                  <rect x="38" y="4" width="26" height="28" rx="3" fill="#FFFFFF"/>
-                  <text x="51" y="25" text-anchor="middle" fill="#0B0E14" font-family="Inter, Impact, sans-serif" font-weight="900" font-size="21">N</text>
-                  <rect x="68" y="3" width="28" height="30" rx="4" fill="#CC0000"/>
-                  <rect x="69" y="4" width="26" height="28" rx="3" fill="#FFFFFF"/>
-                  <text x="82" y="25" text-anchor="middle" fill="#0B0E14" font-family="Inter, Impact, sans-serif" font-weight="900" font-size="21">N</text>
-                  <rect x="100" y="6" width="52" height="24" rx="4" fill="#CC0000"/>
-                  <text x="126" y="22" text-anchor="middle" fill="#FFFFFF" font-family="JetBrains Mono, monospace" font-weight="800" font-size="13" letter-spacing="0.5">.COM</text>
-                  <rect x="157" y="6" width="66" height="24" rx="4" fill="#F59E0B"/>
-                  <text x="190" y="22" text-anchor="middle" fill="#090D14" font-family="Inter, sans-serif" font-weight="900" font-size="13" letter-spacing="0.6">OOTP+</text>
-                </g>
-              </svg>
+              <img src="/static/img/ux/bnn_ootp_scorebug.svg" alt="BNN.COM | OOTP+" class="h-9 w-auto shrink-0 select-none" />
               <div class="hidden sm:block pl-2 border-l border-slate-700">
                 <div class="text-[10px] font-mono uppercase tracking-wider text-amber-400 font-extrabold">${fp.active_league?.name || 'League'} Portal</div>
                 <div class="text-[11px] font-mono text-slate-300">${mast.environment_note || `Season ${fp.selected_year}`}</div>
@@ -11296,21 +11283,8 @@ async function renderStretchTab(container) {
         <header class="bg-gradient-to-r from-[#B91C1C] via-[#991B1B] to-[#1E293B] text-white px-4 py-2 shadow-md border-b border-white/15">
           <div class="bnn-stretch-container flex flex-wrap items-center justify-between gap-3">
             <div class="flex flex-wrap items-center gap-4">
-              <!-- Locked-in Logo 3: [B][N][N] .COM / OOTP+ Broadcast Scorebug Tile SVG -->
-              <svg width="185" height="40" viewBox="0 0 240 54" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="BNN.COM OOTP+ Broadcast Logo" class="shrink-0">
-                <g transform="skewX(-10) translate(12, 8)">
-                  <rect x="0" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
-                  <text x="17" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">B</text>
-                  <rect x="38" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
-                  <text x="55" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">N</text>
-                  <rect x="76" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
-                  <text x="93" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">N</text>
-                  <rect x="114" y="0" width="68" height="23" rx="3" fill="#090D14" stroke="#FFFFFF" stroke-width="1.2"/>
-                  <text x="148" y="16.5" text-anchor="middle" fill="#FFFFFF" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="16">.COM</text>
-                  <rect x="114" y="25" width="68" height="11" rx="2" fill="#F59E0B"/>
-                  <text x="148" y="33.2" text-anchor="middle" fill="#090D14" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="8.5" letter-spacing="1.2">OOTP+</text>
-                </g>
-              </svg>
+              <!-- Set 2 Broadcast Network BNN.COM | OOTP+ Scorebug -->
+              <img src="/static/img/ux/bnn_ootp_scorebug.svg" alt="BNN.COM | OOTP+" class="h-9 w-auto shrink-0 select-none" />
 
               <div class="hidden xl:flex items-center gap-3 text-xs font-extrabold tracking-wide uppercase">
                 <button onclick="switchTab('frontpage')" class="text-white/75 hover:text-white transition">01. Front Page</button>
@@ -12003,21 +11977,8 @@ async function renderWorldDashboardTab(container) {
         <header class="bg-gradient-to-r from-[#0F172A] via-[#1E293B] to-[#0B132B] text-white px-4 py-2 shadow-md border-b border-white/15">
           <div class="bnn-stretch-container flex flex-wrap items-center justify-between gap-3">
             <div class="flex flex-wrap items-center gap-4">
-              <!-- Locked-in Logo 3: [B][N][N] .COM / OOTP+ Broadcast Scorebug Tile SVG -->
-              <svg width="185" height="40" viewBox="0 0 240 54" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="BNN.COM OOTP+ Broadcast Logo" class="shrink-0">
-                <g transform="skewX(-10) translate(12, 8)">
-                  <rect x="0" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
-                  <text x="17" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">B</text>
-                  <rect x="38" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
-                  <text x="55" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">N</text>
-                  <rect x="76" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
-                  <text x="93" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">N</text>
-                  <rect x="114" y="0" width="68" height="23" rx="3" fill="#090D14" stroke="#FFFFFF" stroke-width="1.2"/>
-                  <text x="148" y="16.5" text-anchor="middle" fill="#FFFFFF" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="16">.COM</text>
-                  <rect x="114" y="25" width="68" height="11" rx="2" fill="#F59E0B"/>
-                  <text x="148" y="33.2" text-anchor="middle" fill="#090D14" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="8.5" letter-spacing="1.2">OOTP+</text>
-                </g>
-              </svg>
+              <!-- Set 2 Broadcast Network BNN.COM | OOTP+ Scorebug -->
+              <img src="/static/img/ux/bnn_ootp_scorebug.svg" alt="BNN.COM | OOTP+" class="h-9 w-auto shrink-0 select-none" />
 
               <div class="hidden xl:flex items-center gap-3 text-xs font-extrabold tracking-wide uppercase">
                 <button onclick="switchTab('frontpage')" class="text-white/75 hover:text-white transition">01. Front Page</button>

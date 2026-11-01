@@ -18,6 +18,33 @@
   --accent-purple: #a855f7;
   --team-primary: #1f1f20;
   --team-accent: #dbdbdb;
+
+  /* Set 2 Broadcast Network Brand Tokens */
+  --bn-navy: #070d1f;
+  --bn-royal: #1d4ed8;
+  --bn-crimson: #e11d48;
+  --bn-platinum: #cbd5e1;
+  --bn-nexus: #22d3ee;
+}
+
+.bn-accent-ribbon {
+  height: 3px;
+  width: 100%;
+  background: linear-gradient(90deg, var(--bn-royal) 0%, var(--bn-royal) 49.5%, var(--bn-platinum) 50%, var(--bn-crimson) 50.5%, var(--bn-crimson) 100%);
+}
+
+.bn-trust-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 9999px;
+  background: rgba(7, 13, 31, 0.9);
+  border: 1px solid rgba(203, 213, 225, 0.35);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--bn-platinum);
 }
 
 body {

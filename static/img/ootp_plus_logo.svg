@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 120" fill="none">
+  <defs>
+    <linearGradient id="heroBg_set_2_broadcast_network" x1="0" y1="0" x2="520" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0D1736"/>
+      <stop offset="100%" stop-color="#060A19"/>
+    </linearGradient>
+  </defs>
+  <rect x="1.5" y="1.5" width="517" height="117" rx="18" fill="url(#heroBg_set_2_broadcast_network)" stroke="#94A3B8" stroke-opacity="0.35" stroke-width="1.5"/>
+  <g transform="translate(26, 16) scale(1.375)">
+    
+  <defs>
+    <linearGradient id="bnBg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0B132B"/>
+      <stop offset="100%" stop-color="#050814"/>
+    </linearGradient>
+    <linearGradient id="bnSilver" x1="12" y1="10" x2="52" y2="54" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F8FAFC"/>
+      <stop offset="50%" stop-color="#CBD5E1"/>
+      <stop offset="100%" stop-color="#94A3B8"/>
+    </linearGradient>
+    <clipPath id="bnShieldClip">
+      <path d="M16 15 H48 V35.5 L32 50 L16 35.5 Z"/>
+    </clipPath>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#bnBg)" stroke="#64748B" stroke-opacity="0.45" stroke-width="1.75"/>
+  <!-- Outer Platinum Home-Plate Shield -->
+  <path d="M12 11 H52 V37.5 L32 55 L12 37.5 Z" fill="url(#bnSilver)"/>
+  <path d="M14.5 13.5 H49.5 V36.3 L32 51.8 L14.5 36.3 Z" fill="#090F22"/>
+  <!-- Split Royal Blue & Broadcast Red Panels -->
+  <g clip-path="url(#bnShieldClip)">
+    <rect x="15" y="14" width="17" height="38" fill="#1D4ED8"/>
+    <rect x="32" y="14" width="17" height="38" fill="#E11D48"/>
+    <!-- Corner Baseball Seam Hints -->
+    <path d="M15 24 C20 22, 23 19, 25 14" stroke="#F43F5E" stroke-width="1.6" stroke-dasharray="2 2"/>
+    <path d="M49 24 C44 22, 41 19, 39 14" stroke="#FB7185" stroke-opacity="0.65" stroke-width="1.6" stroke-dasharray="2 2"/>
+    <!-- White Outfield Fan & Basepaths -->
+    <path d="M19 33 A13.5 13.5 0 0 1 45 33 L40 33 L32 25 L24 33 Z" fill="#FFFFFF"/>
+    <path d="M32 24 L41.5 33.5 L32 43 L22.5 33.5 Z" stroke="#FFFFFF" stroke-width="2.4" fill="none"/>
+    <circle cx="32" cy="43" r="3" fill="#FFFFFF"/>
+  </g>
+  <!-- Glowing Center + Nexus -->
+  <path d="M32 28.5 V38.5 M27 33.5 H37" stroke="#22D3EE" stroke-width="4.4" stroke-linecap="square" stroke-opacity="0.55"/>
+  <path d="M32 28.5 V38.5 M27 33.5 H37" stroke="#FFFFFF" stroke-width="2.8" stroke-linecap="square"/>
+
+  </g>
+  <text x="134" y="69" fill="#F8FAFC" font-family="Inter, Space Grotesk, Segoe UI, system-ui, sans-serif" font-size="50" font-weight="900" letter-spacing="-1.2">OOTP<tspan fill="#E11D48">+</tspan></text>
+  <text x="136" y="93" fill="#CBD5E1" font-family="JetBrains Mono, Consolas, monospace" font-size="12.2" font-weight="700" letter-spacing="1.6">SABERMETRICS &#8226; STATCAST &#8226; LEAGUE HOSTING</text>
+</svg>
