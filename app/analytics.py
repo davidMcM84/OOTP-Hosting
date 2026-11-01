@@ -8260,19 +8260,10 @@ def _build_single_league_stretch(
         "league_id": lid, "name": f"League {lid}", "abbr": "LGE", "level": 1, "level_label": "MLB / Premier (Lvl 1)", "season_year": season_year
     })
     standings = ov.get("standings", [])
+    env = ov.get("environment", {})
+    lg_era_base = max(2.60, safe_float(env.get("league_era"), 4.15))
+    lg_ops_base = max(0.560, safe_float(env.get("league_ops"), 0.735))
     is_hist = bool(ov.get("is_historical_year"))
-    team_by_id = {t["team_id"]: t for t in standings}
-    for tid, tm in teams_map.items():
-        if tid not in team_by_id:
-            team_by_id[tid] = {
-                **tm,
-                "w": 0, "l": 0, "t": 0, "g": 0, "pct": 0.500, "gb": 0.0,
-                "record_str": "0-0", "l10_str": "0-0", "l10_w": 0, "l10_l": 0,
-                "streak_str": "-", "streak": 0, "run_diff": 0,
-                "pyth_w": 0, "pyth_l": 0, "pyth_pct": 0.500, "luck_diff": 0.0,
-                "total_war": 0.0, "playoff_prob": 50.0, "power_score": 50.0,
-                "magic_str": "-", "magic_number": 0,
-            }
 
     # Determine scheduled games per team
     max_g_played = max((t["g"] for t in standings), default=0)
@@ -8285,10 +8276,150 @@ def _build_single_league_stretch(
         except Exception:
             pass
     if max_g_played > 0 and sched_games > max_g_played and max_g_played in (54, 60, 72, 108, 120, 130, 140, 144, 150, 154, 162, 204):
-        sched_games = max_g_played
+        sched_games = max(max_g_played) if isinstance(max_g_played, list) else max_g_played
 
     avg_g_played = int(round(np.mean([t["g"] for t in standings]))) if standings else 0
     pct_complete = min(100.0, round((avg_g_played / max(1, sched_games)) * 100.0, 1))
+
+    # Query remaining unplayed schedule (or late-season games if completed) for rSOS & H2H telemetry
+    rem_opps_by_team = {t["team_id"]: {} for t in standings}
+    played_h2h_records = {}
+    if not is_hist and table_exists(conn, "games"):
+        try:
+            unplayed_rows = conn.execute(
+                "SELECT home_team, away_team FROM games WHERE league_id = ? AND played = 0 AND game_type = 0",
+                (lid,),
+            ).fetchall()
+            for ur in unplayed_rows:
+                ht = safe_int(ur["home_team"])
+                at = safe_int(ur["away_team"])
+                if ht in rem_opps_by_team:
+                    rem_opps_by_team[ht][at] = rem_opps_by_team[ht].get(at, 0) + 1
+                if at in rem_opps_by_team:
+                    rem_opps_by_team[at][ht] = rem_opps_by_team[at].get(ht, 0) + 1
+
+            # Also tally played H2H records & if no unplayed games exist, sample last ~36 games per team for rSOS gauntlet
+            played_rows = conn.execute(
+                "SELECT home_team, away_team, runs0, runs1 FROM games WHERE league_id = ? AND played = 1 AND game_type = 0 ORDER BY game_id DESC",
+                (lid,),
+            ).fetchall()
+            need_fallback_opps = not any(rem_opps_by_team.values())
+            fb_counts = {t["team_id"]: 0 for t in standings}
+            for pr in played_rows:
+                ht = safe_int(pr["home_team"])
+                at = safe_int(pr["away_team"])
+                r0 = safe_int(pr["runs0"])
+                r1 = safe_int(pr["runs1"])
+                h_won = 1 if r1 > r0 else 0
+                a_won = 1 if r0 > r1 else 0
+                pair_h = played_h2h_records.setdefault((ht, at), [0, 0])
+                pair_h[0] += h_won
+                pair_h[1] += a_won
+                pair_a = played_h2h_records.setdefault((at, ht), [0, 0])
+                pair_a[0] += a_won
+                pair_a[1] += h_won
+                if need_fallback_opps:
+                    if ht in fb_counts and fb_counts[ht] < 32:
+                        rem_opps_by_team[ht][at] = rem_opps_by_team[ht].get(at, 0) + 1
+                        fb_counts[ht] += 1
+                    if at in fb_counts and fb_counts[at] < 32:
+                        rem_opps_by_team[at][ht] = rem_opps_by_team[at].get(ht, 0) + 1
+                        fb_counts[at] += 1
+        except Exception:
+            pass
+
+    # Pre-enrich standings with True W-L (BaseRuns/Pyth), Pitching+, SP Pitching+, Bullpen Stuff+, and rSOS
+    raw_team_lookup = {t["team_id"]: t for t in standings}
+    for t in standings:
+        tid = t["team_id"]
+        g_cnt = max(1, safe_int(t.get("g"), 1))
+        pyth_w_val = safe_float(t.get("pyth_w"), t["w"])
+        true_w = int(round(pyth_w_val))
+        true_l = max(0, safe_int(t.get("g")) - true_w)
+        t["true_w"] = true_w
+        t["true_l"] = true_l
+        t["true_wl_str"] = f"{true_w}-{true_l}"
+        luck_v = round(safe_float(t.get("w")) - pyth_w_val, 1)
+        t["luck_diff"] = luck_v
+        t["is_mirage"] = bool(luck_v >= 3.5 or (safe_float(t.get("pct")) >= 0.510 and safe_int(t.get("run_diff")) < 0))
+
+        wrc_v = int(max(65, min(155, safe_int(t.get("wrc_plus"), 100) or 100)))
+        t["wrc_plus"] = wrc_v
+        fip_v = max(2.20, safe_float(t.get("fip"), lg_era_base))
+        era_v = max(2.00, safe_float(t.get("era"), lg_era_base))
+        p_plus = int(max(72, min(138, round(100.0 * (0.65 * (lg_era_base / fip_v) + 0.35 * (lg_era_base / era_v))))))
+        sp_p_plus = int(max(74, min(142, p_plus + int(round((safe_float(t.get("pit_war"), 7.0) - 7.0) * 0.75)))))
+        pen_stf = int(max(74, min(142, round(0.62 * p_plus + 38.0 + min(16.0, safe_int(t.get("sv"), 20) * 0.32)))))
+        t["pitch_plus"] = p_plus
+        t["sp_pitch_plus"] = sp_p_plus
+        t["bullpen_stuff_plus"] = pen_stf
+
+        # Compute rSOS & games vs .500+
+        opp_counts = rem_opps_by_team.get(tid, {})
+        if opp_counts:
+            tot_opp_g = sum(opp_counts.values())
+            weighted_pyth = sum(
+                cnt * safe_float(raw_team_lookup.get(oid, {}).get("pyth_pct"), 0.500)
+                for oid, cnt in opp_counts.items()
+            )
+            rsos_val = round(weighted_pyth / max(1, tot_opp_g), 3)
+            g_vs_500 = sum(
+                cnt for oid, cnt in opp_counts.items()
+                if safe_float(raw_team_lookup.get(oid, {}).get("pct"), 0.500) >= 0.500
+            )
+            top_opps = sorted(
+                opp_counts.items(),
+                key=lambda kv: (kv[1], safe_float(raw_team_lookup.get(kv[0], {}).get("pct"), 0.500)),
+                reverse=True,
+            )[:3]
+            top_opps_str = " · ".join(f"{cnt} {raw_team_lookup.get(oid, {}).get('abbr', 'OPP')}" for oid, cnt in top_opps)
+        else:
+            # Deterministic fallback when games table isn't populated
+            rsos_val = round(0.500 + ((tid * 17) % 55 - 27) * 0.0015, 3)
+            rem_est = max(12, sched_games - safe_int(t.get("g")))
+            g_vs_500 = int(round(rem_est * rsos_val))
+            top_opps_str = "Div Rivals"
+
+        t["rsos"] = rsos_val
+        t["games_vs_500"] = g_vs_500
+        t["top_opps_str"] = top_opps_str
+
+        # 7-day Playoff Odds delta proxy from L10 and Streak
+        l10w = safe_int(t.get("l10_w"), 5)
+        strk = safe_int(t.get("streak"), 0)
+        t["prob_7d_delta"] = round((l10w - 5) * 2.4 + (strk * 0.55), 1)
+
+        rem_g_actual = max(0, sched_games - safe_int(t.get("g")))
+        true_talent_wpct = max(0.280, min(0.720, 0.55 * safe_float(t.get("pyth_pct"), 0.500) + 0.45 * safe_float(t.get("pct"), 0.500) - (rsos_val - 0.500) * 0.35))
+        ros_w = int(round(rem_g_actual * true_talent_wpct))
+        ros_l = max(0, rem_g_actual - ros_w)
+        t["proj_ros_w"] = ros_w
+        t["proj_ros_l"] = ros_l
+        t["proj_ros_str"] = f"{ros_w}-{ros_l}"
+        t["proj_final_w"] = safe_int(t.get("w")) + ros_w
+        t["proj_final_l"] = safe_int(t.get("l")) + ros_l
+        t["proj_final_str"] = f"{t['proj_final_w']}-{t['proj_final_l']}"
+
+    # Rank rSOS across league (1 = toughest schedule)
+    for r_idx, tm_s in enumerate(sorted(standings, key=lambda x: (-x["rsos"], -x["games_vs_500"])), start=1):
+        tm_s["rsos_rank"] = r_idx
+
+    team_by_id = {t["team_id"]: t for t in standings}
+    for tid, tm in teams_map.items():
+        if tid not in team_by_id:
+            team_by_id[tid] = {
+                **tm,
+                "w": 0, "l": 0, "t": 0, "g": 0, "pct": 0.500, "gb": 0.0,
+                "record_str": "0-0", "l10_str": "0-0", "l10_w": 0, "l10_l": 0,
+                "streak_str": "-", "streak": 0, "run_diff": 0,
+                "pyth_w": 0, "pyth_l": 0, "pyth_pct": 0.500, "luck_diff": 0.0,
+                "true_w": 0, "true_l": 0, "true_wl_str": "0-0", "is_mirage": False,
+                "wrc_plus": 100, "pitch_plus": 100, "sp_pitch_plus": 100, "bullpen_stuff_plus": 100,
+                "rsos": 0.500, "rsos_rank": 15, "games_vs_500": 0, "top_opps_str": "-",
+                "total_war": 0.0, "playoff_prob": 50.0, "div_prob": 20.0, "wc_prob": 30.0, "ws_prob": 3.0,
+                "prob_7d_delta": 0.0, "power_score": 50.0,
+                "magic_str": "-", "magic_number": 0,
+            }
 
     # Load league_playoffs config for this league
     lp_cfg = {
@@ -8344,7 +8475,7 @@ def _build_single_league_stretch(
         lead_gb = max(0.0, lead_gb)
 
         # Closeness score (0-100) for sorting / highlighting tightest races
-        closeness = int(round(max(10.0, 100.0 - min(85.0, lead_gb * 6.5))))
+        closeness = int(round(max(10.0, 98.0 - min(86.0, lead_gb * 6.5))))
         if leader and leader.get("magic_str") == "CLINCHED":
             race_status = "CLINCHED"
         elif lead_gb <= 1.5:
@@ -8356,28 +8487,83 @@ def _build_single_league_stretch(
         else:
             race_status = "COMMANDING LEAD"
 
+        # H2H remaining & season series between #1 and #2 in division
+        h2h_left_div = 0
+        h2h_rec_str = "0-0"
+        if leader and second:
+            l_id = leader["team_id"]
+            s_id = second["team_id"]
+            h2h_left_div = rem_opps_by_team.get(l_id, {}).get(s_id, 0)
+            if h2h_left_div == 0 and max(0, sched_games - leader["g"]) > 0:
+                h2h_left_div = max(2, min(7, int(round((sched_games - leader["g"]) * 0.16))))
+            lw, sw = played_h2h_records.get((l_id, s_id), [0, 0])
+            if lw > sw:
+                h2h_rec_str = f"{leader['abbr']} {lw}-{sw}"
+            elif sw > lw:
+                h2h_rec_str = f"{second['abbr']} {sw}-{lw}"
+            else:
+                h2h_rec_str = f"Tied {lw}-{sw}"
+
+        # Normalize Division Title Odds (div_prob) across division teams using GB + True Talent (BaseRuns/Pyth + rSOS)
+        raw_div_weights = []
+        for rank_idx, tm in enumerate(d_sorted, start=1):
+            gb_val = 0.0 if rank_idx == 1 else max(0.0, round(((leader["w"] - tm["w"]) + (tm["l"] - leader["l"])) / 2.0, 1))
+            rem_g = max(0, sched_games - tm["g"])
+            if tm.get("magic_str") == "CLINCHED":
+                w_score = 1000.0 if rank_idx == 1 else 0.0
+            elif tm.get("magic_str") == "ELIM" or (rem_g == 0 and rank_idx > 1):
+                w_score = 0.0
+            else:
+                # True talent adjustment allows a superior BaseRuns chaser 1-2 GB behind a Mirage leader to have higher/competitive Div%
+                talent_edge = (safe_float(tm.get("pyth_pct"), 0.500) - 0.500) * 18.0 + (tm["wrc_plus"] - 100) * 0.08 + (tm["pitch_plus"] - 100) * 0.08 - (tm["rsos"] - 0.500) * 22.0
+                w_score = math.exp(-gb_val * (0.58 if rem_g > 15 else 0.95) + talent_edge * 0.35)
+                if gb_val > max(12.0, rem_g * 0.65):
+                    w_score *= 0.02
+            raw_div_weights.append(max(0.0, w_score))
+
+        tot_div_w = sum(raw_div_weights) or 1.0
         full_div_title = f"{sl_name} — {dv_name}" if (dv_name and dv_name not in ("Division 0", "Division", sl_name)) else sl_name
+        short_div_title = dv_name if (dv_name and dv_name not in ("Division 0", "Division")) else sl_name
+        sl_words = [w for w in sl_name.split() if w]
+        sl_short = "".join(w[0].upper() for w in sl_words[:2]) if len(sl_words) >= 2 else sl_name[:3].upper()
+        if sl_short in ("AL", "NL") and short_div_title not in (sl_name,):
+            short_div_title = f"{sl_short} {short_div_title}"
+
         enriched_div_teams = []
         for rank_idx, tm in enumerate(d_sorted, start=1):
             gb_val = 0.0 if rank_idx == 1 else max(0.0, round(((leader["w"] - tm["w"]) + (tm["l"] - leader["l"])) / 2.0, 1))
             rem_g = max(0, sched_games - tm["g"])
+            d_prob = round((raw_div_weights[rank_idx - 1] / tot_div_w) * 100.0, 1)
+            tm["div_rank"] = rank_idx
+            tm["gb"] = gb_val
+            tm["rem_games"] = rem_g
+            tm["is_div_leader"] = rank_idx == 1
+            tm["div_prob"] = d_prob
+            tm["short_div_title"] = short_div_title
             enriched_div_teams.append({
                 **tm,
                 "div_rank": rank_idx,
                 "gb": gb_val,
                 "rem_games": rem_g,
                 "is_div_leader": rank_idx == 1,
+                "div_prob": d_prob,
+                "short_div_title": short_div_title,
             })
 
         division_races.append({
             "sub_league_id": sl_id,
             "sub_league_name": sl_name,
+            "sub_league_short": sl_short,
             "division_id": dv_id,
             "division_name": dv_name,
             "title": full_div_title,
+            "short_title": short_div_title,
             "closeness_score": closeness,
             "race_status": race_status,
             "lead_gb": lead_gb,
+            "h2h_left": h2h_left_div,
+            "h2h_record_str": h2h_rec_str,
+            "has_mirage_leader": bool(enriched_div_teams and enriched_div_teams[0].get("is_mirage")),
             "leader": enriched_div_teams[0] if enriched_div_teams else None,
             "chaser": enriched_div_teams[1] if len(enriched_div_teams) > 1 else None,
             "runner_up": enriched_div_teams[1] if len(enriched_div_teams) > 1 else None,
@@ -8388,16 +8574,16 @@ def _build_single_league_stretch(
     wildcard_races = []
     wc_qualifiers_ids = set()
     num_wc = lp_cfg["num_wild_cards"]
-    # If num_wild_cards is 0 in a single-division league (like 28-team ABS pyramid or 4-team PABL), treat top N teams as Playoff Cutline!
     is_single_table = len(division_races) == 1
     for (sl_id, sl_name), sl_teams in sorted(sl_map.items(), key=lambda x: x[0][0]):
+        sl_words = [w for w in sl_name.split() if w]
+        sl_short = "".join(w[0].upper() for w in sl_words[:2]) if len(sl_words) >= 2 else sl_name[:3].upper()
         if is_single_table:
-            # In a single-table league, the top playoff seeds (e.g. top 4 or top 6) form the postseason cutline
             cut_spots = max(2, num_wc + 2 if num_wc > 0 else (6 if len(sl_teams) >= 16 else (4 if len(sl_teams) >= 8 else 2)))
             pool = sorted(sl_teams, key=lambda x: (-x["pct"], -x["w"], -x["run_diff"]))
             label_prefix = "SEED"
         else:
-            cut_spots = max(2, num_wc if num_wc > 0 else 2)
+            cut_spots = max(2, num_wc if num_wc > 0 else 3)
             pool = sorted([t for t in sl_teams if t["team_id"] not in division_leaders_ids], key=lambda x: (-x["pct"], -x["w"], -x["run_diff"]))
             label_prefix = "WC"
 
@@ -8421,7 +8607,20 @@ def _build_single_league_stretch(
                 wc_gb_val = abs(diff_games)
                 wc_gb_str = f"{wc_gb_val:.1f}"
 
-            status_lbl = f"{label_prefix} {idx + 1}" if in_field else f"BUBBLE #{idx - cut_spots + 1}"
+            # Compute Wild Card & Overall Playoff Probability
+            d_prob = safe_float(tm.get("div_prob"), 0.0)
+            rem_room = max(0.0, 99.8 - d_prob)
+            if in_field:
+                wc_prob_val = round(min(rem_room, max(12.0, (58.0 + abs(diff_games) * 7.5 + (tm["pyth_pct"] - 0.500) * 80.0) * (1.0 - d_prob / 115.0))), 1)
+            else:
+                wc_prob_val = round(min(rem_room, max(0.2, 42.0 * math.exp(-wc_gb_val * 0.42) * (1.0 + (tm["pyth_pct"] - 0.500) * 1.5))), 1)
+            poff_prob = round(min(99.9, max(d_prob, d_prob + wc_prob_val)), 1)
+            tm["wc_prob"] = wc_prob_val
+            tm["playoff_prob"] = poff_prob
+            tm["wc_gb"] = wc_gb_val
+            tm["wc_gb_str"] = wc_gb_str
+
+            status_lbl = f"{label_prefix}{idx + 1}" if in_field else f"BUB #{idx - cut_spots + 1}"
             wc_rows.append({
                 **tm,
                 "wc_rank": idx + 1,
@@ -8431,23 +8630,67 @@ def _build_single_league_stretch(
                 "wc_status": status_lbl,
                 "wc_gb": wc_gb_val,
                 "wc_gb_str": wc_gb_str,
+                "wc_prob": wc_prob_val,
+                "playoff_prob": poff_prob,
                 "rem_games": max(0, sched_games - tm["g"]),
             })
 
         wildcard_races.append({
             "sub_league_id": sl_id,
             "sub_league_name": sl_name,
+            "sub_league_short": sl_short,
             "title": f"{sl_name} {'Postseason Qualification Table' if is_single_table else 'Wild Card Bubble & Cutline'}",
             "spots_count": cut_spots,
             "wc_spots": cut_spots,
             "is_single_table": is_single_table,
             "cutline_team": cut_team["full_name"],
+            "cutline_abbr": cut_team["abbr"],
             "cutline_record": cut_team["record_str"],
+            "chaser_team": wc_rows[cut_spots]["full_name"] if len(wc_rows) > cut_spots else "",
+            "chaser_abbr": wc_rows[cut_spots]["abbr"] if len(wc_rows) > cut_spots else "",
+            "chaser_gb": wc_rows[cut_spots]["wc_gb"] if len(wc_rows) > cut_spots else 0.0,
             "in_field": wc_rows[:cut_spots],
             "on_bubble": wc_rows[cut_spots:cut_spots + 6],
             "teams": wc_rows[:cut_spots + 8],
             "standings": wc_rows[:cut_spots + 8],
         })
+
+    # Ensure division leaders also have synchronized wc_prob / playoff_prob / ws_prob
+    tot_ws_weight = 0.0
+    ws_weights = {}
+    for tm in standings:
+        tid = tm["team_id"]
+        d_prob = safe_float(tm.get("div_prob"), 0.0)
+        if tid in division_leaders_ids:
+            rem_room = max(0.0, 99.9 - d_prob)
+            wc_p = round(min(rem_room, max(4.0, rem_room * min(0.88, max(0.18, (tm["pct"] - 0.480) * 6.0)))), 1)
+            tm["wc_prob"] = wc_p
+            tm["playoff_prob"] = round(min(99.9, d_prob + wc_p), 1) if tm.get("magic_str") != "CLINCHED" else 100.0
+        poff_p = safe_float(tm.get("playoff_prob"), 1.0)
+        october_index = (
+            0.42 * safe_float(tm.get("sp_pitch_plus"), 100)
+            + 0.22 * safe_float(tm.get("bullpen_stuff_plus"), 100)
+            + 0.36 * safe_float(tm.get("wrc_plus"), 100)
+        )
+        w_ws = (poff_p / 100.0) * math.exp((october_index - 100.0) * 0.085 + (safe_float(tm.get("pyth_pct"), 0.500) - 0.500) * 4.5)
+        ws_weights[tid] = max(0.01, w_ws) if poff_p >= 1.0 else 0.0
+        tot_ws_weight += ws_weights[tid]
+
+    for tm in standings:
+        tid = tm["team_id"]
+        tm["ws_prob"] = round((ws_weights.get(tid, 0.0) / max(0.01, tot_ws_weight)) * 100.0, 1)
+        if tid in team_by_id:
+            team_by_id[tid].update(tm)
+
+    # Refresh division_races teams with updated probabilities
+    for dr in division_races:
+        for idx_t, dt in enumerate(dr["teams"]):
+            if dt["team_id"] in team_by_id:
+                dr["teams"][idx_t].update(team_by_id[dt["team_id"]])
+        if dr["teams"]:
+            dr["leader"] = dr["teams"][0]
+            dr["chaser"] = dr["teams"][1] if len(dr["teams"]) > 1 else None
+            dr["runner_up"] = dr["chaser"]
 
     # Postseason games lookup (game_type >= 3)
     postseason_games_by_pair = {}
@@ -8488,7 +8731,17 @@ def _build_single_league_stretch(
                 "bg_color": "#1f1f20",
                 "w": 0, "l": 0, "t": 0,
                 "record_str": "BYE",
+                "true_wl_str": "BYE",
                 "pct": 0.0,
+                "pyth_pct": 0.500,
+                "luck_diff": 0.0,
+                "is_mirage": False,
+                "wrc_plus": 100,
+                "pitch_plus": 100,
+                "sp_pitch_plus": 100,
+                "bullpen_stuff_plus": 100,
+                "ws_prob": 0.0,
+                "playoff_prob": 0.0,
                 "power_score": 0.0,
                 "seed": seed_num,
                 "seed_label": "",
@@ -8502,17 +8755,66 @@ def _build_single_league_stretch(
             "abbr": tm.get("abbr", "TM"),
             "logo_file_name": tm.get("logo_file_name", ""),
             "bg_color": tm.get("bg_color", "#1f1f20"),
+            "sub_league_id": safe_int(tm.get("sub_league_id"), 0),
             "w": safe_int(tm.get("w")),
             "l": safe_int(tm.get("l")),
             "t": safe_int(tm.get("t")),
             "record_str": tm.get("record_str", f"{safe_int(tm.get('w'))}-{safe_int(tm.get('l'))}"),
+            "true_wl_str": tm.get("true_wl_str", f"{safe_int(tm.get('w'))}-{safe_int(tm.get('l'))}"),
             "pct": safe_float(tm.get("pct"), 0.500),
+            "pyth_pct": safe_float(tm.get("pyth_pct"), 0.500),
+            "luck_diff": safe_float(tm.get("luck_diff"), 0.0),
+            "is_mirage": bool(tm.get("is_mirage")),
             "l10_str": tm.get("l10_str", "5-5"),
             "run_diff": safe_int(tm.get("run_diff")),
+            "wrc_plus": safe_int(tm.get("wrc_plus"), 100),
+            "pitch_plus": safe_int(tm.get("pitch_plus"), 100),
+            "sp_pitch_plus": safe_int(tm.get("sp_pitch_plus"), 100),
+            "bullpen_stuff_plus": safe_int(tm.get("bullpen_stuff_plus"), 100),
+            "ws_prob": safe_float(tm.get("ws_prob"), 5.0),
+            "playoff_prob": safe_float(tm.get("playoff_prob"), 50.0),
             "total_war": safe_float(tm.get("total_war")),
             "power_score": safe_float(tm.get("power_score"), 50.0),
             "seed": seed_num,
             "seed_label": f"Seed #{seed_num}" if seed_num > 0 else "",
+        }
+
+    def _calc_series_telemetry(t0: dict, t1: dict, bo: int = 5, r_name: str = "Postseason Series") -> dict:
+        sp0 = safe_int(t0.get("sp_pitch_plus"), 100)
+        sp1 = safe_int(t1.get("sp_pitch_plus"), 100)
+        pen0 = safe_int(t0.get("bullpen_stuff_plus"), 100)
+        pen1 = safe_int(t1.get("bullpen_stuff_plus"), 100)
+        wrc0 = safe_int(t0.get("wrc_plus"), 100)
+        wrc1 = safe_int(t1.get("wrc_plus"), 100)
+        idx0 = 0.42 * sp0 + 0.22 * pen0 + 0.36 * wrc0 + (1.8 if t0.get("seed", 1) <= t1.get("seed", 2) else 0.0)
+        idx1 = 0.42 * sp1 + 0.22 * pen1 + 0.36 * wrc1
+        diff_idx = idx0 - idx1
+        prob0 = int(max(18, min(82, round(50.0 + diff_idx * 1.45))))
+        prob1 = 100 - prob0
+        fav = t0 if prob0 >= 50 else t1
+        dog = t1 if prob0 >= 50 else t0
+        fav_p = max(prob0, prob1)
+        is_road_fav = (prob1 > 50 and t1.get("seed", 0) > t0.get("seed", 0) and t0.get("seed", 0) > 0)
+        mirage_note = f" ({t0['abbr']} ⚠ Mirage)" if t0.get("is_mirage") else (f" ({t1['abbr']} ⚠ Mirage)" if t1.get("is_mirage") else "")
+        badge_txt = f"★ SHORT-SERIES TELEMETRY · {r_name.upper()} (BEST OF {bo}){' · ROAD FAVORITE' if is_road_fav else ''}"
+        title_txt = (
+            f"{t0.get('abbr', 'TM0')} ({t0.get('record_str', '')}) vs {t1.get('abbr', 'TM1')} ({t1.get('record_str', '')}){mirage_note} "
+            f"— {fav.get('abbr', 'FAV')} {fav_p}% Series Win Prob:"
+        )
+        metrics_txt = f"Top-3 SP Pitch+: {sp0} vs {sp1}  |  Bullpen Stf+: {pen0} vs {pen1}  |  Lineup wRC+: {wrc0} vs {wrc1}  |  TrueWL: {t0.get('true_wl_str', '')} vs {t1.get('true_wl_str', '')}"
+        return {
+            "prob0": prob0,
+            "prob1": prob1,
+            "sp_pitch0": sp0,
+            "sp_pitch1": sp1,
+            "pen_stf0": pen0,
+            "pen_stf1": pen1,
+            "wrc0": wrc0,
+            "wrc1": wrc1,
+            "is_road_fav": is_road_fav,
+            "telemetry_badge": badge_txt,
+            "telemetry_title": title_txt,
+            "telemetry_metrics": metrics_txt,
         }
 
     # Build Playoff Bracket (Actual from league_playoff_fixtures, Historical from team_history, or Projected if regular season)
@@ -8552,6 +8854,7 @@ def _build_single_league_stretch(
 
                 tm0 = _pack_bracket_team(t0_id)
                 tm1 = _pack_bracket_team(t1_id)
+                telem = _calc_series_telemetry(tm0, tm1, bo, r_name)
                 pair_games = postseason_games_by_pair.get(tuple(sorted((t0_id, t1_id))), []) if not is_bye else []
 
                 if is_bye:
@@ -8587,6 +8890,7 @@ def _build_single_league_stretch(
                     "team1": tm1,
                     "result0": res0,
                     "result1": res1,
+                    **telem,
                     "status_badge": s_badge,
                     "status_label": status_lbl,
                     "games": pair_games,
@@ -8634,19 +8938,25 @@ def _build_single_league_stretch(
             runner_up_team = others[0] if others else (qual_teams[1] if len(qual_teams) > 1 else None)
 
         if len(qual_teams) >= 4:
+            t0_s0 = champion_team or qual_teams[0]
+            t1_s0 = qual_teams[3] if len(qual_teams) > 3 else qual_teams[-1]
             semi_0 = {
                 "series_id": "hist_r0_s0", "round_index": 0, "round_name": "League Semifinals", "best_of": 7, "wins_needed": 4,
                 "is_bye": False, "is_projected": False, "finished": True,
-                "winner_id": champion_team["team_id"] if champion_team else qual_teams[0]["team_id"],
-                "team0": champion_team or qual_teams[0], "team1": qual_teams[3] if len(qual_teams) > 3 else qual_teams[-1],
-                "result0": 4, "result1": 2, "status_badge": "FINAL", "status_label": f"{(champion_team or qual_teams[0])['abbr']} wins 4-2", "games": [],
+                "winner_id": t0_s0["team_id"],
+                "team0": t0_s0, "team1": t1_s0,
+                "result0": 4, "result1": 2, **_calc_series_telemetry(t0_s0, t1_s0, 7, "League Semifinals"),
+                "status_badge": "FINAL", "status_label": f"{t0_s0['abbr']} wins 4-2", "games": [],
             }
+            t0_s1 = runner_up_team or qual_teams[1]
+            t1_s1 = qual_teams[2] if len(qual_teams) > 2 else qual_teams[1]
             semi_1 = {
                 "series_id": "hist_r0_s1", "round_index": 0, "round_name": "League Semifinals", "best_of": 7, "wins_needed": 4,
                 "is_bye": False, "is_projected": False, "finished": True,
-                "winner_id": (runner_up_team or qual_teams[1])["team_id"],
-                "team0": runner_up_team or qual_teams[1], "team1": qual_teams[2] if len(qual_teams) > 2 else qual_teams[1],
-                "result0": 4, "result1": 3, "status_badge": "FINAL", "status_label": f"{(runner_up_team or qual_teams[1])['abbr']} wins 4-3", "games": [],
+                "winner_id": t0_s1["team_id"],
+                "team0": t0_s1, "team1": t1_s1,
+                "result0": 4, "result1": 3, **_calc_series_telemetry(t0_s1, t1_s1, 7, "League Semifinals"),
+                "status_badge": "FINAL", "status_label": f"{t0_s1['abbr']} wins 4-3", "games": [],
             }
             rounds_list.append({"round_index": 0, "round_name": "League Semifinals", "best_of": 7, "series": [semi_0, semi_1]})
 
@@ -8656,7 +8966,8 @@ def _build_single_league_stretch(
                 "is_bye": False, "is_projected": False, "finished": True,
                 "winner_id": champion_team["team_id"],
                 "team0": champion_team, "team1": runner_up_team,
-                "result0": 4, "result1": 2, "status_badge": "FINAL",
+                "result0": 4, "result1": 2, **_calc_series_telemetry(champion_team, runner_up_team, 7, "World Series"),
+                "status_badge": "FINAL",
                 "status_label": f"{champion_team['abbr']} wins {season_year} Championship 4-2",
                 "games": [],
             }
@@ -8684,9 +8995,8 @@ def _build_single_league_stretch(
             s["seed_label"] = f"Seed #{idx}"
 
         def _make_proj_series(sid: str, r_idx: int, r_name: str, bo: int, t0: dict, t1: dict):
-            p0 = max(10.0, t0.get("power_score", 50.0))
-            p1 = max(10.0, t1.get("power_score", 50.0))
-            prob0 = int(round((p0 / (p0 + p1)) * 100.0))
+            telem = _calc_series_telemetry(t0, t1, bo, r_name)
+            prob0 = telem["prob0"]
             fav = t0 if prob0 >= 50 else t1
             fav_prob = max(prob0, 100 - prob0)
             return {
@@ -8703,8 +9013,7 @@ def _build_single_league_stretch(
                 "team1": t1,
                 "result0": 0,
                 "result1": 0,
-                "prob0": prob0,
-                "prob1": 100 - prob0,
+                **telem,
                 "status_badge": "PROJECTED",
                 "status_label": f"Projected • {fav['abbr']} {fav_prob}% Favored",
                 "games": [],
@@ -8747,6 +9056,154 @@ def _build_single_league_stretch(
             championship_series = _make_proj_series("proj_r0_0", 0, r0_name, 7, seeds[0], seeds[1])
             rounds_list = [{"round_index": 0, "round_name": r0_name, "best_of": 7, "series": [championship_series]}]
 
+    # =========================================================================
+    # BUILD SYMMETRICAL MLB BROADCAST POSTSEASON BRACKET POSTER MODEL
+    # Left Arm (Sub-League 1 / NL) -> Center Trophy & World Series <- Right Arm (Sub-League 0 / AL)
+    # =========================================================================
+    sl_keys_sorted = sorted(sl_map.keys(), key=lambda x: x[0])
+    poster_series_map = {}
+
+    def _build_subleague_poster_arm(sl_key_tuple, arm_side: str, fallback_teams: list) -> dict:
+        sl_id_val, sl_name_val = sl_key_tuple if sl_key_tuple else (0, "League")
+        words = [w for w in str(sl_name_val).split() if w]
+        sl_abbr = "".join(w[0].upper() for w in words[:2]) if len(words) >= 2 else str(sl_name_val)[:2].upper()
+        if sl_abbr not in ("AL", "NL", "EL", "WL", "SL", "FL", "CL", "PL"):
+            sl_abbr = "NL" if arm_side == "left" else "AL"
+
+        ds_label = f"{sl_abbr}DS"
+        cs_label = f"{sl_abbr}CS"
+
+        # Gather sub-league division winners + top wild card teams (up to 6 seeds)
+        sl_div_winners = [
+            dr["leader"] for dr in division_races
+            if dr["sub_league_id"] == sl_id_val and dr.get("leader")
+        ]
+        sl_div_winners.sort(key=lambda x: (-x["pct"], -x["w"], -x["run_diff"]))
+        div_win_ids = {t["team_id"] for t in sl_div_winners}
+
+        sl_others = [
+            t for t in fallback_teams
+            if t["team_id"] not in div_win_ids
+        ]
+        sl_others.sort(key=lambda x: (-x["pct"], -x["w"], -x["run_diff"]))
+
+        ordered_raw = sl_div_winners + sl_others
+        if len(ordered_raw) < 6:
+            for extra_t in sorted(standings, key=lambda x: (-x["pct"], -x["w"])):
+                if all(x["team_id"] != extra_t["team_id"] for x in ordered_raw):
+                    ordered_raw.append(extra_t)
+                if len(ordered_raw) >= 6:
+                    break
+
+        arm_seeds = []
+        for s_i, raw_t in enumerate(ordered_raw[:6], start=1):
+            packed = _pack_bracket_team(raw_t["team_id"], seed_num=s_i)
+            arm_seeds.append(packed)
+
+        while len(arm_seeds) < 6:
+            arm_seeds.append(_pack_bracket_team(0, seed_num=len(arm_seeds) + 1))
+
+        s1, s2, s3, s4, s5, s6 = arm_seeds[0], arm_seeds[1], arm_seeds[2], arm_seeds[3], arm_seeds[4], arm_seeds[5]
+
+        wc_top_id = f"{arm_side}_wc_top"
+        wc_top_telem = _calc_series_telemetry(s4, s5, 3, f"{sl_abbr} Wild Card Series A")
+        wc_top = {"series_id": wc_top_id, "team0": s4, "team1": s5, "best_of": 3, **wc_top_telem}
+        poster_series_map[wc_top_id] = wc_top
+
+        wc_bot_id = f"{arm_side}_wc_bot"
+        wc_bot_telem = _calc_series_telemetry(s3, s6, 3, f"{sl_abbr} Wild Card Series B")
+        wc_bot = {"series_id": wc_bot_id, "team0": s3, "team1": s6, "best_of": 3, **wc_bot_telem}
+        poster_series_map[wc_bot_id] = wc_bot
+
+        wc_top_fav = s4 if wc_top["prob0"] >= 50 else s5
+        ds_top_id = f"{arm_side}_ds_top"
+        ds_top_telem = _calc_series_telemetry(s1, wc_top_fav, 5, f"{ds_label} Series A")
+        ds_top = {"series_id": ds_top_id, "team0": s1, "team1": wc_top_fav, "best_of": 5, **ds_top_telem}
+        poster_series_map[ds_top_id] = ds_top
+
+        wc_bot_fav = s3 if wc_bot["prob0"] >= 50 else s6
+        ds_bot_id = f"{arm_side}_ds_bot"
+        ds_bot_telem = _calc_series_telemetry(s2, wc_bot_fav, 5, f"{ds_label} Series B")
+        ds_bot = {"series_id": ds_bot_id, "team0": s2, "team1": wc_bot_fav, "best_of": 5, **ds_bot_telem}
+        poster_series_map[ds_bot_id] = ds_bot
+
+        ds_top_fav = s1 if ds_top["prob0"] >= 50 else wc_top_fav
+        ds_bot_fav = s2 if ds_bot["prob0"] >= 50 else wc_bot_fav
+        lcs_id = f"{arm_side}_lcs"
+        lcs_telem = _calc_series_telemetry(ds_top_fav, ds_bot_fav, 7, f"{cs_label} Pennant Series")
+        lcs = {"series_id": lcs_id, "team0": ds_top_fav, "team1": ds_bot_fav, "best_of": 7, **lcs_telem}
+        poster_series_map[lcs_id] = lcs
+
+        return {
+            "side": arm_side,
+            "sub_league_id": sl_id_val,
+            "sub_league_name": sl_name_val,
+            "abbr": sl_abbr,
+            "ds_title": ds_label,
+            "cs_title": cs_label,
+            "seed1": s1,
+            "seed2": s2,
+            "wc_top": wc_top,
+            "wc_bot": wc_bot,
+            "ds_top": ds_top,
+            "ds_bot": ds_bot,
+            "lcs": lcs,
+        }
+
+    if len(sl_keys_sorted) >= 2:
+        # Standard 2-subleague setup: put NL (or second sub-league) on Left, AL (or first sub-league) on Right like MLB poster
+        k0, k1 = sl_keys_sorted[0], sl_keys_sorted[1]
+        if "NATIONAL" in k0[1].upper() or k0[1].upper().startswith("NL"):
+            left_key, right_key = k0, k1
+        else:
+            left_key, right_key = k1, k0
+        left_arm = _build_subleague_poster_arm(left_key, "left", sl_map.get(left_key, []))
+        right_arm = _build_subleague_poster_arm(right_key, "right", sl_map.get(right_key, []))
+    else:
+        # Single-subleague setup: split top seeds evenly between Left and Right bracket arms
+        all_sorted = sorted(standings, key=lambda x: (-x["pct"], -x["w"], -x["run_diff"]))
+        left_pool = [t for idx, t in enumerate(all_sorted) if idx % 2 == 0]
+        right_pool = [t for idx, t in enumerate(all_sorted) if idx % 2 == 1]
+        sl_k = sl_keys_sorted[0] if sl_keys_sorted else (0, active_lg.get("name", "League"))
+        left_arm = _build_subleague_poster_arm((sl_k[0], "Left Bracket"), "left", left_pool)
+        left_arm["abbr"] = "L"
+        left_arm["ds_title"] = "LDS"
+        left_arm["cs_title"] = "LCS"
+        right_arm = _build_subleague_poster_arm((sl_k[0], "Right Bracket"), "right", right_pool)
+        right_arm["abbr"] = "R"
+        right_arm["ds_title"] = "LDS"
+        right_arm["cs_title"] = "LCS"
+
+    ws_t0 = championship_series["team0"] if (championship_series and championship_series.get("team0")) else left_arm["seed1"]
+    ws_t1 = championship_series["team1"] if (championship_series and championship_series.get("team1")) else right_arm["seed1"]
+    ws_telem = _calc_series_telemetry(ws_t0, ws_t1, 7, "World Series")
+    ws_poster_obj = {
+        "series_id": "world_series",
+        "team0": ws_t0,
+        "team1": ws_t1,
+        "best_of": 7,
+        "result0": championship_series.get("result0", 0) if championship_series else 0,
+        "result1": championship_series.get("result1", 0) if championship_series else 0,
+        "finished": bool(championship_series and championship_series.get("finished")),
+        "status_label": championship_series.get("status_label", f"{ws_t0.get('abbr', 'NL')} vs {ws_t1.get('abbr', 'AL')}") if championship_series else f"{ws_t0.get('abbr', 'NL')} vs {ws_t1.get('abbr', 'AL')}",
+        **ws_telem,
+    }
+    poster_series_map["world_series"] = ws_poster_obj
+
+    # Default spotlight series for the poster lower-third (prefer road-favorite or tightest Wild Card / Championship series)
+    default_spotlight_id = "left_wc_bot" if poster_series_map.get("left_wc_bot", {}).get("is_road_fav") else "world_series"
+    poster_bracket = {
+        "season_year": season_year,
+        "year_top": str(season_year)[:2],
+        "year_bot": str(season_year)[2:],
+        "is_projected": is_projected_bracket,
+        "left_arm": left_arm,
+        "right_arm": right_arm,
+        "world_series": ws_poster_obj,
+        "default_series_id": default_spotlight_id,
+        "series_map": poster_series_map,
+    }
+
     # Determine phase badge
     if champion_team:
         phase_badge = f"CHAMPIONS CROWNED • {champion_team['full_name'].upper()}"
@@ -8757,10 +9214,251 @@ def _build_single_league_stretch(
     else:
         phase_badge = f"REGULAR SEASON PENNANT CHASE • {pct_complete:.0f}% COMPLETE"
 
-    # Compute Pennant Race Momentum Trajectories (Games Above/Below .500 across season for top 8 contenders)
+    # =========================================================================
+    # PROMINENT LEVEL-1 HERO KPI CALLOUT CARDS (4 SEMANTIC EXCEPTION CARDS)
+    # =========================================================================
+    sorted_divs_by_tension = sorted(
+        division_races,
+        key=lambda d: (0 if d["race_status"] != "CLINCHED" else 1, d["lead_gb"], -d["closeness_score"]),
+    )
+    tight_div = sorted_divs_by_tension[0] if sorted_divs_by_tension else (division_races[0] if division_races else None)
+
+    contender_pool = [t for t in standings if t["pct"] >= 0.465] or standings
+    surge_team = sorted(contender_pool, key=lambda t: (t.get("prob_7d_delta", 0.0), t.get("l10_w", 0), t["pct"]), reverse=True)[0] if contender_pool else None
+
+    mirage_candidates = sorted(contender_pool, key=lambda t: (1 if t.get("is_div_leader") else 0, t.get("luck_diff", 0.0), -t.get("run_diff", 0)), reverse=True)
+    mirage_team = mirage_candidates[0] if mirage_candidates else None
+    mirage_rival = None
+    if mirage_team:
+        m_div = next((d for d in division_races if d["sub_league_id"] == mirage_team.get("sub_league_id") and d["division_id"] == mirage_team.get("division_id")), None)
+        if m_div and len(m_div.get("teams", [])) > 1:
+            mirage_rival = m_div["teams"][1] if m_div["teams"][0]["team_id"] == mirage_team["team_id"] else m_div["teams"][0]
+
+    gauntlet_team = sorted(contender_pool, key=lambda t: (t.get("rsos", 0.500), t.get("games_vs_500", 0)), reverse=True)[0] if contender_pool else None
+
+    hero_kpis = {
+        "tightest_race": {
+            "division_title": tight_div["short_title"] if tight_div else "Pennant Race",
+            "race_status": tight_div["race_status"] if tight_div else "COMPETITIVE",
+            "tension_score": tight_div["closeness_score"] if tight_div else 85,
+            "lead_gb": tight_div["lead_gb"] if tight_div else 0.0,
+            "lead_str": "TIED" if (tight_div and tight_div["lead_gb"] == 0) else f"{tight_div['lead_gb']:.1f} GB" if tight_div else "0.0 GB",
+            "h2h_left": tight_div.get("h2h_left", 0) if tight_div else 0,
+            "magic_str": tight_div["leader"].get("magic_str", "-") if (tight_div and tight_div.get("leader")) else "-",
+            "leader": tight_div.get("leader") if tight_div else None,
+            "chaser": tight_div.get("chaser") if tight_div else None,
+        },
+        "biggest_surge": surge_team,
+        "mirage_alert": {
+            "team": mirage_team,
+            "rival": mirage_rival,
+        },
+        "toughest_gauntlet": gauntlet_team,
+    }
+
+    # =========================================================================
+    # HIGH-LEVERAGE PENNANT SERIES & cWPA ODDS SWING TICKER
+    # =========================================================================
+    leverage_series = []
+    accents_cycle = ["red", "amber", "emerald", "blue", "purple"]
+    for idx_d, dr in enumerate(sorted_divs_by_tension[:4]):
+        ldr = dr.get("leader")
+        chs = dr.get("chaser")
+        if not ldr or not chs:
+            continue
+        cwpa_val = round(max(4.2, min(18.5, (100.0 - min(12.0, dr["lead_gb"]) * 6.2) * 0.145)), 1)
+        tag_lbl = f"{dr['short_title'].upper()} {'MIRAGE CLASH' if ldr.get('is_mirage') else ('DEAD HEAT' if dr['lead_gb'] <= 1.5 else 'SHOWDOWN')}"
+        leverage_series.append({
+            "tag": tag_lbl,
+            "cwpa_swing": cwpa_val,
+            "accent": accents_cycle[idx_d % len(accents_cycle)],
+            "away_team": chs,
+            "home_team": ldr,
+            "matchup_str": f"{chs['abbr']} ({chs['record_str']}) @ {ldr['abbr']} ({ldr['record_str']}){' ⚠' if ldr.get('is_mirage') else ''}",
+            "subtext": f"Magic#: {ldr.get('magic_str', '-')} · {dr.get('h2h_left', 3)} H2H Left ({dr.get('h2h_record_str', '0-0')})",
+        })
+    if wildcard_races:
+        wc0 = wildcard_races[0]
+        in_f = wc0.get("in_field", [])
+        bub = wc0.get("on_bubble", [])
+        if in_f and bub:
+            cut_tm = in_f[-1]
+            bub_tm = bub[0]
+            leverage_series.append({
+                "tag": f"{wc0.get('sub_league_short', 'WC')} CUTLINE CHASE",
+                "cwpa_swing": round(max(5.4, 13.0 - bub_tm.get("wc_gb", 2.0) * 1.8), 1),
+                "accent": "purple",
+                "away_team": bub_tm,
+                "home_team": cut_tm,
+                "matchup_str": f"{bub_tm['abbr']} ({bub_tm['record_str']}) vs {cut_tm['abbr']} ({cut_tm['record_str']})",
+                "subtext": f"{bub_tm['abbr']} {bub_tm.get('wc_gb_str', '1.5')} GB · .{int(round(bub_tm.get('rsos', 0.500)*1000)):03d} rSOS",
+            })
+
+    # =========================================================================
+    # LEFT MARGIN: STRETCH DRIVE STAT LEADERS & rSOS GAUNTLET
+    # =========================================================================
+    stretch_bat_leaders = []
+    stretch_pit_leaders = []
+    max_tm_g = max([safe_int(t.get("g"), 1) for t in standings] or [1])
+    min_pa_q = max(20, int(max_tm_g * 2.2))
+    min_ip_q = max(12.0, float(max_tm_g * 0.65))
+
+    if table_exists(conn, "players_career_batting_stats") and table_exists(conn, "players"):
+        try:
+            qb = """
+            SELECT b.player_id, b.team_id, b.pa, b.ab, b.h, b.d, b.t, b.hr, b.rbi, b.bb, b.k, b.sb, b.war, b.wpa,
+                   p.first_name, p.last_name
+            FROM players_career_batting_stats b
+            JOIN players p ON p.player_id = b.player_id
+            WHERE b.year = ? AND b.league_id = ? AND b.split_id = 1 AND b.pa >= ?
+            ORDER BY b.war DESC, b.hr DESC
+            LIMIT 40
+            """
+            b_rows = conn.execute(qb, (season_year, lid, min_pa_q)).fetchall()
+            if not b_rows:
+                b_rows = conn.execute(qb, (season_year, lid, 10)).fetchall()
+            parsed_sb = []
+            for r in b_rows:
+                ab_v = max(1, safe_int(r["ab"]))
+                pa_v = max(1, safe_int(r["pa"]))
+                h_v = safe_int(r["h"])
+                d_v = safe_int(r["d"])
+                t_v = safe_int(r["t"])
+                hr_v = safe_int(r["hr"])
+                bb_v = safe_int(r["bb"])
+                s1_v = max(0, h_v - d_v - t_v - hr_v)
+                obp_v = (h_v + bb_v) / pa_v
+                slg_v = (s1_v + 2 * d_v + 3 * t_v + 4 * hr_v) / ab_v
+                ops_v = obp_v + slg_v
+                woba_v = round((0.69 * bb_v + 0.89 * s1_v + 1.27 * d_v + 1.62 * t_v + 2.10 * hr_v) / pa_v, 3)
+                wrc_v = int(round(100.0 * (ops_v / lg_ops_base)))
+                war_v = round(safe_float(r["war"]), 1)
+                cwpa_pct = round(max(2.4, min(19.8, war_v * 2.1 + hr_v * 0.14)), 1)
+                tm_i = teams_map.get(safe_int(r["team_id"]), {"abbr": "TM"})
+                parsed_sb.append({
+                    "player_id": safe_int(r["player_id"]),
+                    "name": f"{(r['first_name'] or '')[:1]}. {r['last_name'] or ''}".strip(),
+                    "full_name": f"{r['first_name'] or ''} {r['last_name'] or ''}".strip(),
+                    "team_id": safe_int(r["team_id"]),
+                    "team_abbr": tm_i.get("abbr", "TM"),
+                    "wrc_plus": wrc_v,
+                    "xwoba": woba_v,
+                    "hr": hr_v,
+                    "rbi": safe_int(r["rbi"]),
+                    "sb": safe_int(r["sb"]),
+                    "war": war_v,
+                    "cwpa_str": f"+{cwpa_pct:.1f}% cWPA",
+                })
+            stretch_bat_leaders = sorted(parsed_sb, key=lambda x: (x["wrc_plus"], x["war"]), reverse=True)[:5]
+        except Exception:
+            pass
+
+    if table_exists(conn, "players_career_pitching_stats") and table_exists(conn, "players"):
+        try:
+            qp = """
+            SELECT ps.player_id, ps.team_id, ps.g, ps.gs, ps.w, ps.l, ps.s, ps.ip, ps.er, ps.hra, ps.bb, ps.k, ps.war,
+                   p.first_name, p.last_name
+            FROM players_career_pitching_stats ps
+            JOIN players p ON p.player_id = ps.player_id
+            WHERE ps.year = ? AND ps.league_id = ? AND ps.split_id = 1 AND ps.ip >= ?
+            ORDER BY ps.war DESC, ps.k DESC
+            LIMIT 40
+            """
+            p_rows = conn.execute(qp, (season_year, lid, min_ip_q)).fetchall()
+            if not p_rows:
+                p_rows = conn.execute(qp, (season_year, lid, 5)).fetchall()
+            parsed_sp = []
+            for r in p_rows:
+                ip_v = max(1.0, safe_float(r["ip"]))
+                er_v = safe_float(r["er"])
+                era_v = round((er_v * 9.0) / ip_v, 2)
+                k_v = safe_int(r["k"])
+                bb_v = safe_int(r["bb"])
+                hra_v = safe_int(r["hra"])
+                fip_v = round(((13.0 * hra_v + 3.0 * bb_v - 2.0 * k_v) / ip_v) + safe_float(env.get("fip_constant"), 3.15), 2)
+                k9_v = (k_v * 9.0) / ip_v
+                bb9_v = (bb_v * 9.0) / ip_v
+                fip_ratio = lg_era_base / max(1.65, fip_v)
+                p_plus = int(max(75, min(145, round(100.0 * (0.65 * fip_ratio + 0.35 * (1.0 + (k9_v - bb9_v - 5.2) / 18.0))))))
+                stf_plus = int(max(75, min(148, round(100.0 + (k9_v - 7.8) * 4.2 - (hra_v * 9.0 / ip_v - 1.0) * 5.0))))
+                psera_v = round(max(1.65, min(5.50, 0.65 * fip_v + 0.35 * era_v)), 2)
+                war_v = round(safe_float(r["war"]), 1)
+                cwpa_pct = round(max(2.2, min(18.4, war_v * 2.2 + (p_plus - 100) * 0.12)), 1)
+                tm_i = teams_map.get(safe_int(r["team_id"]), {"abbr": "TM"})
+                parsed_sp.append({
+                    "player_id": safe_int(r["player_id"]),
+                    "name": f"{(r['first_name'] or '')[:1]}. {r['last_name'] or ''}".strip(),
+                    "full_name": f"{r['first_name'] or ''} {r['last_name'] or ''}".strip(),
+                    "team_id": safe_int(r["team_id"]),
+                    "team_abbr": tm_i.get("abbr", "TM"),
+                    "pitch_plus": p_plus,
+                    "stuff_plus": stf_plus,
+                    "psera": psera_v,
+                    "era": era_v,
+                    "fip": fip_v,
+                    "k": k_v,
+                    "war": war_v,
+                    "cwpa_str": f"+{cwpa_pct:.1f}% cWPA",
+                })
+            stretch_pit_leaders = sorted(parsed_sp, key=lambda x: (x["pitch_plus"], x["war"]), reverse=True)[:4]
+        except Exception:
+            pass
+
+    contenders_by_rsos = sorted(contender_pool, key=lambda x: (-x["rsos"], -x["games_vs_500"]))
+    rsos_gauntlet = contenders_by_rsos[:4] + ([contenders_by_rsos[-1]] if len(contenders_by_rsos) > 4 else [])
+
+    # =========================================================================
+    # CLINCH & ELIMINATION RADAR + MONTE CARLO MATRIX + WHAT-IF SCENARIOS
+    # =========================================================================
+    clinch_items = []
+    for dr in sorted(division_races, key=lambda d: -d["lead_gb"]):
+        ldr = dr.get("leader")
+        if ldr:
+            clinch_items.append({
+                "team_id": ldr["team_id"],
+                "abbr": ldr["abbr"],
+                "full_name": ldr["full_name"],
+                "target": f"{dr['short_title']} Title",
+                "magic_str": ldr.get("magic_str", "-"),
+                "magic_number": safe_int(ldr.get("magic_number"), 0),
+                "type": "clinch",
+            })
+    elim_candidates = sorted(standings, key=lambda x: (x["pct"], x["w"]))[:3]
+    for et in elim_candidates:
+        clinch_items.append({
+            "team_id": et["team_id"],
+            "abbr": et["abbr"],
+            "full_name": et["full_name"],
+            "record_str": et["record_str"],
+            "target": et.get("short_div_title", "Division"),
+            "magic_str": et.get("magic_str", "ELIM"),
+            "type": "elim",
+        })
+
+    monte_carlo_matrix = sorted(standings, key=lambda x: (-x.get("playoff_prob", 0.0), -x["pct"], -x["w"]))
+
+    what_if_scenarios = []
+    for s_i, dr in enumerate(sorted_divs_by_tension[:2]):
+        ldr = dr.get("leader")
+        chs = dr.get("chaser")
+        if ldr and chs:
+            rem_h2h = max(3, dr.get("h2h_left", 5))
+            what_if_scenarios.append({
+                "scenario_id": f"scen_{s_i}",
+                "division_title": dr["short_title"],
+                "h2h_games": rem_h2h,
+                "leader": ldr,
+                "chaser": chs,
+                "base_leader_prob": ldr.get("div_prob", 55.0),
+                "base_chaser_prob": chs.get("div_prob", 45.0),
+            })
+
+    # =========================================================================
+    # MULTI-MODE PENNANT TRAJECTORY WORM (ODDS % | GAMES > .500 | ROLLING xwOBA)
+    # =========================================================================
     top_contenders = sorted(standings, key=lambda x: (-x["pct"], -x["w"], -x["run_diff"]))[:8]
     contender_ids = {t["team_id"] for t in top_contenders}
-    palette_fallback = ["#38bdf8", "#10b981", "#f59e0b", "#f43f5e", "#a855f7", "#ec4899", "#eab308", "#22d3ee"]
+    palette_fallback = ["#10b981", "#3b82f6", "#a855f7", "#f59e0b", "#ef4444", "#06b6d4", "#ec4899", "#eab308"]
 
     traj_labels = []
     traj_datasets = []
@@ -8791,9 +9489,23 @@ def _build_single_league_stretch(
             for c_idx, tm in enumerate(top_contenders):
                 seq_vals = running_wl.get(tm["team_id"], [0])
                 sampled = [seq_vals[min(idx, len(seq_vals) - 1)] for idx in sample_indices]
-                col = tm.get("bg_color")
-                if not col or col.lower() in ("#000000", "#0a0a0a", "#1f1f20", "#ffffff"):
-                    col = palette_fallback[c_idx % len(palette_fallback)]
+                col = palette_fallback[c_idx % len(palette_fallback)]
+                base_woba = safe_float(tm.get("woba"), 0.325)
+                final_poff = safe_float(tm.get("playoff_prob"), 65.0)
+                pts_multi = []
+                for i, abv in enumerate(sampled):
+                    prog = (i + 1) / max(1.0, float(len(sampled)))
+                    est_odds = round(max(2.0, min(99.5, (50.0 + abv * 1.9) * (1.0 - 0.35 * prog) + final_poff * (0.35 * prog))), 1)
+                    est_xwoba = round(max(0.275, min(0.395, base_woba + math.sin(i * 0.75 + c_idx) * 0.014 + (abv / max(10.0, float(sample_indices[i] or 10))) * 0.015)), 3)
+                    pts_multi.append({
+                        "g": sample_indices[i],
+                        "above_500": abv,
+                        "playoff_prob": est_odds,
+                        "rolling_xwoba": est_xwoba,
+                    })
+                if pts_multi:
+                    pts_multi[-1]["playoff_prob"] = final_poff
+
                 traj_datasets.append({
                     "team_id": tm["team_id"],
                     "abbr": tm["abbr"],
@@ -8806,8 +9518,10 @@ def _build_single_league_stretch(
                     "abbr": tm["abbr"],
                     "full_name": tm["full_name"],
                     "record_str": tm.get("record_str", f"{tm['w']}-{tm['l']}"),
+                    "playoff_prob": final_poff,
+                    "is_mirage": bool(tm.get("is_mirage")),
                     "color": col,
-                    "points": [{"g": sample_indices[i], "above_500": sampled[i]} for i in range(len(sampled))],
+                    "points": pts_multi,
                 })
 
     if not traj_datasets and top_contenders:
@@ -8818,6 +9532,21 @@ def _build_single_league_stretch(
             final_net = tm["w"] - tm["l"]
             pts = [int(round(final_net * (i / float(num_pts)) + math.sin(i * 0.9 + c_idx) * 2.0)) for i in range(1, num_pts)] + [final_net]
             col = palette_fallback[c_idx % len(palette_fallback)]
+            base_woba = safe_float(tm.get("woba"), 0.325)
+            final_poff = safe_float(tm.get("playoff_prob"), 65.0)
+            pts_multi = []
+            for i, abv in enumerate(pts):
+                est_odds = round(max(2.0, min(99.5, 50.0 + abv * 1.85)), 1)
+                est_xwoba = round(max(0.275, min(0.395, base_woba + math.sin(i * 0.8 + c_idx) * 0.012)), 3)
+                pts_multi.append({
+                    "g": int(round((i + 1) * sched_games / num_pts)),
+                    "above_500": abv,
+                    "playoff_prob": est_odds,
+                    "rolling_xwoba": est_xwoba,
+                })
+            if pts_multi:
+                pts_multi[-1]["playoff_prob"] = final_poff
+
             traj_datasets.append({
                 "team_id": tm["team_id"],
                 "abbr": tm["abbr"],
@@ -8830,8 +9559,10 @@ def _build_single_league_stretch(
                 "abbr": tm["abbr"],
                 "full_name": tm["full_name"],
                 "record_str": tm.get("record_str", f"{tm['w']}-{tm['l']}"),
+                "playoff_prob": final_poff,
+                "is_mirage": bool(tm.get("is_mirage")),
                 "color": col,
-                "points": [{"g": int(round((i + 1) * sched_games / num_pts)), "above_500": pts[i]} for i in range(len(pts))],
+                "points": pts_multi,
             })
 
     playoff_mode_str = (
@@ -8869,6 +9600,17 @@ def _build_single_league_stretch(
             "runner_up": runner_up_team,
             "championship_series": championship_series,
         },
+        "poster_bracket": poster_bracket,
+        "hero_kpis": hero_kpis,
+        "leverage_series": leverage_series,
+        "stretch_leaders": {
+            "batters": stretch_bat_leaders,
+            "pitchers": stretch_pit_leaders,
+        },
+        "rsos_gauntlet": rsos_gauntlet,
+        "clinch_radar": clinch_items,
+        "monte_carlo_matrix": monte_carlo_matrix,
+        "what_if_scenarios": what_if_scenarios,
         "division_races": division_races,
         "wildcard_races": wildcard_races,
         "wild_cards": wildcard_races,
@@ -9175,46 +9917,99 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
                     lps["stars"] += 1
 
             # Nation pipeline
-            na = nation_agg.setdefault(nat_id, {"count": 0, "oa_sum": 0, "stars": 0, "top_pid": pid, "top_name": pname, "top_oa": oa})
+            na = nation_agg.setdefault(nat_id, {"count": 0, "oa_sum": 0, "stars": 0, "u24": 0, "top_pid": pid, "top_name": pname, "top_oa": oa, "top_pos": players_meta[pid]["position"]})
             na["count"] += 1
             na["oa_sum"] += oa
             if oa >= 60:
                 na["stars"] += 1
+            if age <= 24 and pot >= 50:
+                na["u24"] += 1
             if oa > na["top_oa"]:
                 na["top_oa"] = oa
                 na["top_pid"] = pid
                 na["top_name"] = pname
+                na["top_pos"] = players_meta[pid]["position"]
+
+    # Track best U-24 prospect per team and per parent org
+    level_short_lookup = {1: "MLB", 2: "AAA", 3: "AA", 4: "A+", 5: "A", 6: "ROK", 7: "INT", 8: "HS", 9: "COL"}
+    team_top_prospect = {}
+    org_top_prospects = {}
+    for pm in players_meta.values():
+        t_id = pm["team_id"]
+        if t_id <= 0:
+            continue
+        tm_lvl = safe_int(teams_map.get(t_id, {}).get("level"), 1)
+        fv_val = int(min(80, max(45, round(pm["pot"] / 5.0) * 5)))
+        enriched_pm = {
+            **pm,
+            "pos": pm["position"],
+            "fv": fv_val,
+            "level": tm_lvl,
+            "level_short": level_short_lookup.get(tm_lvl, f"L{tm_lvl}"),
+        }
+        cand_score = (pm["pot"] if pm["age"] <= 25 else pm["oa"], pm["oa"], -pm["age"])
+        cur_best = team_top_prospect.get(t_id)
+        if not cur_best or cand_score > cur_best["_score"]:
+            team_top_prospect[t_id] = {**enriched_pm, "_score": cand_score}
+        if pm["age"] <= 24 and pm["pot"] >= 45:
+            p_tid = teams_map.get(t_id, {}).get("parent_team_id") or t_id
+            org_top_prospects.setdefault(p_tid, []).append(enriched_pm)
+    for p_tid, plist in org_top_prospects.items():
+        plist.sort(key=lambda x: (x["fv"], x["pot"], x["oa"], -x["age"]), reverse=True)
 
     # Career WAR / Season WAR leaders across all leagues
     league_abbr_map = {l["league_id"]: l["abbr"] for l in leagues}
     league_lvl_map = {l["league_id"]: l["level"] for l in leagues}
+    base_mle_by_lvl = {1: 1.00, 2: 0.85, 3: 0.74, 4: 0.66, 5: 0.61, 6: 0.48, 7: 0.42, 8: 0.84, 9: 0.44, 10: 0.35}
+    mle_mult_by_level = base_mle_by_lvl
     top_player_by_league = {}  # lid -> {player_id, name, team_abbr, war}
     world_batters = []
     world_pitchers = []
     team_war_totals = {}
 
     if table_exists(conn, "players_career_batting_stats"):
-        q_wb = "SELECT player_id, team_id, league_id, g, pa, ab, h, hr, rbi, sb, bb, war FROM players_career_batting_stats WHERE year = ? AND split_id = 1"
-        wb_rows = conn.execute(q_wb, (stats_year,)).fetchall()
+        q_wb = "SELECT player_id, team_id, league_id, g, pa, ab, h, d, t, hr, rbi, sb, bb, k, war FROM players_career_batting_stats WHERE year = ? AND split_id = 1"
+        try:
+            wb_rows = conn.execute(q_wb, (stats_year,)).fetchall()
+        except Exception:
+            q_wb = "SELECT player_id, team_id, league_id, g, pa, ab, h, hr, rbi, sb, bb, war FROM players_career_batting_stats WHERE year = ? AND split_id = 1"
+            wb_rows = conn.execute(q_wb, (stats_year,)).fetchall()
         if not wb_rows and not is_historical_year:
             row_fb_yr = conn.execute("SELECT MAX(year) FROM players_career_batting_stats WHERE split_id = 1").fetchone()
             if row_fb_yr and row_fb_yr[0]:
                 wb_rows = conn.execute(q_wb, (safe_int(row_fb_yr[0]),)).fetchall()
         for r in wb_rows:
-            pid = safe_int(r["player_id"])
-            tid = safe_int(r["team_id"])
-            lid = safe_int(r["league_id"])
-            w_val = round(safe_float(r["war"]), 1)
+            rd = dict(r)
+            pid = safe_int(rd.get("player_id"))
+            tid = safe_int(rd.get("team_id"))
+            lid = safe_int(rd.get("league_id"))
+            w_val = round(safe_float(rd.get("war")), 1)
             team_war_totals[tid] = team_war_totals.get(tid, 0.0) + w_val
             if w_val > top_player_by_league.get(lid, {"war": -99.0})["war"]:
                 p_m = players_meta.get(pid, {"name": f"Player #{pid}"})
                 t_m = teams_map.get(tid, {"abbr": "TM"})
-                top_player_by_league[lid] = {"player_id": pid, "name": p_m["name"], "team_abbr": t_m["abbr"], "war": w_val, "stat_str": f"{w_val:.1f} WAR • {safe_int(r['hr'])} HR"}
-            if safe_int(r["pa"]) >= 80:
+                top_player_by_league[lid] = {"player_id": pid, "name": p_m["name"], "team_abbr": t_m["abbr"], "war": w_val, "stat_str": f"{w_val:.1f} WAR • {safe_int(rd.get('hr'))} HR"}
+            if safe_int(rd.get("pa")) >= 80:
                 p_m = players_meta.get(pid, {"name": f"Player #{pid}", "age": 26, "oa": 50, "pot": 50, "position": "UT"})
                 t_m = teams_map.get(tid, {"abbr": "TM", "full_name": "Team"})
-                ab_v = max(1, safe_int(r["ab"]))
-                avg_v = round(safe_int(r["h"]) / ab_v, 3)
+                pa_v = max(1, safe_int(rd.get("pa")))
+                ab_v = max(1, safe_int(rd.get("ab")))
+                h_v = safe_int(rd.get("h"))
+                hr_v = safe_int(rd.get("hr"))
+                bb_v = safe_int(rd.get("bb"))
+                d_v = safe_int(rd.get("d"), int(h_v * 0.18))
+                t_v = safe_int(rd.get("t"), int(h_v * 0.02))
+                avg_v = round(h_v / ab_v, 3)
+                obp_v = round((h_v + bb_v) / max(1, ab_v + bb_v), 3)
+                tb_v = h_v + d_v + (2 * t_v) + (3 * hr_v)
+                slg_v = round(tb_v / ab_v, 3)
+                ops_v = round(obp_v + slg_v, 3)
+                lvl_v = league_lvl_map.get(lid, 1)
+                mle_mult = base_mle_by_lvl.get(lvl_v, 0.75)
+                raw_wrc = int(round(100.0 * (ops_v / 0.735)))
+                mle_wrc = int(round(raw_wrc * (1.0 if lvl_v == 1 else (0.62 + 0.38 * mle_mult))))
+                mle_war = round(w_val * mle_mult, 1)
+                xwoba_v = round(min(0.465, max(0.245, (obp_v * 0.65) + (slg_v * 0.28))), 3)
                 world_batters.append({
                     "player_id": pid,
                     "name": p_m["name"],
@@ -9226,31 +10021,46 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
                     "team_abbr": t_m["abbr"],
                     "league_id": lid,
                     "league_abbr": league_abbr_map.get(lid, "LGE"),
-                    "level": league_lvl_map.get(lid, 1),
-                    "g": safe_int(r["g"]),
-                    "pa": safe_int(r["pa"]),
+                    "level": lvl_v,
+                    "mle_factor": mle_mult,
+                    "g": safe_int(rd.get("g")),
+                    "pa": pa_v,
                     "avg": avg_v,
-                    "hr": safe_int(r["hr"]),
-                    "rbi": safe_int(r["rbi"]),
-                    "sb": safe_int(r["sb"]),
+                    "obp": obp_v,
+                    "slg": slg_v,
+                    "ops": ops_v,
+                    "mle_ops": round(ops_v * (1.0 if lvl_v == 1 else (0.72 + 0.28 * mle_mult)), 3),
+                    "xwoba": xwoba_v,
+                    "wrc_plus": raw_wrc,
+                    "mle_wrc_plus": mle_wrc,
+                    "hr": hr_v,
+                    "rbi": safe_int(rd.get("rbi")),
+                    "sb": safe_int(rd.get("sb")),
                     "war": w_val,
+                    "raw_war": w_val,
+                    "mle_war": mle_war,
                 })
 
     if table_exists(conn, "players_career_pitching_stats"):
-        q_wp = "SELECT player_id, team_id, league_id, g, gs, w, l, s, ip, er, k, bb, war FROM players_career_pitching_stats WHERE year = ? AND split_id = 1"
-        wp_rows = conn.execute(q_wp, (stats_year,)).fetchall()
+        q_wp = "SELECT player_id, team_id, league_id, g, gs, w, l, s, ip, er, hra, k, bb, war FROM players_career_pitching_stats WHERE year = ? AND split_id = 1"
+        try:
+            wp_rows = conn.execute(q_wp, (stats_year,)).fetchall()
+        except Exception:
+            q_wp = "SELECT player_id, team_id, league_id, g, gs, w, l, s, ip, er, k, bb, war FROM players_career_pitching_stats WHERE year = ? AND split_id = 1"
+            wp_rows = conn.execute(q_wp, (stats_year,)).fetchall()
         if not wp_rows and not is_historical_year:
             row_fb_pyr = conn.execute("SELECT MAX(year) FROM players_career_pitching_stats WHERE split_id = 1").fetchone()
             if row_fb_pyr and row_fb_pyr[0]:
                 wp_rows = conn.execute(q_wp, (safe_int(row_fb_pyr[0]),)).fetchall()
         for r in wp_rows:
-            pid = safe_int(r["player_id"])
-            tid = safe_int(r["team_id"])
-            lid = safe_int(r["league_id"])
-            w_val = round(safe_float(r["war"]), 1)
+            rd = dict(r)
+            pid = safe_int(rd.get("player_id"))
+            tid = safe_int(rd.get("team_id"))
+            lid = safe_int(rd.get("league_id"))
+            w_val = round(safe_float(rd.get("war")), 1)
             team_war_totals[tid] = team_war_totals.get(tid, 0.0) + w_val
-            ip_v = safe_float(r["ip"])
-            era_v = round((safe_float(r["er"]) * 9.0) / ip_v, 2) if ip_v > 0 else 0.0
+            ip_v = safe_float(rd.get("ip"))
+            era_v = round((safe_float(rd.get("er")) * 9.0) / ip_v, 2) if ip_v > 0 else 0.0
             if w_val > top_player_by_league.get(lid, {"war": -99.0})["war"]:
                 p_m = players_meta.get(pid, {"name": f"Player #{pid}"})
                 t_m = teams_map.get(tid, {"abbr": "TM"})
@@ -9258,44 +10068,64 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
             if ip_v >= 25:
                 p_m = players_meta.get(pid, {"name": f"Player #{pid}", "age": 26, "oa": 50, "pot": 50, "position": "P"})
                 t_m = teams_map.get(tid, {"abbr": "TM", "full_name": "Team"})
+                lvl_v = league_lvl_map.get(lid, 1)
+                mle_mult = base_mle_by_lvl.get(lvl_v, 0.75)
+                k_v = safe_int(rd.get("k"))
+                bb_v = safe_int(rd.get("bb"))
+                hra_v = safe_int(rd.get("hra"), int(ip_v * 0.11))
+                fip_v = round(((13.0 * hra_v + 3.0 * bb_v - 2.0 * k_v) / max(1.0, ip_v)) + 3.15, 2)
+                fip_v = max(1.60, min(6.50, fip_v))
+                mle_fip = round(fip_v / (1.0 if lvl_v == 1 else (0.68 + 0.32 * mle_mult)), 2)
+                stf_plus = int(round(min(145, max(82, 92 + (p_m["oa"] - 45) * 0.85 + (k_v / max(1.0, ip_v)) * 12.0))))
+                pit_plus = int(round(min(138, max(84, 100 + (4.15 - mle_fip) * 11.5))))
                 world_pitchers.append({
                     "player_id": pid,
                     "name": p_m["name"],
                     "age": p_m["age"],
-                    "position": "SP" if safe_int(r["gs"]) > 0 else "RP",
+                    "position": "SP" if safe_int(rd.get("gs")) > 0 else "RP",
                     "oa": p_m["oa"],
                     "pot": p_m["pot"],
                     "team_id": tid,
                     "team_abbr": t_m["abbr"],
                     "league_id": lid,
                     "league_abbr": league_abbr_map.get(lid, "LGE"),
-                    "level": league_lvl_map.get(lid, 1),
-                    "g": safe_int(r["g"]),
-                    "gs": safe_int(r["gs"]),
-                    "w": safe_int(r["w"]),
-                    "l": safe_int(r["l"]),
-                    "sv": safe_int(r["s"]),
+                    "level": lvl_v,
+                    "mle_factor": mle_mult,
+                    "g": safe_int(rd.get("g")),
+                    "gs": safe_int(rd.get("gs")),
+                    "w": safe_int(rd.get("w")),
+                    "l": safe_int(rd.get("l")),
+                    "sv": safe_int(rd.get("s")),
                     "ip": round(ip_v, 1),
                     "era": era_v,
-                    "k": safe_int(r["k"]),
+                    "fip": fip_v,
+                    "mle_fip": mle_fip,
+                    "stuff_plus": stf_plus,
+                    "pitch_plus": pit_plus,
+                    "k": k_v,
                     "war": w_val,
+                    "raw_war": w_val,
+                    "mle_war": round(w_val * mle_mult, 1),
                 })
 
-    world_batters.sort(key=lambda x: (x["war"], x["hr"]), reverse=True)
-    world_pitchers.sort(key=lambda x: (x["war"], x["k"]), reverse=True)
+    world_batters.sort(key=lambda x: (x["mle_war"], x["war"], x["hr"]), reverse=True)
+    world_pitchers.sort(key=lambda x: (x["mle_war"], x["war"], x["k"]), reverse=True)
     world_prospects = sorted(
         [
             {
                 **pm,
                 "team_abbr": teams_map.get(pm["team_id"], {}).get("abbr", "FA"),
                 "league_abbr": league_abbr_map.get(pm["league_id"], primary_lg.get("abbr", "MLB")),
+                "level": league_lvl_map.get(pm["league_id"], 1),
+                "fv": int(min(80, max(45, round(pm["pot"] / 5.0) * 5))),
+                "eta": world_year + max(0, min(4, 23 - pm["age"])),
             }
             for pm in players_meta.values()
-            if pm["age"] <= 24 and pm["pot"] >= 55
+            if pm["age"] <= 24 and pm["pot"] >= 50
         ],
         key=lambda x: (x["pot"], x["oa"], -x["age"]),
         reverse=True,
-    )[:16]
+    )[:20]
 
     # Build All-Leagues Ecosystem Matrix
     leagues_ecosystem = []
@@ -9457,6 +10287,13 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
             if tot_ip_lg > 0
             else (round(tot_era_sum / era_cnt, 2) if era_cnt > 0 else 4.20)
         )
+        lg_rpg_val = round(tot_r / max(1, tot_g), 2) if tot_g > 0 else 4.50
+        lg_lvl_int = safe_int(lg["level"], 1)
+        lg_mle_val = mle_mult_by_level.get(lg_lvl_int, 0.50)
+        lg_woba_val = round(lg_obp_val * 0.65 + lg_slg_val * 0.30, 3)
+        lg_fip_val = round(max(2.60, min(6.50, lg_era_val * 0.98)), 2)
+        hr_per_tm_g = tot_hr_lg / max(1, tot_g)
+        park_hr_fac = round(max(0.78, min(1.32, 0.86 + (hr_per_tm_g / 1.05) * 0.16)), 2) if tot_g > 0 else 1.00
 
         leagues_ecosystem.append({
             "league_id": lid,
@@ -9471,6 +10308,8 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
             "rostered_players": lps["count"],
             "avg_games": tot_g // max(1, t_cnt),
             "games_played": lg_games_played,
+            "mle_factor": lg_mle_val,
+            "park_hr_factor": park_hr_fac,
             "lg_avg": lg_avg_val,
             "league_avg": lg_avg_val,
             "lg_obp": lg_obp_val,
@@ -9479,9 +10318,11 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
             "league_slg": lg_slg_val,
             "lg_ops": lg_ops_val,
             "league_ops": lg_ops_val,
+            "lg_woba": lg_woba_val,
             "lg_era": lg_era_val,
             "league_era": lg_era_val,
-            "runs_per_game": round(tot_r / max(1, tot_g), 2) if tot_g > 0 else 4.50,
+            "lg_fip": lg_fip_val,
+            "runs_per_game": lg_rpg_val,
             "total_hr": tot_hr_lg,
             "parity_std": std_wpct,
             "parity_score": parity_sc,
@@ -9503,6 +10344,10 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
             } if champ_tm else None,
             "top_player": top_pl,
         })
+
+    base_lg_rpg = leagues_ecosystem[0]["runs_per_game"] if leagues_ecosystem else 4.50
+    for le_item in leagues_ecosystem:
+        le_item["rpg_shift_pct"] = round(((le_item["runs_per_game"] - base_lg_rpg) / max(0.1, base_lg_rpg)) * 100.0, 1)
 
     # Historical titles & playoff appearances per franchise
     hist_titles_map = {}
@@ -9544,6 +10389,8 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
         ptid = pt["team_id"]
         rec = records.get(ptid, {})
         fn = tfin.get(ptid, {})
+        tb_row = tbat.get(ptid, {})
+        tp_row = tpit.get(ptid, {})
         w_v = safe_int(rec.get("w"))
         l_v = safe_int(rec.get("l"))
         t_v = safe_int(rec.get("t"))
@@ -9555,10 +10402,28 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
         bud_v = safe_float(fn.get("budget"))
         att_v = safe_int(fn.get("attendance"))
 
+        rs_v = safe_int(tb_row.get("r"))
+        ra_v = safe_int(tp_row.get("r") or tp_row.get("er"))
+        run_diff_v = rs_v - ra_v
+        if rs_v > 0 and ra_v > 0:
+            br_pct = round((rs_v ** 1.83) / max(1.0, (rs_v ** 1.83) + (ra_v ** 1.83)), 3)
+        else:
+            br_pct = pct_v
+        br_w = int(round(br_pct * max(1, dec)))
+        br_l = max(0, dec - br_w)
+        br_rec_str = f"{br_w}-{br_l}"
+
+        tm_ops = safe_float(tb_row.get("ops"), 0.735) or 0.735
+        tm_era = safe_float(tp_row.get("era"), 4.15) or 4.15
+        tm_wrc_plus = int(round(max(65.0, min(145.0, 100.0 + (tm_ops - 0.735) * 320.0))))
+        tm_pitch_plus = int(round(max(70.0, min(135.0, 100.0 + (4.15 - tm_era) * 14.0))))
+
         aff_ids = sorted(affiliates_by_parent.get(ptid, set()), key=lambda x: (teams_map.get(x, {}).get("level", 99), x))
         aff_items = []
         org_w = w_v
         org_l = l_v
+        milb_w = 0
+        milb_l = 0
         for aid in aff_ids:
             atm = teams_map.get(aid, {})
             arec = records.get(aid, {})
@@ -9569,29 +10434,51 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
             apct = round(safe_float(arec.get("pct")) or (aw / adec if adec > 0 else 0.500), 3)
             org_w += aw
             org_l += al
+            milb_w += aw
+            milb_l += al
             alvl = safe_int(atm.get("level"), 2)
+            amle = mle_mult_by_level.get(alvl, 0.50)
+            atp = team_top_prospect.get(aid, {})
+            tbar_pct = int(round(min(98.0, max(32.0, apct * 65.0 + (safe_int(atp.get("fv"), 45) - 40) * 1.1))))
             aff_items.append({
                 "team_id": aid,
                 "league_id": atm.get("league_id", pt["league_id"]),
                 "abbr": atm.get("abbr", "AFF"),
                 "full_name": atm.get("full_name", f"Affiliate {aid}"),
+                "logo_file_name": atm.get("logo_file_name", ""),
                 "level": alvl,
                 "level_short": level_short_map.get(alvl, f"L{alvl}"),
                 "level_label": LEVEL_LABELS.get(alvl, f"Lvl {alvl}"),
                 "league_abbr": league_abbr_map.get(atm.get("league_id"), "MiLB"),
+                "mle_factor": amle,
                 "w": aw,
                 "l": al,
                 "pct": apct,
                 "record_str": f"{aw}-{al}-{at}" if at > 0 else f"{aw}-{al}",
+                "top_prospect_id": atp.get("player_id", 0),
+                "top_prospect_name": atp.get("name", "Org Depth"),
+                "top_prospect_pos": atp.get("pos", "P"),
+                "top_prospect_fv": atp.get("fv", 45),
+                "talent_bar_pct": tbar_pct,
             })
 
         org_dec = org_w + org_l
         org_pct = round(org_w / org_dec, 3) if org_dec > 0 else pct_v
+        milb_dec = milb_w + milb_l
+        milb_pct = round(milb_w / milb_dec, 3) if milb_dec > 0 else org_pct
         prosp_cnt = org_prospect_counts.get(ptid, 0)
         u24_pots = sorted(org_u24_pots.get(ptid, []), reverse=True)
         farm_top5_pot = round(float(np.mean(u24_pots[:5])), 1) if u24_pots else 50.0
         titles_cnt = hist_titles_map.get(ptid, 0) + (1 if lp_winners.get(pt["league_id"]) == ptid else 0)
         poffs_cnt = hist_poff_map.get(ptid, 0)
+
+        pay_m = round(pay_v / 1e6, 2) if pay_v > 0 else round((avg_premier_pay * (0.75 + (ptid % 7) * 0.08)) / 1e6, 2)
+        bud_m = round(bud_v / 1e6, 2) if bud_v > 0 else round(pay_m * 1.18, 2)
+        eff_war = max(4.0, twar) if twar > 0 else max(6.0, round(pct_v * 42.0, 1))
+        cost_per_war_m = round(pay_m / eff_war, 2)
+        surplus_m = round((eff_war * 6.5) - pay_m, 1)
+
+        org_top_p_list = sorted(org_top_prospects.get(ptid, []), key=lambda x: (x["fv"], x["pot"], x["oa"]), reverse=True)[:5]
 
         # Composite Organizational Power Index (0-100)
         power_idx = round(min(99.5, max(25.0,
@@ -9620,10 +10507,19 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
             "parent_pct": pct_v,
             "record_str": rec_str,
             "parent_record": rec_str,
+            "run_diff": run_diff_v,
+            "baseruns_pct": br_pct,
+            "baseruns_record_str": br_rec_str,
+            "wrc_plus": tm_wrc_plus,
+            "pitch_plus": tm_pitch_plus,
             "total_war": twar,
             "parent_war": twar,
             "payroll": pay_v,
+            "payroll_m": pay_m,
             "budget": bud_v,
+            "budget_m": bud_m,
+            "cost_per_war_m": cost_per_war_m,
+            "surplus_m": surplus_m,
             "attendance": att_v,
             "affiliates_count": len(aff_items),
             "affiliate_count": len(aff_items),
@@ -9633,16 +10529,19 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
             "org_combined_pct": org_pct,
             "org_pct": org_pct,
             "org_record_str": f"{org_w}-{org_l}",
+            "milb_w": milb_w,
+            "milb_l": milb_l,
+            "milb_pct": milb_pct,
+            "milb_record_str": f"{milb_w}-{milb_l}" if milb_dec > 0 else f"{org_w}-{org_l}",
             "farm_prospects_count": prosp_cnt,
             "farm_prospect_count": prosp_cnt,
             "farm_top5_pot": farm_top5_pot,
+            "top_prospects": org_top_p_list,
             "championships": titles_cnt,
             "playoff_appearances": poffs_cnt,
             "org_power_index": power_idx,
         })
 
-        pay_m = round(pay_v / 1e6, 2) if pay_v > 0 else round((avg_premier_pay * (0.75 + (ptid % 7) * 0.08)) / 1e6, 2)
-        bud_m = round(bud_v / 1e6, 2) if bud_v > 0 else round(pay_m * 1.18, 2)
         is_high_pay = (pay_m * 1e6) >= avg_premier_pay
         is_winning = pct_v >= 0.500
         if is_high_pay and is_winning:
@@ -9658,17 +10557,62 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
             "team_id": ptid,
             "abbr": pt["abbr"],
             "full_name": pt["full_name"],
+            "logo_file_name": pt.get("logo_file_name", ""),
             "color": pt.get("bg_color", "#38bdf8"),
             "payroll_m": pay_m,
             "budget_m": bud_m,
             "pct": pct_v,
+            "baseruns_pct": br_pct,
+            "record_str": rec_str,
+            "baseruns_record_str": br_rec_str,
             "w": w_v,
+            "l": l_v,
             "total_war": twar,
             "cost_per_win_m": round(pay_m / max(1, w_v), 2),
+            "cost_per_war_m": cost_per_war_m,
+            "surplus_m": surplus_m,
+            "u24_count": prosp_cnt,
             "quadrant": quad,
         })
 
     organizational_pyramid.sort(key=lambda x: (x["org_power_index"], x["pct"], x["total_war"]), reverse=True)
+
+    # Compute Payroll Rank vs BaseRuns Win% Rank across financial_quadrant
+    by_pay_desc = sorted(financial_quadrant, key=lambda x: x["payroll_m"], reverse=True)
+    pay_rank_map = {item["team_id"]: idx + 1 for idx, item in enumerate(by_pay_desc)}
+    by_br_desc = sorted(financial_quadrant, key=lambda x: (x["baseruns_pct"], x["pct"], x["total_war"]), reverse=True)
+    br_rank_map = {item["team_id"]: idx + 1 for idx, item in enumerate(by_br_desc)}
+    for fq in financial_quadrant:
+        fq["payroll_rank"] = pay_rank_map.get(fq["team_id"], 15)
+        fq["baseruns_rank"] = br_rank_map.get(fq["team_id"], 15)
+        fq["rank_delta"] = fq["payroll_rank"] - fq["baseruns_rank"]
+
+    # Build Level-1 Hero KPI Strip Summary Objects
+    top_org_kpi = organizational_pyramid[0] if organizational_pyramid else {}
+    top_farm_kpi = (
+        sorted(
+            organizational_pyramid,
+            key=lambda x: (x.get("farm_top5_pot", 50.0) * 0.8 + x.get("milb_pct", 0.5) * 40.0 + min(25, x.get("farm_prospects_count", 0)) * 0.6),
+            reverse=True,
+        )[0]
+        if organizational_pyramid
+        else {}
+    )
+    mb_candidates = [fq for fq in financial_quadrant if fq.get("pct", 0) >= 0.500] or financial_quadrant
+    moneyball_kpi = (
+        sorted(mb_candidates, key=lambda x: (x.get("rank_delta", 0), -x.get("cost_per_war_m", 99.0), x.get("pct", 0)), reverse=True)[0]
+        if mb_candidates
+        else {}
+    )
+    env_candidates = sorted(leagues_ecosystem, key=lambda x: (abs(x.get("rpg_shift_pct", 0.0)), x.get("runs_per_game", 0.0)), reverse=True)
+    extreme_env_kpi = env_candidates[0] if env_candidates else {}
+
+    hero_kpis_obj = {
+        "top_org": top_org_kpi,
+        "top_farm": top_farm_kpi,
+        "moneyball_king": moneyball_kpi,
+        "extreme_env_alert": extreme_env_kpi,
+    }
 
     # Top Nations Pipeline
     nations_pipeline = []
@@ -9690,9 +10634,11 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
                 "avg_oa": round(n_info["oa_sum"] / max(1, n_info["count"]), 1),
                 "stars_count": n_info["stars"],
                 "elite_count": n_info["stars"],
+                "u24_count": n_info.get("u24", 0),
                 "top_player_id": n_info["top_pid"],
                 "top_player_name": n_info["top_name"],
                 "top_player_oa": n_info["top_oa"],
+                "top_player_pos": n_info.get("top_pos", "P"),
             })
 
     # Historical Macro Trends across the save (fast direct SQL aggregation)
@@ -9795,6 +10741,7 @@ def get_world_dashboard(save_slug: str, year: int = None) -> dict:
         "save_name": save_meta.get("save_name", save_slug),
         "world_year": world_year,
         "selected_year": world_year,
+        "hero_kpis": hero_kpis_obj,
         "world_kpis": {
             "total_leagues": len(leagues),
             "levels_represented": len({l["level"] for l in leagues}),
@@ -9891,22 +10838,39 @@ def get_newspaper_front_page(save_slug: str, league_id: int = None, year: int = 
     # Fast SQL lookup for top batters and pitchers in the selected league & year
     bat_war_leaders = []
     bat_hr_leaders = []
+    bat_wrc_leaders = []
+    bat_woba_leaders = []
+    bat_avg_leaders = []
+    bat_rbi_leaders = []
+    bat_ops_leaders = []
     pit_war_leaders = []
     pit_k_leaders = []
+    pit_fip_leaders = []
+    pit_era_leaders = []
+    pit_sv_leaders = []
+    pit_plus_leaders = []
+    batter_lookup = {}
+    pitcher_lookup = {}
+
+    max_team_g = max([safe_int(t.get("w", 0)) + safe_int(t.get("l", 0)) for t in standings] or [1])
+    qual_pa = max(20, int(max_team_g * 2.5))
+    qual_ip = max(10.0, float(max_team_g * 0.75))
+
     if table_exists(conn, "players_career_batting_stats") and table_exists(conn, "players"):
         q_fb = """
-        SELECT b.player_id, b.team_id, b.pa, b.ab, b.h, b.d, b.t, b.hr, b.rbi, b.bb, b.sb, b.war,
+        SELECT b.player_id, b.team_id, b.pa, b.ab, b.h, b.d, b.t, b.hr, b.rbi, b.bb, b.k, b.sb, b.war,
                p.first_name, p.last_name, p.position
         FROM players_career_batting_stats b
         JOIN players p ON p.player_id = b.player_id
-        WHERE b.year = ? AND b.league_id = ? AND b.split_id = 1
-        ORDER BY b.war DESC
-        LIMIT 25
+        WHERE b.year = ? AND b.league_id = ? AND b.split_id = 1 AND b.pa >= 10
+        ORDER BY b.war DESC, b.hr DESC, b.rbi DESC
+        LIMIT 250
         """
         b_rows = conn.execute(q_fb, (season_year, lid)).fetchall()
         if not b_rows:
             b_rows = conn.execute(q_fb.replace("AND b.league_id = ?", ""), (season_year,)).fetchall()
         parsed_b = []
+        lg_ops_base = max(0.550, env.get("league_ops", 0.735))
         for r in b_rows:
             ab_v = max(1, safe_int(r["ab"]))
             pa_v = max(1, safe_int(r["pa"]))
@@ -9915,14 +10879,18 @@ def get_newspaper_front_page(save_slug: str, league_id: int = None, year: int = 
             t_v = safe_int(r["t"])
             hr_v = safe_int(r["hr"])
             bb_v = safe_int(r["bb"])
+            k_v = safe_int(r["k"])
             s1_v = max(0, h_v - d_v - t_v - hr_v)
             avg_v = round(h_v / ab_v, 3)
             obp_v = round((h_v + bb_v) / pa_v, 3)
             slg_v = round((s1_v + 2 * d_v + 3 * t_v + 4 * hr_v) / ab_v, 3)
             ops_v = round(obp_v + slg_v, 3)
-            wrc_v = int(round(100.0 * (ops_v / max(0.550, env.get("league_ops", 0.735)))))
+            woba_v = round((0.69 * bb_v + 0.89 * s1_v + 1.27 * d_v + 1.62 * t_v + 2.10 * hr_v) / pa_v, 3)
+            bip_denom = max(1, ab_v - k_v - hr_v)
+            babip_v = round(max(0.0, (h_v - hr_v) / bip_denom), 3)
+            wrc_v = int(round(100.0 * (ops_v / lg_ops_base)))
             tm_i = teams_map.get(safe_int(r["team_id"]), {"abbr": "TM", "full_name": "Team"})
-            parsed_b.append({
+            item_b = {
                 "player_id": safe_int(r["player_id"]),
                 "name": f"{r['first_name'] or ''} {r['last_name'] or ''}".strip(),
                 "position": POSITIONS.get(safe_int(r["position"]), "UT"),
@@ -9934,14 +10902,25 @@ def get_newspaper_front_page(save_slug: str, league_id: int = None, year: int = 
                 "obp": obp_v,
                 "slg": slg_v,
                 "ops": ops_v,
+                "woba": woba_v,
+                "babip": babip_v,
                 "hr": hr_v,
                 "rbi": safe_int(r["rbi"]),
                 "sb": safe_int(r["sb"]),
                 "wrc_plus": wrc_v,
                 "war": round(safe_float(r["war"]), 1),
-            })
-        bat_war_leaders = sorted(parsed_b, key=lambda x: x["war"], reverse=True)[:8]
+            }
+            parsed_b.append(item_b)
+            batter_lookup[item_b["player_id"]] = item_b
+
+        qual_b = [x for x in parsed_b if x["pa"] >= qual_pa] or parsed_b
+        bat_war_leaders = sorted(parsed_b, key=lambda x: (x["war"], x["wrc_plus"]), reverse=True)[:8]
         bat_hr_leaders = sorted(parsed_b, key=lambda x: (x["hr"], x["ops"]), reverse=True)[:8]
+        bat_rbi_leaders = sorted(parsed_b, key=lambda x: (x["rbi"], x["ops"]), reverse=True)[:8]
+        bat_wrc_leaders = sorted(qual_b, key=lambda x: (x["wrc_plus"], x["war"]), reverse=True)[:8]
+        bat_woba_leaders = sorted(qual_b, key=lambda x: (x["woba"], x["war"]), reverse=True)[:8]
+        bat_avg_leaders = sorted(qual_b, key=lambda x: (x["avg"], x["ops"]), reverse=True)[:8]
+        bat_ops_leaders = sorted(qual_b, key=lambda x: (x["ops"], x["war"]), reverse=True)[:8]
 
     if table_exists(conn, "players_career_pitching_stats") and table_exists(conn, "players"):
         q_fp = """
@@ -9949,14 +10928,15 @@ def get_newspaper_front_page(save_slug: str, league_id: int = None, year: int = 
                p.first_name, p.last_name
         FROM players_career_pitching_stats ps
         JOIN players p ON p.player_id = ps.player_id
-        WHERE ps.year = ? AND ps.league_id = ? AND ps.split_id = 1
-        ORDER BY ps.war DESC
-        LIMIT 25
+        WHERE ps.year = ? AND ps.league_id = ? AND ps.split_id = 1 AND ps.ip >= 5
+        ORDER BY ps.war DESC, ps.s DESC, ps.k DESC
+        LIMIT 250
         """
         p_rows = conn.execute(q_fp, (season_year, lid)).fetchall()
         if not p_rows:
             p_rows = conn.execute(q_fp.replace("AND ps.league_id = ?", ""), (season_year,)).fetchall()
         parsed_p = []
+        lg_era_base = max(2.50, env.get("league_era", 4.15))
         for r in p_rows:
             ip_v = max(0.1, safe_float(r["ip"]))
             er_v = safe_float(r["er"])
@@ -9965,8 +10945,14 @@ def get_newspaper_front_page(save_slug: str, league_id: int = None, year: int = 
             bb_v = safe_int(r["bb"])
             hra_v = safe_int(r["hra"])
             fip_v = round(((13.0 * hra_v + 3.0 * bb_v - 2.0 * k_v) / ip_v) + env.get("fip_constant", 3.15), 2)
+            k_per_9 = round((k_v * 9.0) / ip_v, 1)
+            bb_per_9 = round((bb_v * 9.0) / ip_v, 1)
+            # Pitching+ / Stuff+ composite proxy centered on 100 (higher = better)
+            fip_ratio = lg_era_base / max(1.60, fip_v)
+            pitch_plus = int(max(70, min(145, round(100.0 * (0.65 * fip_ratio + 0.35 * (1.0 + (k_per_9 - bb_per_9 - 5.2) / 18.0))))))
+            stuff_plus = int(max(70, min(148, round(100.0 + (k_per_9 - 7.8) * 4.2 - (hra_v * 9.0 / ip_v - 1.0) * 5.0))))
             tm_i = teams_map.get(safe_int(r["team_id"]), {"abbr": "TM", "full_name": "Team"})
-            parsed_p.append({
+            item_p = {
                 "player_id": safe_int(r["player_id"]),
                 "name": f"{r['first_name'] or ''} {r['last_name'] or ''}".strip(),
                 "role": "SP" if safe_int(r["gs"]) > 0 else "RP",
@@ -9980,20 +10966,36 @@ def get_newspaper_front_page(save_slug: str, league_id: int = None, year: int = 
                 "era": era_v,
                 "fip": fip_v,
                 "k": k_v,
+                "k9": k_per_9,
+                "pitch_plus": pitch_plus,
+                "stuff_plus": stuff_plus,
                 "war": round(safe_float(r["war"]), 1),
-            })
-        pit_war_leaders = sorted(parsed_p, key=lambda x: x["war"], reverse=True)[:8]
+            }
+            parsed_p.append(item_p)
+            pitcher_lookup[item_p["player_id"]] = item_p
+
+        qual_p = [p for p in parsed_p if p["ip"] >= qual_ip] or [p for p in parsed_p if p["ip"] >= 20] or parsed_p
+        pit_war_leaders = sorted(parsed_p, key=lambda x: (x["war"], -x["fip"]), reverse=True)[:8]
         pit_k_leaders = sorted(parsed_p, key=lambda x: (x["k"], -x["era"]), reverse=True)[:8]
-        pit_fip_leaders = sorted([p for p in parsed_p if p["ip"] >= 20], key=lambda x: (x["era"], x["fip"]))[:8] or pit_war_leaders
-    else:
-        pit_fip_leaders = []
+        pit_sv_leaders = sorted(parsed_p, key=lambda x: (x["sv"], -x["era"]), reverse=True)[:8]
+        pit_fip_leaders = sorted(qual_p, key=lambda x: (x["fip"], x["era"]))[:8]
+        pit_era_leaders = sorted(qual_p, key=lambda x: (x["era"], x["fip"]))[:8]
+        pit_plus_leaders = sorted(qual_p, key=lambda x: (x["pitch_plus"], x["war"]), reverse=True)[:8]
 
     leaders = {
         "bat_war": bat_war_leaders,
         "bat_hr": bat_hr_leaders,
+        "bat_rbi": bat_rbi_leaders,
+        "bat_wrc": bat_wrc_leaders,
+        "bat_woba": bat_woba_leaders,
+        "bat_avg": bat_avg_leaders,
+        "bat_ops": bat_ops_leaders,
         "pit_war": pit_war_leaders,
         "pit_k": pit_k_leaders,
         "pit_fip": pit_fip_leaders,
+        "pit_era": pit_era_leaders,
+        "pit_sv": pit_sv_leaders,
+        "pit_plus": pit_plus_leaders,
     }
 
     stretch_pkg = _build_single_league_stretch(conn, save_slug, lid, season_year, leagues, teams_map, overview=ov)
@@ -10042,6 +11044,51 @@ def get_newspaper_front_page(save_slug: str, league_id: int = None, year: int = 
             sid = safe_int(r["streak_id"])
             pname_str = f"{r['first_name'] or ''} {r['last_name'] or ''}".strip()
             s_meta = STREAK_NAMES.get(sid, {"name": f"Streak #{sid}", "unit": "G", "type": "batting", "icon": "bi-fire"})
+            s_type = s_meta.get("type", "batting") if isinstance(s_meta, dict) else "batting"
+            b_info = batter_lookup.get(pid)
+            p_info = pitcher_lookup.get(pid)
+            proc_badge = ""
+            proc_tier = "50"
+            proc_sub = ""
+            if s_type == "pitching" and p_info:
+                p_plus = p_info.get("pitch_plus", 100)
+                fip_v = p_info.get("fip", 4.00)
+                era_v = p_info.get("era", 4.00)
+                proc_sub = f"{p_plus} Pitch+ • {fip_v:.2f} FIP ({era_v:.2f} ERA)"
+                if p_plus >= 115 or fip_v <= 3.10:
+                    proc_badge = f"{p_plus} P+ • LEGIT"
+                    proc_tier = "95"
+                elif p_plus >= 104 or fip_v <= 3.75:
+                    proc_badge = f"{p_plus} P+ • SOLID"
+                    proc_tier = "80"
+                elif era_v < fip_v - 0.65:
+                    proc_badge = f"{fip_v:.2f} FIP • MIRAGE"
+                    proc_tier = "20"
+                else:
+                    proc_badge = f"{p_plus} P+ • {fip_v:.2f} FIP"
+                    proc_tier = "50"
+            elif b_info:
+                wrc_v = b_info.get("wrc_plus", 100)
+                woba_v = b_info.get("woba", 0.320)
+                babip_v = b_info.get("babip", 0.300)
+                proc_sub = f"{wrc_v} wRC+ • .{int(round(woba_v * 1000)):03d} wOBA (.{int(round(babip_v * 1000)):03d} BABIP)"
+                if wrc_v >= 135 and babip_v <= 0.375:
+                    proc_badge = f"{wrc_v} wRC+ • LEGIT"
+                    proc_tier = "95"
+                elif babip_v >= 0.385 and wrc_v < 115:
+                    proc_badge = f".{int(round(babip_v * 1000)):03d} BABIP • LUCK"
+                    proc_tier = "20"
+                elif wrc_v >= 115:
+                    proc_badge = f"{wrc_v} wRC+ • SOLID"
+                    proc_tier = "80"
+                else:
+                    proc_badge = f"{wrc_v} wRC+ • .{int(round(woba_v * 1000)):03d} wOBA"
+                    proc_tier = "50"
+            else:
+                proc_badge = "ACTIVE STREAK"
+                proc_tier = "80"
+                proc_sub = f"Started {r['started'] or 'recently'}"
+
             active_streaks.append({
                 "player_id": pid,
                 "name": pname_str,
@@ -10050,11 +11097,14 @@ def get_newspaper_front_page(save_slug: str, league_id: int = None, year: int = 
                 "streak_id": sid,
                 "streak_name": s_meta["name"] if isinstance(s_meta, dict) else str(s_meta),
                 "streak_unit": s_meta.get("unit", "G") if isinstance(s_meta, dict) else "G",
-                "streak_type": s_meta.get("type", "batting") if isinstance(s_meta, dict) else "batting",
+                "streak_type": s_type,
                 "streak_icon": s_meta.get("icon", "bi-fire") if isinstance(s_meta, dict) else "bi-fire",
                 "value": safe_int(r["value"]),
                 "active": safe_int(r["has_ended"]) == 0,
                 "started": r["started"] or "",
+                "process_badge": proc_badge,
+                "process_tier": proc_tier,
+                "process_sub": proc_sub,
             })
 
     # Curated Newspaper Wire Stories from messages & trade_history
@@ -10337,6 +11387,23 @@ def get_newspaper_front_page(save_slug: str, league_id: int = None, year: int = 
             "teams": dr["teams"],
         })
 
+    # Compute True-Talent Power Rankings (Pythagorean W% + Team WAR + L10)
+    power_rankings = []
+    for tm in standings:
+        gp_tm = max(1, safe_int(tm.get("w")) + safe_int(tm.get("l")))
+        pyth_w_tm = safe_int(tm.get("pyth_w"))
+        pyth_l_tm = safe_int(tm.get("pyth_l"))
+        pyth_gp = max(1, pyth_w_tm + pyth_l_tm)
+        pyth_pct = round(pyth_w_tm / pyth_gp, 3)
+        luck_diff = safe_int(tm.get("w")) - pyth_w_tm
+        true_score = (pyth_pct * 0.55) + (safe_float(tm.get("pct")) * 0.30) + (safe_float(tm.get("l10_w")) / 10.0 * 0.15)
+        tm_copy = dict(tm)
+        tm_copy["pyth_pct"] = pyth_pct
+        tm_copy["luck_diff"] = luck_diff
+        tm_copy["true_score"] = round(true_score, 4)
+        power_rankings.append(tm_copy)
+    power_rankings.sort(key=lambda x: (-x["true_score"], -x.get("run_diff", 0), -x.get("total_war", 0)))
+
     conn.close()
     return {
         "has_csv": True,
@@ -10344,6 +11411,7 @@ def get_newspaper_front_page(save_slug: str, league_id: int = None, year: int = 
         "selected_year": season_year,
         "active_league": active_lg,
         "leagues": leagues,
+        "environment": env,
         "masthead": {
             "paper_title": f"THE {active_lg.get('name', 'AMERICAN BASEBALL').upper()} CHRONICLE",
             "sub_motto": "“All The Diamond News, Sabermetrics & Postseason Drama Fit To Print”",
@@ -10360,6 +11428,8 @@ def get_newspaper_front_page(save_slug: str, league_id: int = None, year: int = 
         "wild_cards": wc_races,
         "hottest_teams": hottest_teams[:8],
         "cold_teams": list(reversed(hottest_teams))[:8],
+        "power_rankings": power_rankings[:12],
+        "standings": standings,
         "stretch_summary": {
             "phase_badge": stretch_pkg.get("phase_badge"),
             "pct_complete": stretch_pkg.get("pct_season_complete", 100.0),
@@ -10373,7 +11443,7 @@ def get_newspaper_front_page(save_slug: str, league_id: int = None, year: int = 
         "active_streaks": active_streaks,
         "wire_stories": wire_stories,
         "standings_groups": standings_groups,
-        "recent_games": recent_games[:12],
+        "recent_games": recent_games[:14],
         "leaders": leaders,
     }
 

@@ -8,14 +8,33 @@ const AppState = {
   activeTeamId: null,
   activeTab: "frontpage",
   frontPageData: null,
+  frontPageLayoutMode: "portal", // portal (BNN.COM | OOTP+ default) | broadsheet (Classic Newspaper)
+  frontPageTheme: "dark", // dark (default) | light
+  frontPageViewportMode: "auto", // auto | standard (16:9 3-Col) | ultrawide (21:9 5-Col Wall)
+  frontPageScoreFilter: "ALL", // ALL | CLOSE | BLOWOUT
+  frontPageSelectedGameId: null, // null (show headline lead) or game_id from recent_games
+  frontPageBatCat: "bat_wrc", // bat_wrc | bat_woba | bat_war | bat_hr | bat_avg | bat_rbi | bat_ops
+  frontPagePitCat: "pit_plus", // pit_plus | pit_war | pit_fip | pit_era | pit_k | pit_sv
+  frontPageStandingsFilter: "ALL", // ALL | WC | division index
   frontPageHeadlineMode: "auto", // auto | matchup | champions | phillies_fire | hot_streak | superstar
   frontPagePaperTheme: "dark", // dark | light
   stretchData: null,
   stretchLeagueIds: [],
+  stretchWormMode: "odds", // odds | 500 | xwoba
+  stretchRightFilter: "tight", // tight | sl0 | sl1 | wc
+  stretchViewMode: "portal", // portal | matrix
+  stretchSelectedSeriesByPkg: {},
   worldData: null,
+  worldViewMode: "portal", // portal | almanac | atlas | comparator
+  worldMacroMode: "quadrant", // quadrant | talent | runenv
+  worldP4PMode: "mle", // mle | raw
+  worldP4PDomain: "bat", // bat | pit | prosp
   worldTalentMode: "tiers", // tiers | ages
   worldOrgSearch: "",
   worldSelectedOrgId: null,
+  worldCmpOrgA: null,
+  worldCmpOrgB: null,
+  worldMleSimIdx: 0,
   teamHubSubTab: "depth", // depth | strengths | roadmap | roster | command
   selectedDepthPos: "SS",
   saberSubTab: "batting", // batting | pitching | split_saber | proj_teams | proj_batters | proj_pitchers | split_proj
@@ -8686,10 +8705,11 @@ window.finishSetupWizard = async function() {
 };
 
 /* ============================================================================
- * 12. BRAND NEW LANDING PAGE — EDITORIAL NEWSPAPER FRONT PAGE ("THE CHRONICLE")
+ * 12. BNN.COM | OOTP+ SPORTS BROADCAST LEAGUE PORTAL & BROADSHEET FRONT PAGE
  * ============================================================================ */
 window.setNewspaperHeadlineMode = function(modeId) {
   AppState.frontPageHeadlineMode = modeId || "auto";
+  AppState.frontPageSelectedGameId = null;
   const container = document.getElementById("main-view-container");
   if (container && AppState.activeTab === "frontpage") {
     renderFrontPageTab(container);
@@ -8704,6 +8724,71 @@ window.toggleNewspaperPaperTheme = function() {
   }
 };
 
+window.setFrontPageTheme = function(theme) {
+  AppState.frontPageTheme = theme === "light" ? "light" : "dark";
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "frontpage") {
+    renderFrontPageTab(container);
+  }
+};
+
+window.setFrontPageLayoutMode = function(layoutMode) {
+  AppState.frontPageLayoutMode = layoutMode === "broadsheet" ? "broadsheet" : "portal";
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "frontpage") {
+    renderFrontPageTab(container);
+  }
+};
+
+window.setFrontPageViewportMode = function(vpMode) {
+  AppState.frontPageViewportMode = vpMode || "auto";
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "frontpage") {
+    renderFrontPageTab(container);
+  }
+};
+
+window.setFrontPageScoreFilter = function(filterKey) {
+  AppState.frontPageScoreFilter = filterKey || "ALL";
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "frontpage") {
+    renderFrontPageTab(container);
+  }
+};
+
+window.selectFrontPageScoreGame = function(gameId) {
+  const numId = gameId ? Number(gameId) : null;
+  AppState.frontPageSelectedGameId = (AppState.frontPageSelectedGameId === numId) ? null : numId;
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "frontpage") {
+    renderFrontPageTab(container);
+  }
+};
+
+window.setFrontPageBatCat = function(catKey) {
+  AppState.frontPageBatCat = catKey || "bat_wrc";
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "frontpage") {
+    renderFrontPageTab(container);
+  }
+};
+
+window.setFrontPagePitCat = function(catKey) {
+  AppState.frontPagePitCat = catKey || "pit_plus";
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "frontpage") {
+    renderFrontPageTab(container);
+  }
+};
+
+window.setFrontPageStandingsFilter = function(filterKey) {
+  AppState.frontPageStandingsFilter = filterKey || "ALL";
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "frontpage") {
+    renderFrontPageTab(container);
+  }
+};
+
 window.jumpToGameReplayFromFrontPage = async function(gameId) {
   if (gameId && typeof openGameReplayModal === "function") {
     openGameReplayModal(gameId);
@@ -8712,9 +8797,915 @@ window.jumpToGameReplayFromFrontPage = async function(gameId) {
   }
 };
 
+function renderBnnPortalFrontPage(container, fp, activeHead) {
+  const mast = fp.masthead || {};
+  const headlines = fp.headlines || [];
+  const mode = AppState.frontPageHeadlineMode || "auto";
+  const standingsGroups = fp.standings_groups || [];
+  const standings = fp.standings || [];
+  const powerRankings = fp.power_rankings || standings.slice(0, 10);
+  const wildCards = fp.wild_cards || [];
+  const bracket = fp.playoff_bracket || {};
+  const hottestTeams = fp.hottest_teams || [];
+  const activeStreaks = fp.active_streaks || [];
+  const wireStories = fp.wire_stories || [];
+  const leaders = fp.leaders || {};
+  const recentGames = fp.recent_games || [];
+
+  const themeCls = AppState.frontPageTheme === "light" ? "bnn-portal-light" : "bnn-portal-dark";
+  const vpMode = AppState.frontPageViewportMode || "auto";
+  const vpCls = vpMode === "ultrawide" ? "bnn-vp-ultrawide" : (vpMode === "standard" ? "bnn-vp-standard" : "bnn-vp-auto");
+
+  // Map team_id -> team object for quick lookup in scoreboard & hero
+  const teamById = {};
+  standings.forEach(t => { teamById[t.team_id] = t; });
+
+  // 1. Scoreboard Strip Filtering
+  const scoreFilter = AppState.frontPageScoreFilter || "ALL";
+  const filteredGames = recentGames.filter(g => {
+    const diff = Math.abs(Number(g.away_runs || 0) - Number(g.home_runs || 0));
+    if (scoreFilter === "CLOSE") return diff <= 2 || Number(g.innings || 9) > 9;
+    if (scoreFilter === "BLOWOUT") return diff >= 4;
+    return true;
+  });
+  const displayGames = filteredGames.length ? filteredGames : recentGames;
+  const selectedGame = AppState.frontPageSelectedGameId
+    ? recentGames.find(g => Number(g.game_id) === Number(AppState.frontPageSelectedGameId))
+    : null;
+
+  // 2. Left Margin Batting Leaders Configuration
+  const batCatMeta = {
+    bat_wrc: { label: "wRC+", tag: "SABER", fmt: p => `${p.wrc_plus || 100}`, proc: p => `.${Math.round((p.woba || 0.320) * 1000).toString().padStart(3, "0")} wOBA`, tier: p => (p.wrc_plus >= 145 ? "95" : (p.wrc_plus >= 120 ? "80" : "50")) },
+    bat_woba: { label: "wOBA", tag: "SABER", fmt: p => fmtAvg(p.woba || p.ops || 0.320), proc: p => `${p.wrc_plus || 100} wRC+`, tier: p => ((p.woba || 0) >= 0.380 ? "95" : ((p.woba || 0) >= 0.340 ? "80" : "50")) },
+    bat_war: { label: "WAR", tag: "SABER", fmt: p => Number(p.war || 0).toFixed(1), proc: p => `${p.wrc_plus || 100} wRC+`, tier: p => ((p.war || 0) >= 5.0 ? "95" : ((p.war || 0) >= 3.2 ? "80" : "50")) },
+    bat_hr: { label: "HR", tag: "TRAD", fmt: p => `${p.hr || 0}`, proc: p => `${fmtAvg(p.slg || 0.450)} SLG`, tier: p => ((p.wrc_plus || 100) >= 135 ? "95" : ((p.wrc_plus || 100) >= 115 ? "80" : "50")) },
+    bat_avg: { label: "AVG", tag: "TRAD", fmt: p => fmtAvg(p.avg || 0), proc: p => `${fmtAvg(p.babip || 0.300)} BABIP`, tier: p => ((p.wrc_plus || 100) >= 135 ? "95" : ((p.babip || 0) >= 0.365 && (p.wrc_plus || 100) < 110 ? "20" : "80")) },
+    bat_rbi: { label: "RBI", tag: "TRAD", fmt: p => `${p.rbi || 0}`, proc: p => `${p.hr || 0} HR • ${p.wrc_plus || 100} wRC+`, tier: p => ((p.wrc_plus || 100) >= 130 ? "95" : "80") },
+    bat_ops: { label: "OPS", tag: "TRAD", fmt: p => fmtAvg(p.ops || 0), proc: p => `${p.wrc_plus || 100} wRC+`, tier: p => ((p.ops || 0) >= 0.900 ? "95" : "80") },
+  };
+  const activeBatKey = batCatMeta[AppState.frontPageBatCat] ? AppState.frontPageBatCat : "bat_wrc";
+  const batMeta = batCatMeta[activeBatKey];
+  const batRows = (leaders[activeBatKey] || leaders.bat_war || []).slice(0, 5);
+  const tcAvgLeader = (leaders.bat_avg || [])[0] || {};
+  const tcHrLeader = (leaders.bat_hr || [])[0] || {};
+  const tcRbiLeader = (leaders.bat_rbi || [])[0] || {};
+
+  // 3. Right Margin Pitching Leaders Configuration
+  const pitCatMeta = {
+    pit_plus: { label: "Pitch+", tag: "SABER", fmt: p => `${p.pitch_plus || 100}`, proc: p => `${Number(p.fip || 3.80).toFixed(2)} FIP`, tier: p => ((p.pitch_plus || 100) >= 120 ? "95" : ((p.pitch_plus || 100) >= 108 ? "80" : "50")) },
+    pit_war: { label: "WAR", tag: "SABER", fmt: p => Number(p.war || 0).toFixed(1), proc: p => `${Number(p.fip || 3.80).toFixed(2)} FIP`, tier: p => ((p.war || 0) >= 4.5 ? "95" : "80") },
+    pit_fip: { label: "FIP", tag: "SABER", fmt: p => Number(p.fip || 0).toFixed(2), proc: p => `${p.pitch_plus || 100} P+`, tier: p => ((p.fip || 4) <= 3.00 ? "95" : ((p.fip || 4) <= 3.50 ? "80" : "50")) },
+    pit_era: { label: "ERA", tag: "TRAD", fmt: p => Number(p.era || 0).toFixed(2), proc: p => `${Number(p.fip || 0).toFixed(2)} FIP`, tier: p => ((p.fip || 4) <= 3.15 ? "95" : ((p.era || 4) < (p.fip || 4) - 0.65 ? "20" : "80")) },
+    pit_k: { label: "SO", tag: "TRAD", fmt: p => `${p.k || 0}`, proc: p => `${Number(p.k9 || 9.0).toFixed(1)} K/9`, tier: p => ((p.k9 || 0) >= 10.0 ? "95" : "80") },
+    pit_sv: { label: "SV", tag: "TRAD", fmt: p => `${p.sv || 0}`, proc: p => `${Number(p.fip || 3.50).toFixed(2)} FIP`, tier: p => ((p.fip || 4) <= 3.10 ? "95" : "80") },
+  };
+  const activePitKey = pitCatMeta[AppState.frontPagePitCat] ? AppState.frontPagePitCat : "pit_plus";
+  const pitMeta = pitCatMeta[activePitKey];
+  const pitRows = (leaders[activePitKey] || leaders.pit_war || []).slice(0, 5);
+  const tcEraLeader = (leaders.pit_era || [])[0] || {};
+  const tcSoLeader = (leaders.pit_k || [])[0] || {};
+  const tcSvLeader = (leaders.pit_sv || [])[0] || {};
+
+  // 4. Three Stars of the League / Slate
+  const star1 = (leaders.bat_war || [])[0] || (leaders.bat_wrc || [])[0];
+  const star2 = (leaders.pit_plus || [])[0] || (leaders.pit_war || [])[0];
+  const star3 = (leaders.bat_hr || [])[0] || (leaders.pit_k || [])[0];
+
+  // 5. Analytical Storyline Cards (Pythagorean Mirage, Hottest L10, Tightest Cutline, Wire Dispatch)
+  const luckSorted = standings.slice().sort((a, b) => Math.abs((b.w || 0) - (b.pyth_w || 0)) - Math.abs((a.w || 0) - (a.pyth_w || 0)));
+  const mirageTeam = luckSorted[0] || standings[0] || {};
+  const mirageDiff = (mirageTeam.w || 0) - (mirageTeam.pyth_w || 0);
+  const hotClub = hottestTeams[0] || standings[0] || {};
+  const tightestRace = standingsGroups.slice().sort((a, b) => (a.lead_gb || 99) - (b.lead_gb || 99))[0] || standingsGroups[0];
+  const topWire = wireStories[0] || {
+    category: "LEAGUE DISPATCH",
+    team_abbr: fp.active_league?.abbr || "MLB",
+    headline: `${fp.active_league?.name || "League"} Front Offices Prepare for Key Stretch Run Decisions`,
+    body: "Scouts and analytics departments are closely evaluating roster depth and bullpen leverage across every division.",
+  };
+
+  // Helper to render compact division standings table
+  const renderStandingsTableHtml = (groupsToRender, compactMode = false) => {
+    return groupsToRender.map(grp => `
+      <div class="bnn-subcard rounded-lg overflow-hidden mb-2.5">
+        <div class="px-2.5 py-1.5 border-b bnn-border flex items-center justify-between bg-black/20">
+          <span class="font-mono font-extrabold text-[10.5px] uppercase tracking-wider text-amber-400 truncate">${grp.title}</span>
+          <span class="font-mono text-[9.5px] px-1.5 py-0.5 rounded bg-red-600/20 text-red-400 font-bold shrink-0">${grp.race_status || ""}</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-[11px] font-mono" style="font-variant-numeric: tabular-nums;">
+            <thead>
+              <tr class="border-b bnn-border text-[9.5px] uppercase bnn-muted">
+                <th class="text-left py-1 px-2">Club</th>
+                <th class="text-right py-1 px-1.5">W-L</th>
+                <th class="text-right py-1 px-1.5">GB</th>
+                <th class="text-right py-1 px-1.5" title="Run Differential">RD</th>
+                ${compactMode ? "" : `<th class="text-right py-1 px-1.5" title="Pythagorean Record">PYTH</th>`}
+                <th class="text-right py-1 px-1.5">L10</th>
+                <th class="text-right py-1 px-2" title="Playoff Odds">POFF%</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y bnn-border">
+              ${(grp.teams || []).map((t, idx) => {
+                const rd = Number(t.run_diff || 0);
+                const pProb = Number(t.playoff_prob || 0);
+                const pCls = pProb >= 80 ? "text-emerald-400 font-black" : (pProb >= 35 ? "text-amber-400 font-bold" : "bnn-muted");
+                return `
+                  <tr onclick="switchTeamAndGo(${t.team_id})" class="bnn-row-hover cursor-pointer">
+                    <td class="py-1.5 px-2 font-sans font-bold">
+                      <div class="flex items-center gap-1.5">
+                        <span class="text-[9.5px] bnn-muted font-mono w-3">${idx + 1}</span>
+                        <img src="${teamLogoUrl(t.logo_file_name)}" class="w-4 h-4 object-contain shrink-0" alt="">
+                        <span class="truncate hover:text-red-400 transition">${t.abbr || t.nickname || t.name}</span>
+                      </div>
+                    </td>
+                    <td class="text-right py-1.5 px-1.5 font-bold">${t.record_str}</td>
+                    <td class="text-right py-1.5 px-1.5 bnn-muted">${t.gb === 0 ? "—" : Number(t.gb || 0).toFixed(1)}</td>
+                    <td class="text-right py-1.5 px-1.5 font-bold ${rd >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${rd >= 0 ? '+' : ''}${rd}</td>
+                    ${compactMode ? "" : `<td class="text-right py-1.5 px-1.5 bnn-muted">${t.pyth_w || 0}-${t.pyth_l || 0}</td>`}
+                    <td class="text-right py-1.5 px-1.5 ${(t.l10_w || 0) >= 7 ? 'text-emerald-400 font-bold' : ((t.l10_w || 0) <= 3 ? 'text-rose-400' : '')}">${t.l10_str || '5-5'}</td>
+                    <td class="text-right py-1.5 px-2 ${pCls}">${pProb.toFixed(0)}%</td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `).join("");
+  };
+
+  // Standings Filter for Right Margin (16:9 mode)
+  const stFilter = AppState.frontPageStandingsFilter || "ALL";
+  let rightMarginStandingsHtml = "";
+  if (stFilter === "WC" && wildCards.length) {
+    rightMarginStandingsHtml = wildCards.map(wc => `
+      <div class="bnn-subcard rounded-lg overflow-hidden mb-2.5">
+        <div class="px-2.5 py-1.5 border-b bnn-border flex items-center justify-between bg-black/20">
+          <span class="font-mono font-extrabold text-[10.5px] uppercase tracking-wider text-amber-400">${wc.title || 'Wild Card Race'}</span>
+          <span class="font-mono text-[9.5px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">Top ${wc.wc_spots || 3} Cutline</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-[11px] font-mono" style="font-variant-numeric: tabular-nums;">
+            <thead>
+              <tr class="border-b bnn-border text-[9.5px] uppercase bnn-muted">
+                <th class="text-left py-1 px-2">Club</th>
+                <th class="text-right py-1 px-1.5">W-L</th>
+                <th class="text-right py-1 px-1.5">WC GB</th>
+                <th class="text-right py-1 px-1.5">L10</th>
+                <th class="text-right py-1 px-2">POFF%</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y bnn-border">
+              ${(wc.teams || []).slice(0, 7).map((t, i) => `
+                <tr onclick="switchTeamAndGo(${t.team_id})" class="bnn-row-hover cursor-pointer ${i + 1 === (wc.wc_spots || 3) ? 'border-b-2 border-dashed border-amber-400' : ''}">
+                  <td class="py-1.5 px-2 font-sans font-bold flex items-center gap-1.5">
+                    <span class="text-[9.5px] bnn-muted font-mono w-3">${i + 1}</span>
+                    <img src="${teamLogoUrl(t.logo_file_name)}" class="w-4 h-4 object-contain" alt="">
+                    <span>${t.abbr}</span>
+                  </td>
+                  <td class="text-right py-1.5 px-1.5 font-bold">${t.record_str}</td>
+                  <td class="text-right py-1.5 px-1.5 ${t.wc_gb === 0 ? 'text-emerald-400 font-bold' : 'bnn-muted'}">${t.wc_gb_str || (t.wc_gb === 0 ? '—' : Number(t.wc_gb || 0).toFixed(1))}</td>
+                  <td class="text-right py-1.5 px-1.5">${t.l10_str || '5-5'}</td>
+                  <td class="text-right py-1.5 px-2 font-bold text-sky-400">${Number(t.playoff_prob || 0).toFixed(0)}%</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `).join("");
+  } else if (stFilter.startsWith("DIV_")) {
+    const idx = Number(stFilter.replace("DIV_", "")) || 0;
+    const grp = standingsGroups[idx] ? [standingsGroups[idx]] : standingsGroups;
+    rightMarginStandingsHtml = renderStandingsTableHtml(grp, false);
+  } else {
+    rightMarginStandingsHtml = renderStandingsTableHtml(standingsGroups, false);
+  }
+
+  // Center Hero Content: Selected Scoreboard Game vs. Lead Story Headline
+  const heroTeams = activeHead.hero_teams || [];
+  let centerHeroCardHtml = "";
+  if (selectedGame) {
+    const awayTm = teamById[selectedGame.away_id] || {};
+    const homeTm = teamById[selectedGame.home_id] || {};
+    const awayWon = Number(selectedGame.away_runs) > Number(selectedGame.home_runs);
+    const runDiffGame = Math.abs(Number(selectedGame.away_runs) - Number(selectedGame.home_runs));
+    const gameTag = Number(selectedGame.innings || 9) > 9
+      ? `EXTRA INNINGS (${selectedGame.innings} INN)`
+      : (runDiffGame === 1 ? "HIGH-LEVERAGE 1-RUN THRILLER" : "OFFICIAL BNN BOX SCORE SPOTLIGHT");
+
+    centerHeroCardHtml = `
+      <div class="bnn-card bnn-hero-bg rounded-xl overflow-hidden">
+        <div class="px-4 py-2.5 border-b bnn-border flex flex-wrap items-center justify-between gap-2 bg-black/25">
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded bg-red-600 text-white font-mono font-black text-[10px] uppercase tracking-wider">BNN GAME SPOTLIGHT</span>
+            <span class="text-xs font-mono font-bold text-amber-400">${gameTag} • ${selectedGame.date || ''}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="selectFrontPageScoreGame(null)" class="px-2.5 py-1 rounded bnn-pill-btn text-[11px] font-mono font-bold">
+              &larr; Back to Lead Story
+            </button>
+            <button onclick="jumpToGameReplayFromFrontPage(${selectedGame.game_id})" class="px-3 py-1 rounded bg-red-600 hover:bg-red-500 text-white text-[11px] font-mono font-extrabold shadow transition flex items-center gap-1.5">
+              <i class="bi bi-play-circle-fill"></i> Pitch-by-Pitch Replay
+            </button>
+          </div>
+        </div>
+        <div class="p-5">
+          <div class="grid grid-cols-1 sm:grid-cols-11 gap-4 items-center bnn-subcard p-4 rounded-xl mb-4">
+            <div onclick="switchTeamAndGo(${selectedGame.away_id})" class="sm:col-span-4 flex items-center gap-3 cursor-pointer group">
+              <img src="${teamLogoUrl(selectedGame.away_logo || awayTm.logo_file_name)}" class="w-14 h-14 object-contain rounded-xl bg-black/30 p-1.5 border bnn-border group-hover:border-red-500 transition" alt="">
+              <div>
+                <div class="text-[10px] font-mono uppercase bnn-muted font-bold">ROAD CLUB • ${awayTm.record_str || ''}</div>
+                <div class="text-lg font-black group-hover:text-red-400 transition">${selectedGame.away_name || awayTm.full_name || selectedGame.away_abbr}</div>
+                <div class="text-xs font-mono bnn-muted">${awayTm.wrc_plus ? `${awayTm.wrc_plus} wRC+ • ${Number(awayTm.era || 4).toFixed(2)} ERA` : selectedGame.away_abbr}</div>
+              </div>
+            </div>
+            <div class="sm:col-span-3 text-center py-2 px-3 rounded-xl bg-black/30 border bnn-border font-mono">
+              <div class="text-[10px] uppercase tracking-widest text-amber-400 font-extrabold mb-0.5">FINAL ${Number(selectedGame.innings || 9) > 9 ? `(${selectedGame.innings} INN)` : ''}</div>
+              <div class="text-3xl font-black tracking-tight">
+                <span class="${awayWon ? 'text-emerald-400' : 'bnn-muted'}">${selectedGame.away_runs}</span>
+                <span class="bnn-muted mx-1.5">-</span>
+                <span class="${!awayWon ? 'text-emerald-400' : 'bnn-muted'}">${selectedGame.home_runs}</span>
+              </div>
+            </div>
+            <div onclick="switchTeamAndGo(${selectedGame.home_id})" class="sm:col-span-4 flex items-center sm:flex-row-reverse sm:text-right gap-3 cursor-pointer group">
+              <img src="${teamLogoUrl(selectedGame.home_logo || homeTm.logo_file_name)}" class="w-14 h-14 object-contain rounded-xl bg-black/30 p-1.5 border bnn-border group-hover:border-red-500 transition" alt="">
+              <div>
+                <div class="text-[10px] font-mono uppercase bnn-muted font-bold">HOME CLUB • ${homeTm.record_str || ''}</div>
+                <div class="text-lg font-black group-hover:text-red-400 transition">${selectedGame.home_name || homeTm.full_name || selectedGame.home_abbr}</div>
+                <div class="text-xs font-mono bnn-muted">${homeTm.wrc_plus ? `${homeTm.wrc_plus} wRC+ • ${Number(homeTm.era || 4).toFixed(2)} ERA` : selectedGame.home_abbr}</div>
+              </div>
+            </div>
+          </div>
+          <h2 class="text-2xl sm:text-3xl font-black tracking-tight leading-tight mb-2">
+            ${awayWon ? (selectedGame.away_name || selectedGame.away_abbr) : (selectedGame.home_name || selectedGame.home_abbr)}
+            defeat
+            ${awayWon ? (selectedGame.home_name || selectedGame.home_abbr) : (selectedGame.away_name || selectedGame.away_abbr)},
+            ${Math.max(selectedGame.away_runs, selectedGame.home_runs)}-${Math.min(selectedGame.away_runs, selectedGame.home_runs)}
+          </h2>
+          <p class="text-sm bnn-muted leading-relaxed mb-0" style="max-width: 72ch;">
+            Click <b>Pitch-by-Pitch Replay</b> above to step through every plate appearance, win-probability swing, and Statcast batted-ball trajectory from this matchup, or click any score in the top BNN SCORES ticker to inspect another game.
+          </p>
+        </div>
+      </div>
+    `;
+  } else {
+    const heroMatchupStrip = heroTeams.length >= 2 ? `
+      <div class="bnn-subcard p-3.5 rounded-xl mb-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div onclick="switchTeamAndGo(${heroTeams[0].team_id})" class="flex items-center gap-3 cursor-pointer group">
+          <img src="${teamLogoUrl(heroTeams[0].logo_file_name)}" class="w-12 h-12 object-contain rounded-lg bg-black/25 p-1 border bnn-border group-hover:border-red-500 transition" alt="">
+          <div>
+            <div class="text-[9.5px] font-mono uppercase tracking-wider text-amber-400 font-bold">CONTENDER • ${heroTeams[0].record_str} (${fmtAvg(heroTeams[0].pct)})</div>
+            <div class="text-base font-black group-hover:text-red-400 transition">${heroTeams[0].full_name}</div>
+            <div class="text-[11px] font-mono bnn-muted">${heroTeams[0].wrc_plus || 100} wRC+ • ${Number(heroTeams[0].fip || 4.0).toFixed(2)} FIP • ${Number(heroTeams[0].total_war || 0).toFixed(1)} WAR</div>
+          </div>
+        </div>
+        <div class="text-center px-3 py-1.5 rounded-lg bg-red-600/15 border border-red-500/40 font-mono shrink-0">
+          <div class="text-[9.5px] uppercase tracking-widest text-red-400 font-extrabold">${bracket.championship_series?.round_name || 'HEAD-TO-HEAD'}</div>
+          <div class="text-base font-black">
+            ${bracket.championship_series && (bracket.championship_series.result0 || bracket.championship_series.result1)
+              ? `${bracket.championship_series.result0} — ${bracket.championship_series.result1}`
+              : `VS`}
+          </div>
+        </div>
+        <div onclick="switchTeamAndGo(${heroTeams[1].team_id})" class="flex items-center gap-3 sm:flex-row-reverse sm:text-right cursor-pointer group">
+          <img src="${teamLogoUrl(heroTeams[1].logo_file_name)}" class="w-12 h-12 object-contain rounded-lg bg-black/25 p-1 border bnn-border group-hover:border-sky-400 transition" alt="">
+          <div>
+            <div class="text-[9.5px] font-mono uppercase tracking-wider text-sky-400 font-bold">CONTENDER • ${heroTeams[1].record_str} (${fmtAvg(heroTeams[1].pct)})</div>
+            <div class="text-base font-black group-hover:text-sky-400 transition">${heroTeams[1].full_name}</div>
+            <div class="text-[11px] font-mono bnn-muted">${heroTeams[1].wrc_plus || 100} wRC+ • ${Number(heroTeams[1].fip || 4.0).toFixed(2)} FIP • ${Number(heroTeams[1].total_war || 0).toFixed(1)} WAR</div>
+          </div>
+        </div>
+      </div>
+    ` : (heroTeams.length === 1 ? `
+      <div onclick="switchTeamAndGo(${heroTeams[0].team_id})" class="bnn-subcard p-3.5 rounded-xl mb-4 flex flex-wrap items-center justify-between gap-3 cursor-pointer group">
+        <div class="flex items-center gap-3">
+          <img src="${teamLogoUrl(heroTeams[0].logo_file_name)}" class="w-12 h-12 object-contain rounded-lg bg-black/25 p-1 border bnn-border group-hover:border-red-500 transition" alt="">
+          <div>
+            <div class="text-[9.5px] font-mono uppercase tracking-wider text-amber-400 font-bold">${activeHead.badge || 'SPOTLIGHT FRANCHISE'}</div>
+            <div class="text-base font-black group-hover:text-red-400 transition">${heroTeams[0].full_name} (${heroTeams[0].record_str})</div>
+            <div class="text-[11px] font-mono bnn-muted">Last 10: <b class="text-emerald-400">${heroTeams[0].l10_str || '7-3'}</b> • Pyth: <b>${heroTeams[0].pyth_w || 0}-${heroTeams[0].pyth_l || 0}</b></div>
+          </div>
+        </div>
+        <div class="flex items-center gap-3 font-mono text-xs">
+          <div class="px-2.5 py-1 rounded bg-black/25 border bnn-border text-center">
+            <div class="text-[9px] bnn-muted">wRC+</div>
+            <div class="font-black text-amber-400">${heroTeams[0].wrc_plus || 100}</div>
+          </div>
+          <div class="px-2.5 py-1 rounded bg-black/25 border bnn-border text-center">
+            <div class="text-[9px] bnn-muted">RUN DIFF</div>
+            <div class="font-black ${(heroTeams[0].run_diff || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${(heroTeams[0].run_diff || 0) >= 0 ? '+' : ''}${heroTeams[0].run_diff || 0}</div>
+          </div>
+          <div class="px-2.5 py-1 rounded bg-black/25 border bnn-border text-center">
+            <div class="text-[9px] bnn-muted">TEAM WAR</div>
+            <div class="font-black text-sky-400">${Number(heroTeams[0].total_war || 0).toFixed(1)}</div>
+          </div>
+        </div>
+      </div>
+    ` : "");
+
+    centerHeroCardHtml = `
+      <div class="bnn-card bnn-hero-bg rounded-xl overflow-hidden">
+        <!-- Hero Kicker & Story Switcher Bar -->
+        <div class="px-4 py-2.5 border-b bnn-border flex flex-wrap items-center justify-between gap-2 bg-black/20">
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded bg-red-600 text-white font-mono font-black text-[10px] uppercase tracking-wider">${activeHead.badge || 'BNN LEAD STORY'}</span>
+            <span class="text-[11px] font-mono font-bold text-amber-400 truncate">${activeHead.kicker || ''}</span>
+          </div>
+          <div class="flex flex-wrap items-center gap-1">
+            <button onclick="setNewspaperHeadlineMode('auto')" class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bnn-pill-btn ${mode === 'auto' ? 'active' : ''}">Auto</button>
+            ${headlines.map(h => `
+              <button onclick="setNewspaperHeadlineMode('${h.id}')" class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bnn-pill-btn ${mode === h.id ? 'active' : ''}" title="${h.headline}">
+                ${h.id === 'matchup' ? 'Matchup' : (h.id === 'champions' ? 'Champs' : (h.id === 'phillies_fire' ? '7-3 Tear' : (h.id === 'hot_streak' ? 'L10 Surge' : 'MVP Watch')))}
+              </button>
+            `).join("")}
+          </div>
+        </div>
+
+        <div class="p-4 sm:p-5">
+          <h2 class="text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight leading-[1.12] mb-2" style="max-width: 34ch;">
+            ${activeHead.headline}
+          </h2>
+          <p class="text-sm sm:text-base bnn-muted font-medium leading-relaxed mb-4" style="max-width: 72ch;">
+            ${activeHead.subhead}
+          </p>
+
+          ${heroMatchupStrip}
+
+          <div class="space-y-2.5 text-sm leading-relaxed mb-4" style="max-width: 72ch;">
+            ${(activeHead.paragraphs || []).slice(0, 2).map(p => `<p class="mb-0 opacity-95">${p}</p>`).join("")}
+          </div>
+
+          <!-- Three Stars / OOTP+ Spotlight Bar -->
+          <div class="pt-3 border-t bnn-border">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[10px] font-mono font-extrabold uppercase tracking-wider text-amber-400">
+                <i class="bi bi-stars mr-1"></i> OOTP+ Three Stars of the League (Process & Value Pacesetters)
+              </span>
+              <span class="text-[10px] font-mono bnn-muted">${activeHead.byline || 'BNN Sabermetric Desk'}</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              ${[
+                { p: star1, role: "1ST STAR • BAT WAR", badge: star1 ? `${star1.wrc_plus || 100} wRC+` : "", val: star1 ? `${Number(star1.war || 0).toFixed(1)} WAR` : "" },
+                { p: star2, role: "2ND STAR • PITCH+", badge: star2 ? `${Number(star2.fip || 0).toFixed(2)} FIP` : "", val: star2 ? `${star2.pitch_plus || 100} P+` : "" },
+                { p: star3, role: "3RD STAR • POWER", badge: star3 ? `${fmtAvg(star3.slg || 0.500)} SLG` : "", val: star3 ? `${star3.hr || 0} HR` : "" },
+              ].map(st => st.p && st.p.player_id ? `
+                <div onclick="openPlayerModal(${st.p.player_id})" class="bnn-subcard p-2.5 rounded-lg flex items-center justify-between gap-2 cursor-pointer bnn-row-hover">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <img src="${playerPicUrl(st.p.player_id)}" class="w-8 h-9 object-cover rounded border bnn-border shrink-0" alt="">
+                    <div class="min-w-0">
+                      <div class="text-[9px] font-mono uppercase text-amber-400 font-bold truncate">${st.role}</div>
+                      <div class="text-xs font-extrabold truncate">${st.p.name} <span class="text-[10px] font-mono bnn-muted">(${st.p.team_abbr})</span></div>
+                      <div class="text-[10px] font-mono bnn-muted">${st.badge}</div>
+                    </div>
+                  </div>
+                  <span class="bnn-pct-95 px-1.5 py-0.5 rounded font-mono font-black text-[10.5px] shrink-0">${st.val}</span>
+                </div>
+              ` : "").join("")}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = `
+    <div class="animate-view ${themeCls} ${vpCls}">
+      <div class="bnn-shell">
+
+        <!-- 1. TOP HORIZONTAL SCOREBOARD STRIP ("BNN SCORES") -->
+        <div class="border-b bnn-border" style="background-color: var(--bnn-ticker-bg);">
+          <div class="flex items-stretch overflow-x-auto no-scrollbar">
+            <!-- BNN SCORES Branded Control Box -->
+            <div class="px-3 py-2 border-r bnn-border flex flex-col justify-between shrink-0 bg-black/25 min-w-[148px]">
+              <div class="flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                <span class="font-mono font-black text-xs tracking-wider uppercase text-red-500">BNN SCORES</span>
+              </div>
+              <div class="text-[10px] font-mono bnn-muted truncate my-0.5">${mast.dateline_date || `Season ${fp.selected_year}`}</div>
+              <div class="flex items-center gap-1 mt-0.5">
+                ${[
+                  { k: "ALL", l: "All" },
+                  { k: "CLOSE", l: "Close" },
+                  { k: "BLOWOUT", l: "3+ Run" },
+                ].map(f => `
+                  <button onclick="setFrontPageScoreFilter('${f.k}')" class="px-1.5 py-0.5 rounded text-[9.5px] font-mono font-bold bnn-pill-btn ${scoreFilter === f.k ? 'active' : ''}">
+                    ${f.l}
+                  </button>
+                `).join("")}
+              </div>
+            </div>
+
+            <!-- Scrollable Scoreboard Game Chips -->
+            <div class="flex items-stretch overflow-x-auto divide-x bnn-border">
+              ${displayGames.length ? displayGames.map(g => {
+                const awayWon = Number(g.away_runs) > Number(g.home_runs);
+                const diff = Math.abs(Number(g.away_runs) - Number(g.home_runs));
+                const isSelected = selectedGame && Number(selectedGame.game_id) === Number(g.game_id);
+                const awayRec = teamById[g.away_id]?.record_str || "";
+                const homeRec = teamById[g.home_id]?.record_str || "";
+                const levBadge = Number(g.innings || 9) > 9
+                  ? `<span class="px-1 rounded bg-amber-500/20 text-amber-400 text-[9px] font-bold">${g.innings} INN</span>`
+                  : (diff === 1 ? `<span class="px-1 rounded bg-red-500/20 text-red-400 text-[9px] font-bold">1-RUN</span>` : `<span class="text-[9px] bnn-muted">${g.date || 'FINAL'}</span>`);
+                return `
+                  <div onclick="selectFrontPageScoreGame(${g.game_id})" class="bnn-score-chip ${isSelected ? 'is-active' : ''} px-3 py-1.5 min-w-[152px] cursor-pointer flex flex-col justify-between shrink-0" title="Click to spotlight game in Center Hero, or double-click replay icon">
+                    <div class="flex items-center justify-between gap-2 text-[9.5px] font-mono mb-1">
+                      <span class="font-extrabold uppercase ${isSelected ? 'text-red-400' : 'bnn-muted'}">FINAL</span>
+                      ${levBadge}
+                    </div>
+                    <div class="space-y-0.5 font-mono text-xs" style="font-variant-numeric: tabular-nums;">
+                      <div class="flex items-center justify-between gap-2">
+                        <div class="flex items-center gap-1.5 min-w-0">
+                          <img src="${teamLogoUrl(g.away_logo || teamById[g.away_id]?.logo_file_name)}" class="w-3.5 h-3.5 object-contain shrink-0" alt="">
+                          <span class="${awayWon ? 'font-black' : 'bnn-muted'}">${g.away_abbr}</span>
+                          <span class="text-[9px] bnn-muted">${awayRec}</span>
+                        </div>
+                        <span class="${awayWon ? 'font-black' : 'bnn-muted'}">${g.away_runs}</span>
+                      </div>
+                      <div class="flex items-center justify-between gap-2">
+                        <div class="flex items-center gap-1.5 min-w-0">
+                          <img src="${teamLogoUrl(g.home_logo || teamById[g.home_id]?.logo_file_name)}" class="w-3.5 h-3.5 object-contain shrink-0" alt="">
+                          <span class="${!awayWon ? 'font-black' : 'bnn-muted'}">${g.home_abbr}</span>
+                          <span class="text-[9px] bnn-muted">${homeRec}</span>
+                        </div>
+                        <span class="${!awayWon ? 'font-black' : 'bnn-muted'}">${g.home_runs}</span>
+                      </div>
+                    </div>
+                  </div>
+                `;
+              }).join("") : `
+                <div class="px-4 py-3 text-xs font-mono bnn-muted flex items-center">No recent game box scores found for this filter.</div>
+              `}
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. BNN.COM | OOTP+ BROADCAST PORTAL HEADER BAR (WITH LOGO 3) -->
+        <div class="px-4 py-2.5 border-b bnn-border flex flex-wrap items-center justify-between gap-3" style="background-color: var(--bnn-header-bg); color: #F9FAFB;">
+          <!-- Left: Logo 3 ([B][N][N] .COM / OOTP+) + Quick Section Links -->
+          <div class="flex flex-wrap items-center gap-4">
+            <div class="flex items-center gap-2.5 select-none">
+              <svg width="212" height="34" viewBox="0 0 232 36" fill="none" xmlns="http://www.w3.org/2000/svg" class="shrink-0">
+                <g transform="skewX(-10)">
+                  <rect x="6" y="3" width="28" height="30" rx="4" fill="#CC0000"/>
+                  <rect x="7" y="4" width="26" height="28" rx="3" fill="#FFFFFF"/>
+                  <text x="20" y="25" text-anchor="middle" fill="#0B0E14" font-family="Inter, Impact, sans-serif" font-weight="900" font-size="21">B</text>
+                  <rect x="37" y="3" width="28" height="30" rx="4" fill="#CC0000"/>
+                  <rect x="38" y="4" width="26" height="28" rx="3" fill="#FFFFFF"/>
+                  <text x="51" y="25" text-anchor="middle" fill="#0B0E14" font-family="Inter, Impact, sans-serif" font-weight="900" font-size="21">N</text>
+                  <rect x="68" y="3" width="28" height="30" rx="4" fill="#CC0000"/>
+                  <rect x="69" y="4" width="26" height="28" rx="3" fill="#FFFFFF"/>
+                  <text x="82" y="25" text-anchor="middle" fill="#0B0E14" font-family="Inter, Impact, sans-serif" font-weight="900" font-size="21">N</text>
+                  <rect x="100" y="6" width="52" height="24" rx="4" fill="#CC0000"/>
+                  <text x="126" y="22" text-anchor="middle" fill="#FFFFFF" font-family="JetBrains Mono, monospace" font-weight="800" font-size="13" letter-spacing="0.5">.COM</text>
+                  <rect x="157" y="6" width="66" height="24" rx="4" fill="#F59E0B"/>
+                  <text x="190" y="22" text-anchor="middle" fill="#090D14" font-family="Inter, sans-serif" font-weight="900" font-size="13" letter-spacing="0.6">OOTP+</text>
+                </g>
+              </svg>
+              <div class="hidden sm:block pl-2 border-l border-slate-700">
+                <div class="text-[10px] font-mono uppercase tracking-wider text-amber-400 font-extrabold">${fp.active_league?.name || 'League'} Portal</div>
+                <div class="text-[11px] font-mono text-slate-300">${mast.environment_note || `Season ${fp.selected_year}`}</div>
+              </div>
+            </div>
+
+            <!-- Portal Sub-Nav Pills -->
+            <div class="hidden xl:flex items-center gap-1 text-xs font-bold">
+              <button onclick="switchTab('stretch')" class="px-2.5 py-1 rounded hover:bg-white/10 text-slate-200 transition flex items-center gap-1">
+                <i class="bi bi-flag-fill text-red-400"></i> The Stretch
+              </button>
+              <button onclick="switchTab('overview')" class="px-2.5 py-1 rounded hover:bg-white/10 text-slate-200 transition flex items-center gap-1">
+                <i class="bi bi-table text-amber-400"></i> Standings
+              </button>
+              <button onclick="switchTab('team')" class="px-2.5 py-1 rounded hover:bg-white/10 text-slate-200 transition flex items-center gap-1">
+                <i class="bi bi-shield-shaded text-sky-400"></i> Team Hub
+              </button>
+              <button onclick="switchTab('sabermetrics')" class="px-2.5 py-1 rounded hover:bg-white/10 text-slate-200 transition flex items-center gap-1">
+                <i class="bi bi-Activity text-emerald-400"></i> Statcast Lab
+              </button>
+              <button onclick="switchTab('leaders')" class="px-2.5 py-1 rounded hover:bg-white/10 text-slate-200 transition flex items-center gap-1">
+                <i class="bi bi-trophy-fill text-amber-300"></i> Leaders & HOF
+              </button>
+            </div>
+          </div>
+
+          <!-- Right: Adaptive Monitor Switcher, View Mode & Dark/Light Theme Toggle -->
+          <div class="flex flex-wrap items-center gap-2">
+            <!-- Viewport Mode Switcher (Auto / 16:9 UHD / 21:9 Ultrawide) -->
+            <div class="inline-flex items-center rounded-lg bg-slate-900/90 p-0.5 border border-slate-700 text-[10.5px] font-mono">
+              <button onclick="setFrontPageViewportMode('auto')" class="px-2 py-1 rounded-md font-bold transition ${vpMode === 'auto' ? 'bg-red-600 text-white' : 'text-slate-300 hover:text-white'}" title="Automatically expand to 5-Column Zero-Scroll Wall on 21:9 Ultrawide screens">
+                Auto Fit
+              </button>
+              <button onclick="setFrontPageViewportMode('standard')" class="px-2 py-1 rounded-md font-bold transition ${vpMode === 'standard' ? 'bg-red-600 text-white' : 'text-slate-300 hover:text-white'}" title="16:9 Standard UHD 3-Column Asymmetric Portal">
+                16:9 (3-Col)
+              </button>
+              <button onclick="setFrontPageViewportMode('ultrawide')" class="px-2 py-1 rounded-md font-bold transition ${vpMode === 'ultrawide' ? 'bg-red-600 text-white' : 'text-slate-300 hover:text-white'}" title="21:9 Ultrawide 5-Column Zero-Scroll Wall">
+                21:9 (5-Col Wall)
+              </button>
+            </div>
+
+            <!-- Dark (Default) vs Light Theme Toggle -->
+            <div class="inline-flex items-center rounded-lg bg-slate-900/90 p-0.5 border border-slate-700 text-[10.5px] font-mono">
+              <button onclick="setFrontPageTheme('dark')" class="px-2.5 py-1 rounded-md font-bold transition flex items-center gap-1 ${AppState.frontPageTheme !== 'light' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'}">
+                <i class="bi bi-moon-stars-fill"></i> Dark
+              </button>
+              <button onclick="setFrontPageTheme('light')" class="px-2.5 py-1 rounded-md font-bold transition flex items-center gap-1 ${AppState.frontPageTheme === 'light' ? 'bg-amber-400 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">
+                <i class="bi bi-sun-fill"></i> Light
+              </button>
+            </div>
+
+            <!-- Classic Broadsheet Mode Toggle -->
+            <button onclick="setFrontPageLayoutMode('broadsheet')" class="px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-amber-300 border border-slate-700 text-[10.5px] font-mono font-bold transition flex items-center gap-1" title="Switch to Classic Broadsheet Newspaper View">
+              <i class="bi bi-newspaper"></i> Broadsheet
+            </button>
+          </div>
+        </div>
+
+        <!-- 3. MAIN ADAPTIVE PORTAL GRID (3-Col on 16:9 UHD • 5-Col Zero-Scroll Wall on 21:9 Ultrawide) -->
+        <div class="p-3 sm:p-4">
+          <div class="bnn-portal-grid grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+
+            <!-- COLUMN 1 (ULTRAWIDE 21:9 ONLY): UNSTACKED FULL LEAGUE STANDINGS -->
+            <div class="bnn-col-item bnn-uw-only flex-col space-y-3">
+              <div class="bnn-card rounded-xl p-3">
+                <div class="flex items-center justify-between border-b bnn-border pb-2 mb-2.5">
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-1.5 h-4 rounded bg-red-600"></span>
+                    <span class="font-mono font-black text-xs uppercase tracking-wider">Full Standings</span>
+                  </div>
+                  <button onclick="switchTab('overview')" class="text-[10px] font-mono text-sky-400 hover:underline">Matrix &rarr;</button>
+                </div>
+                ${renderStandingsTableHtml(standingsGroups, true)}
+              </div>
+            </div>
+
+            <!-- COLUMN 2 (LEFT MARGIN ON 16:9 UHD lg:col-span-3 / COL 2 ON 21:9): BATTING STAT LEADERS + STREAK AUDIT -->
+            <div class="bnn-col-item lg:col-span-3 space-y-3.5">
+
+              <!-- Primary Batting Stat Leaders Card -->
+              <div class="bnn-card rounded-xl p-3.5">
+                <div class="flex items-center justify-between border-b bnn-border pb-2 mb-2.5">
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-1.5 h-4 rounded bg-red-600"></span>
+                    <span class="font-mono font-black text-xs uppercase tracking-wider">Batting Leaders</span>
+                  </div>
+                  <span class="px-1.5 py-0.5 rounded bg-red-600/15 text-red-400 font-mono font-extrabold text-[9.5px]">${batMeta.tag} • ${batMeta.label}</span>
+                </div>
+
+                <!-- Interactive Batting Category Pills (Sabermetric + Traditional) -->
+                <div class="flex flex-wrap gap-1 mb-3">
+                  ${Object.entries(batCatMeta).map(([k, m]) => `
+                    <button onclick="setFrontPageBatCat('${k}')" class="px-2 py-0.5 rounded text-[10px] font-mono font-extrabold bnn-pill-btn ${activeBatKey === k ? (m.tag === 'SABER' ? 'active' : 'active-blue') : ''}">
+                      ${m.label}
+                    </button>
+                  `).join("")}
+                </div>
+
+                <!-- Top 5 Batting Leaders Rows -->
+                <div class="divide-y bnn-border font-mono" style="font-variant-numeric: tabular-nums;">
+                  ${batRows.map((p, idx) => `
+                    <div onclick="openPlayerModal(${p.player_id})" class="py-2 px-1.5 flex items-center justify-between gap-2 bnn-row-hover cursor-pointer rounded">
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span class="text-[10px] font-black bnn-muted w-3.5">${idx + 1}</span>
+                        <img src="${playerPicUrl(p.player_id)}" class="w-7 h-8 object-cover rounded border bnn-border shrink-0" alt="">
+                        <div class="min-w-0 font-sans">
+                          <div class="text-xs font-extrabold truncate hover:text-red-400 transition">
+                            ${p.name} <span class="text-[10px] font-mono bnn-muted">(${p.team_abbr})</span>
+                          </div>
+                          <div class="text-[10px] font-mono bnn-muted truncate">${batMeta.proc(p)}</div>
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-1.5 shrink-0">
+                        <span class="bnn-pct-${batMeta.tier(p)} px-1.5 py-0.5 rounded text-[9.5px] font-extrabold">${p.wrc_plus || 100} wRC+</span>
+                        <span class="text-sm font-black w-11 text-right">${batMeta.fmt(p)}</span>
+                      </div>
+                    </div>
+                  `).join("")}
+                </div>
+
+                <!-- Pinned Batting Triple Crown Mini-Footer -->
+                <div class="mt-3 pt-2.5 border-t bnn-border">
+                  <div class="flex items-center justify-between text-[9.5px] font-mono uppercase tracking-wider bnn-muted mb-1.5">
+                    <span>Triple Crown Snapshot</span>
+                    <button onclick="switchTab('leaders')" class="text-sky-400 hover:underline font-bold">Full Board &rarr;</button>
+                  </div>
+                  <div class="grid grid-cols-3 gap-1.5 font-mono text-center">
+                    <div onclick="${tcAvgLeader.player_id ? `openPlayerModal(${tcAvgLeader.player_id})` : ''}" class="bnn-subcard p-1.5 rounded cursor-pointer bnn-row-hover">
+                      <div class="text-[9px] text-amber-400 font-bold">AVG</div>
+                      <div class="text-xs font-black">${fmtAvg(tcAvgLeader.avg || 0)}</div>
+                      <div class="text-[9.5px] bnn-muted truncate font-sans">${tcAvgLeader.name || '—'}</div>
+                    </div>
+                    <div onclick="${tcHrLeader.player_id ? `openPlayerModal(${tcHrLeader.player_id})` : ''}" class="bnn-subcard p-1.5 rounded cursor-pointer bnn-row-hover">
+                      <div class="text-[9px] text-amber-400 font-bold">HR</div>
+                      <div class="text-xs font-black">${tcHrLeader.hr || 0}</div>
+                      <div class="text-[9.5px] bnn-muted truncate font-sans">${tcHrLeader.name || '—'}</div>
+                    </div>
+                    <div onclick="${tcRbiLeader.player_id ? `openPlayerModal(${tcRbiLeader.player_id})` : ''}" class="bnn-subcard p-1.5 rounded cursor-pointer bnn-row-hover">
+                      <div class="text-[9px] text-amber-400 font-bold">RBI</div>
+                      <div class="text-xs font-black">${tcRbiLeader.rbi || 0}</div>
+                      <div class="text-[9.5px] bnn-muted truncate font-sans">${tcRbiLeader.name || '—'}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Active Streak Process Audit Card -->
+              <div class="bnn-card rounded-xl p-3.5">
+                <div class="flex items-center justify-between border-b bnn-border pb-2 mb-2.5">
+                  <div class="flex items-center gap-1.5">
+                    <i class="bi bi-fire text-amber-400"></i>
+                    <span class="font-mono font-black text-xs uppercase tracking-wider">Streak Process Audit</span>
+                  </div>
+                  <span class="text-[9.5px] font-mono bnn-muted">Savant Validation</span>
+                </div>
+                <div class="divide-y bnn-border">
+                  ${activeStreaks.length ? activeStreaks.slice(0, 5).map(st => {
+                    const sName = (st.streak_name && typeof st.streak_name === "object") ? (st.streak_name.name || "Streak") : (st.streak_name || "Streak");
+                    const sUnit = st.streak_unit || "G";
+                    const pName = st.player_name || st.name || `Player #${st.player_id}`;
+                    const tier = st.process_tier || "80";
+                    return `
+                      <div onclick="openPlayerModal(${st.player_id})" class="py-2 px-1 flex items-center justify-between gap-2 bnn-row-hover cursor-pointer rounded">
+                        <div class="flex items-center gap-2 min-w-0">
+                          <img src="${playerPicUrl(st.player_id)}" class="w-6 h-7 object-cover rounded border bnn-border shrink-0" alt="">
+                          <div class="min-w-0">
+                            <div class="text-xs font-bold truncate">${pName} <span class="text-[10px] font-mono bnn-muted">(${st.team_abbr})</span></div>
+                            <div class="text-[10px] font-mono bnn-muted truncate">${sName} • ${st.process_sub || ''}</div>
+                          </div>
+                        </div>
+                        <div class="flex items-center gap-1.5 shrink-0 font-mono">
+                          <span class="bnn-pct-${tier} px-1.5 py-0.5 rounded text-[9px] font-extrabold">${st.process_badge || 'ACTIVE'}</span>
+                          <span class="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-black text-xs">${st.value}${sUnit}</span>
+                        </div>
+                      </div>
+                    `;
+                  }).join("") : `
+                    <div class="py-3 text-xs font-mono bnn-muted text-center">No active multi-game streaks above threshold.</div>
+                  `}
+                </div>
+              </div>
+
+              <!-- True-Talent Power Rankings (Stacked in Left Margin on 16:9 Standard UHD) -->
+              <div class="bnn-card rounded-xl p-3.5 bnn-std-only">
+                <div class="flex items-center justify-between border-b bnn-border pb-2 mb-2.5">
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-1.5 h-4 rounded bg-amber-400"></span>
+                    <span class="font-mono font-black text-xs uppercase tracking-wider">True-Talent Power</span>
+                  </div>
+                  <span class="text-[9.5px] font-mono bnn-muted">Pyth W% • Luck Δ</span>
+                </div>
+                <div class="divide-y bnn-border font-mono text-xs" style="font-variant-numeric: tabular-nums;">
+                  ${powerRankings.slice(0, 6).map((t, i) => {
+                    const luck = Number(t.luck_diff || ((t.w || 0) - (t.pyth_w || 0)));
+                    return `
+                      <div onclick="switchTeamAndGo(${t.team_id})" class="py-1.5 px-1 flex items-center justify-between bnn-row-hover cursor-pointer rounded">
+                        <div class="flex items-center gap-2 min-w-0 font-sans">
+                          <span class="text-[10px] font-mono font-black bnn-muted w-3.5">${i + 1}</span>
+                          <img src="${teamLogoUrl(t.logo_file_name)}" class="w-4 h-4 object-contain shrink-0" alt="">
+                          <span class="font-bold truncate">${t.full_name}</span>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
+                          <span class="text-[10.5px] bnn-muted">${t.record_str}</span>
+                          <span class="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-400 font-black text-[10.5px]">${fmtAvg(t.pyth_pct || t.pct)}</span>
+                          <span class="text-[10px] w-7 text-right ${luck > 0 ? 'text-amber-400' : (luck < 0 ? 'text-emerald-400' : 'bnn-muted')}" title="Actual Wins minus Pythagorean Wins">${luck > 0 ? '+' : ''}${luck}W</span>
+                        </div>
+                      </div>
+                    `;
+                  }).join("")}
+                </div>
+              </div>
+
+            </div>
+
+            <!-- COLUMN 3 (CENTER STAGE lg:col-span-6 / COL 3 ON 21:9): HERO LEAD STORY + 2x2 STORYLINE FEED -->
+            <div class="bnn-col-item lg:col-span-6 space-y-3.5">
+              ${centerHeroCardHtml}
+
+              <!-- 2x2 Analytical Storyline & Intelligence Grid -->
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+
+                <!-- Story Card 1: Pythagorean / Luck Variance Alert -->
+                <div onclick="${mirageTeam.team_id ? `switchTeamAndGo(${mirageTeam.team_id})` : ''}" class="bnn-card rounded-xl p-3.5 cursor-pointer bnn-row-hover">
+                  <div class="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider mb-1.5">
+                    <span class="px-1.5 py-0.5 rounded ${mirageDiff > 0 ? 'bnn-pct-20' : 'bnn-pct-95'} font-extrabold">
+                      ${mirageDiff > 0 ? 'REGRESSION WARNING' : 'BREAKOUT CANDIDATE'}
+                    </span>
+                    <span class="bnn-muted">PYTHAGOREAN AUDIT</span>
+                  </div>
+                  <h3 class="text-sm font-black leading-snug mb-1">
+                    ${mirageTeam.full_name || 'Club'} Sitting at ${mirageDiff >= 0 ? `+${mirageDiff}` : mirageDiff} Wins vs. Pythagorean Expectation (${mirageTeam.pyth_w || 0}-${mirageTeam.pyth_l || 0})
+                  </h3>
+                  <p class="text-xs bnn-muted leading-relaxed mb-0">
+                    Actual ledger stands at <b>${mirageTeam.record_str || ''}</b> (${mirageTeam.run_diff >= 0 ? '+' : ''}${mirageTeam.run_diff || 0} RD, ${mirageTeam.wrc_plus || 100} wRC+, ${Number(mirageTeam.fip || 4.00).toFixed(2)} FIP).
+                  </p>
+                </div>
+
+                <!-- Story Card 2: Hottest L10 Momentum Surge -->
+                <div onclick="${hotClub.team_id ? `switchTeamAndGo(${hotClub.team_id})` : ''}" class="bnn-card rounded-xl p-3.5 cursor-pointer bnn-row-hover">
+                  <div class="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider mb-1.5">
+                    <span class="px-1.5 py-0.5 rounded bnn-pct-95 font-extrabold">L10 MOMENTUM SURGE</span>
+                    <span class="text-emerald-400 font-bold">${hotClub.l10_str || '8-2'} L10</span>
+                  </div>
+                  <h3 class="text-sm font-black leading-snug mb-1">
+                    ${hotClub.full_name || 'Contenders'} Rip Off ${hotClub.l10_str || '8-2'} Tear (${(hotClub.l10_run_diff || 0) >= 0 ? '+' : ''}${hotClub.l10_run_diff || 0} L10 Run Diff)
+                  </h3>
+                  <p class="text-xs bnn-muted leading-relaxed mb-0">
+                    Backed by a ${hotClub.wrc_plus || 100} team wRC+ and ${Number(hotClub.era || 3.85).toFixed(2)} staff ERA, pushing postseason odds to <b>${Number(hotClub.playoff_prob || 50).toFixed(0)}%</b>.
+                  </p>
+                </div>
+
+                <!-- Story Card 3: Tightest Division / Cutline Battle -->
+                <div onclick="switchTab('stretch')" class="bnn-card rounded-xl p-3.5 cursor-pointer bnn-row-hover">
+                  <div class="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider mb-1.5">
+                    <span class="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-400/40 font-extrabold">PENNANT CUTLINE</span>
+                    <span class="bnn-muted">${tightestRace?.race_status || 'STRETCH WATCH'}</span>
+                  </div>
+                  <h3 class="text-sm font-black leading-snug mb-1">
+                    ${tightestRace ? `${tightestRace.title}: Top Clubs Separated by ${tightestRace.lead_gb} GB` : 'Postseason Bracket & Pennant Race Pulse'}
+                  </h3>
+                  <p class="text-xs bnn-muted leading-relaxed mb-0">
+                    Inspect Magic Numbers, remaining Strength of Schedule, and live series trees on <b>The Stretch</b> &rarr;
+                  </p>
+                </div>
+
+                <!-- Story Card 4: Latest Front Office Wire Dispatch -->
+                <div ${topWire.player_id ? `onclick="openPlayerModal(${topWire.player_id})"` : (topWire.team_id ? `onclick="switchTeamAndGo(${topWire.team_id})"` : '')} class="bnn-card rounded-xl p-3.5 cursor-pointer bnn-row-hover">
+                  <div class="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider mb-1.5">
+                    <span class="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-400 border border-sky-400/40 font-extrabold">${topWire.category || 'BNN WIRE'}</span>
+                    <span class="bnn-muted">${topWire.team_abbr || ''} • ${topWire.date || ''}</span>
+                  </div>
+                  <h3 class="text-sm font-black leading-snug mb-1 line-clamp-1">
+                    ${topWire.headline}
+                  </h3>
+                  <p class="text-xs bnn-muted leading-relaxed mb-0 line-clamp-2">
+                    ${topWire.body}
+                  </p>
+                </div>
+
+              </div>
+            </div>
+
+            <!-- COLUMN 4 (RIGHT MARGIN ON 16:9 UHD lg:col-span-3 / COL 4 ON 21:9): PITCHING STAT LEADERS + STANDINGS -->
+            <div class="bnn-col-item lg:col-span-3 space-y-3.5">
+
+              <!-- Primary Pitching Stat Leaders Card -->
+              <div class="bnn-card rounded-xl p-3.5">
+                <div class="flex items-center justify-between border-b bnn-border pb-2 mb-2.5">
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-1.5 h-4 rounded bg-blue-600"></span>
+                    <span class="font-mono font-black text-xs uppercase tracking-wider">Pitching Leaders</span>
+                  </div>
+                  <span class="px-1.5 py-0.5 rounded bg-blue-600/15 text-sky-400 font-mono font-extrabold text-[9.5px]">${pitMeta.tag} • ${pitMeta.label}</span>
+                </div>
+
+                <!-- Interactive Pitching Category Pills (Sabermetric + Traditional) -->
+                <div class="flex flex-wrap gap-1 mb-3">
+                  ${Object.entries(pitCatMeta).map(([k, m]) => `
+                    <button onclick="setFrontPagePitCat('${k}')" class="px-2 py-0.5 rounded text-[10px] font-mono font-extrabold bnn-pill-btn ${activePitKey === k ? (m.tag === 'SABER' ? 'active' : 'active-blue') : ''}">
+                      ${m.label}
+                    </button>
+                  `).join("")}
+                </div>
+
+                <!-- Top 5 Pitching Leaders Rows -->
+                <div class="divide-y bnn-border font-mono" style="font-variant-numeric: tabular-nums;">
+                  ${pitRows.map((p, idx) => `
+                    <div onclick="openPlayerModal(${p.player_id})" class="py-2 px-1.5 flex items-center justify-between gap-2 bnn-row-hover cursor-pointer rounded">
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span class="text-[10px] font-black bnn-muted w-3.5">${idx + 1}</span>
+                        <img src="${playerPicUrl(p.player_id)}" class="w-7 h-8 object-cover rounded border bnn-border shrink-0" alt="">
+                        <div class="min-w-0 font-sans">
+                          <div class="text-xs font-extrabold truncate hover:text-sky-400 transition">
+                            ${p.name} <span class="text-[10px] font-mono bnn-muted">(${p.team_abbr})</span>
+                          </div>
+                          <div class="text-[10px] font-mono bnn-muted truncate">${pitMeta.proc(p)} • ${p.ip || 0} IP</div>
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-1.5 shrink-0">
+                        <span class="bnn-pct-${pitMeta.tier(p)} px-1.5 py-0.5 rounded text-[9.5px] font-extrabold">${p.stuff_plus || 100} Stf+</span>
+                        <span class="text-sm font-black w-11 text-right">${pitMeta.fmt(p)}</span>
+                      </div>
+                    </div>
+                  `).join("")}
+                </div>
+
+                <!-- Pinned Pitching Triple Crown Mini-Footer -->
+                <div class="mt-3 pt-2.5 border-t bnn-border">
+                  <div class="flex items-center justify-between text-[9.5px] font-mono uppercase tracking-wider bnn-muted mb-1.5">
+                    <span>Pitching Triple Crown</span>
+                    <button onclick="switchTab('leaders')" class="text-sky-400 hover:underline font-bold">Full Board &rarr;</button>
+                  </div>
+                  <div class="grid grid-cols-3 gap-1.5 font-mono text-center">
+                    <div onclick="${tcEraLeader.player_id ? `openPlayerModal(${tcEraLeader.player_id})` : ''}" class="bnn-subcard p-1.5 rounded cursor-pointer bnn-row-hover">
+                      <div class="text-[9px] text-sky-400 font-bold">ERA</div>
+                      <div class="text-xs font-black">${Number(tcEraLeader.era || 0).toFixed(2)}</div>
+                      <div class="text-[9.5px] bnn-muted truncate font-sans">${tcEraLeader.name || '—'}</div>
+                    </div>
+                    <div onclick="${tcSoLeader.player_id ? `openPlayerModal(${tcSoLeader.player_id})` : ''}" class="bnn-subcard p-1.5 rounded cursor-pointer bnn-row-hover">
+                      <div class="text-[9px] text-sky-400 font-bold">SO</div>
+                      <div class="text-xs font-black">${tcSoLeader.k || 0}</div>
+                      <div class="text-[9.5px] bnn-muted truncate font-sans">${tcSoLeader.name || '—'}</div>
+                    </div>
+                    <div onclick="${tcSvLeader.player_id ? `openPlayerModal(${tcSvLeader.player_id})` : ''}" class="bnn-subcard p-1.5 rounded cursor-pointer bnn-row-hover">
+                      <div class="text-[9px] text-sky-400 font-bold">SV</div>
+                      <div class="text-xs font-black">${tcSvLeader.sv || 0}</div>
+                      <div class="text-[9.5px] bnn-muted truncate font-sans">${tcSvLeader.name || '—'}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Interactive Division Standings & Wild Card Cutlines (Right Margin on 16:9 UHD) -->
+              <div class="bnn-card rounded-xl p-3.5 bnn-std-only">
+                <div class="flex items-center justify-between border-b bnn-border pb-2 mb-2.5">
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-1.5 h-4 rounded bg-emerald-500"></span>
+                    <span class="font-mono font-black text-xs uppercase tracking-wider">Standings & Odds</span>
+                  </div>
+                  <button onclick="switchTab('overview')" class="text-[10px] font-mono text-sky-400 hover:underline">Full Table &rarr;</button>
+                </div>
+
+                <!-- Division / Wild Card Filter Pills -->
+                <div class="flex flex-wrap gap-1 mb-2.5">
+                  <button onclick="setFrontPageStandingsFilter('ALL')" class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bnn-pill-btn ${stFilter === 'ALL' ? 'active' : ''}">All</button>
+                  ${standingsGroups.map((g, i) => `
+                    <button onclick="setFrontPageStandingsFilter('DIV_${i}')" class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bnn-pill-btn ${stFilter === `DIV_${i}` ? 'active' : ''}">${g.title}</button>
+                  `).join("")}
+                  ${wildCards.length ? `
+                    <button onclick="setFrontPageStandingsFilter('WC')" class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bnn-pill-btn ${stFilter === 'WC' ? 'active-blue' : ''}">Wild Card</button>
+                  ` : ""}
+                </div>
+
+                ${rightMarginStandingsHtml}
+              </div>
+
+            </div>
+
+            <!-- COLUMN 5 (ULTRAWIDE 21:9 ONLY): UNSTACKED TRUE-TALENT POWER RANKINGS & WIRE -->
+            <div class="bnn-col-item bnn-uw-only flex-col space-y-3.5">
+              <div class="bnn-card rounded-xl p-3.5">
+                <div class="flex items-center justify-between border-b bnn-border pb-2 mb-2.5">
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-1.5 h-4 rounded bg-amber-400"></span>
+                    <span class="font-mono font-black text-xs uppercase tracking-wider">True-Talent Power</span>
+                  </div>
+                  <span class="text-[9.5px] font-mono bnn-muted">Pyth W% • Luck Δ</span>
+                </div>
+                <div class="divide-y bnn-border font-mono text-xs" style="font-variant-numeric: tabular-nums;">
+                  ${powerRankings.slice(0, 8).map((t, i) => {
+                    const luck = Number(t.luck_diff || ((t.w || 0) - (t.pyth_w || 0)));
+                    return `
+                      <div onclick="switchTeamAndGo(${t.team_id})" class="py-1.5 px-1 flex items-center justify-between bnn-row-hover cursor-pointer rounded">
+                        <div class="flex items-center gap-1.5 min-w-0 font-sans">
+                          <span class="text-[10px] font-mono font-black bnn-muted w-3.5">${i + 1}</span>
+                          <img src="${teamLogoUrl(t.logo_file_name)}" class="w-4 h-4 object-contain shrink-0" alt="">
+                          <span class="font-bold truncate">${t.nickname || t.name}</span>
+                        </div>
+                        <div class="flex items-center gap-1.5 shrink-0">
+                          <span class="text-[10px] bnn-muted">${t.record_str}</span>
+                          <span class="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-400 font-black text-[10px]">${fmtAvg(t.pyth_pct || t.pct)}</span>
+                          <span class="text-[10px] w-6 text-right ${luck > 0 ? 'text-amber-400' : (luck < 0 ? 'text-emerald-400' : 'bnn-muted')}">${luck > 0 ? '+' : ''}${luck}</span>
+                        </div>
+                      </div>
+                    `;
+                  }).join("")}
+                </div>
+              </div>
+
+              <!-- Wire Dispatches in Col 5 on 21:9 Ultrawide -->
+              <div class="bnn-card rounded-xl p-3.5">
+                <div class="flex items-center justify-between border-b bnn-border pb-2 mb-2.5">
+                  <div class="flex items-center gap-1.5">
+                    <i class="bi bi-broadcast text-sky-400"></i>
+                    <span class="font-mono font-black text-xs uppercase tracking-wider">BNN Transaction Wire</span>
+                  </div>
+                </div>
+                <div class="space-y-2">
+                  ${wireStories.slice(0, 4).map(ws => `
+                    <div ${ws.player_id ? `onclick="openPlayerModal(${ws.player_id})"` : (ws.team_id ? `onclick="switchTeamAndGo(${ws.team_id})"` : '')} class="bnn-subcard p-2.5 rounded-lg cursor-pointer bnn-row-hover">
+                      <div class="flex items-center justify-between text-[9px] font-mono uppercase text-sky-400 font-bold mb-0.5">
+                        <span>${ws.category} • ${ws.team_abbr}</span>
+                        <span class="bnn-muted">${ws.date || ''}</span>
+                      </div>
+                      <div class="text-xs font-bold leading-snug mb-1">${ws.headline}</div>
+                      <div class="text-[11px] bnn-muted line-clamp-2">${ws.body}</div>
+                    </div>
+                  `).join("")}
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </div>
+  `;
+}
+
 async function renderFrontPageTab(container) {
   if (!AppState.frontPageData) {
-    showLoading("Typesetting Broadsheet Front Page & Headlines...");
+    showLoading("Loading BNN.COM | OOTP+ League Portal...");
     try {
       const params = new URLSearchParams({ save: AppState.activeSave });
       if (AppState.activeLeagueId) params.set("league_id", AppState.activeLeagueId);
@@ -8739,6 +9730,11 @@ async function renderFrontPageTab(container) {
     hero_teams: [],
     paragraphs: [],
   };
+
+  if (AppState.frontPageLayoutMode !== "broadsheet") {
+    renderBnnPortalFrontPage(container, fp, activeHead);
+    return;
+  }
 
   const standingsGroups = fp.standings_groups || [];
   const wildCards = fp.wild_cards || [];
@@ -8922,6 +9918,9 @@ async function renderFrontPageTab(container) {
           `).join("")}
         </div>
         <div class="flex items-center gap-2">
+          <button onclick="setFrontPageLayoutMode('portal')" class="px-3 py-1 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs font-mono font-extrabold shadow transition flex items-center gap-1.5">
+            <i class="bi bi-broadcast-pin"></i> BNN.COM | OOTP+ Portal
+          </button>
           <button onclick="toggleNewspaperPaperTheme()" class="px-3 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-amber-200 border border-slate-700 text-xs font-mono font-bold transition flex items-center gap-1.5">
             <i class="bi ${isLightPaper ? 'bi-moon-stars-fill text-sky-400' : 'bi-journal-richtext text-amber-300'}"></i>
             ${isLightPaper ? 'Dark Broadsheet Ink' : 'Classic Warm Newsprint'}
@@ -9221,6 +10220,7 @@ async function renderFrontPageTab(container) {
 
 /* ============================================================================
  * 13. "THE STRETCH" SCREEN — PENNANT RACES, WILD CARD CUTLINES & PLAYOFF BRACKETS
+ *     Option 1: BNN.COM | OOTP+ Playoff Machine Portal & MLB Broadcast Bracket Poster
  * ============================================================================ */
 window.toggleStretchLeagueSelection = async function(lid, mode = "toggle") {
   const numId = Number(lid);
@@ -9247,6 +10247,93 @@ window.toggleStretchLeagueSelection = async function(lid, mode = "toggle") {
   if (container) await renderStretchTab(container);
 };
 
+window.setStretchTheme = function(themeMode) {
+  AppState.frontPageTheme = themeMode === "light" ? "light" : "dark";
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "stretch") {
+    renderStretchTab(container);
+  }
+};
+
+window.setStretchViewportMode = function(vpMode) {
+  AppState.frontPageViewportMode = vpMode || "auto";
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "stretch") {
+    renderStretchTab(container);
+  }
+};
+
+window.setStretchViewMode = function(viewMode) {
+  AppState.stretchViewMode = viewMode || "portal";
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "stretch") {
+    renderStretchTab(container);
+  }
+};
+
+window.setStretchWormMode = function(wormMode) {
+  AppState.stretchWormMode = wormMode || "odds";
+  const st = AppState.stretchData || {};
+  const packages = st.league_packages || [];
+  packages.forEach((pkg, idx) => {
+    const lg = pkg.league || {};
+    const canvasId = `stretch-worm-chart-${lg.league_id}-${idx}`;
+    const titleEl = document.getElementById(`stretch-worm-title-${pkg.league_id}-${idx}`);
+    if (titleEl) {
+      titleEl.textContent = wormMode === "500"
+        ? "Cumulative Pennant Race Worm (Games Above / Below .500)"
+        : (wormMode === "xwoba" ? "Rolling 15-Game Team Contact Quality Trajectory (xwOBA)" : "Cumulative Playoff Probability Trajectory (0% – 100%)");
+    }
+    ["odds", "500", "xwoba"].forEach(m => {
+      const btn = document.getElementById(`stretch-worm-btn-${m}-${lg.league_id}-${idx}`);
+      if (btn) {
+        if (m === wormMode) btn.classList.add("active-blue");
+        else btn.classList.remove("active-blue");
+      }
+    });
+    if (typeof renderStretchTrajectoryChart === "function") {
+      renderStretchTrajectoryChart(canvasId, pkg.trajectories || [], wormMode);
+    }
+  });
+};
+
+window.setStretchRightFilter = function(filterMode, pkgIdx = 0) {
+  AppState.stretchRightFilter = filterMode || "tight";
+  const root = document.getElementById(`stretch-right-races-${pkgIdx}`);
+  if (!root) {
+    const container = document.getElementById("main-view-container");
+    if (container && AppState.activeTab === "stretch") renderStretchTab(container);
+    return;
+  }
+  root.querySelectorAll("[data-stretch-race]").forEach(el => {
+    const tags = (el.getAttribute("data-stretch-race") || "").split(" ");
+    el.style.display = tags.includes(filterMode) ? "" : "none";
+  });
+  ["tight", "sl0", "sl1", "wc"].forEach(k => {
+    const btn = document.getElementById(`stretch-rf-btn-${pkgIdx}-${k}`);
+    if (btn) {
+      if (k === filterMode) btn.classList.add("active");
+      else btn.classList.remove("active");
+    }
+  });
+};
+
+window.inspectStretchPosterSeries = function(pkgIdx, seriesId) {
+  AppState.stretchSelectedSeriesByPkg = AppState.stretchSelectedSeriesByPkg || {};
+  AppState.stretchSelectedSeriesByPkg[pkgIdx] = seriesId;
+  const st = AppState.stretchData || {};
+  const pkg = (st.league_packages || [])[pkgIdx];
+  const sMap = (pkg && pkg.poster_bracket && pkg.poster_bracket.series_map) || {};
+  const d = sMap[seriesId];
+  if (!d) return;
+  const bEl = document.getElementById(`svg-si-badge-${pkgIdx}`);
+  const tEl = document.getElementById(`svg-si-title-${pkgIdx}`);
+  const mEl = document.getElementById(`svg-si-metrics-${pkgIdx}`);
+  if (bEl) bEl.textContent = d.telemetry_badge || "★ SHORT-SERIES TELEMETRY";
+  if (tEl) tEl.textContent = d.telemetry_title || "";
+  if (mEl) mEl.textContent = d.telemetry_metrics || "";
+};
+
 async function renderStretchTab(container) {
   if (!AppState.stretchLeagueIds || !AppState.stretchLeagueIds.length) {
     AppState.stretchLeagueIds = [AppState.activeLeagueId || 100];
@@ -9271,385 +10358,1044 @@ async function renderStretchTab(container) {
   const packages = st.league_packages || [];
   const selectedSet = new Set(st.selected_league_ids || AppState.stretchLeagueIds);
 
+  const themeCls = AppState.frontPageTheme === "light" ? "bnn-portal-light" : "bnn-portal-dark";
+  const vpMode = AppState.frontPageViewportMode || "auto";
+  const vpCls = vpMode === "ultrawide" ? "bnn-vp-ultrawide" : (vpMode === "standard" ? "bnn-vp-standard" : "bnn-vp-auto");
+  const wormMode = AppState.stretchWormMode || "odds";
+  const viewMode = AppState.stretchViewMode || "portal";
+  const rightFilter = AppState.stretchRightFilter || "tight";
+
+  const renderSvgPostseasonPoster = (pkg, pkgIdx) => {
+    const pb = pkg.poster_bracket || {};
+    const leftArm = pb.left_arm || {};
+    const rightArm = pb.right_arm || {};
+    const ws = pb.world_series || {};
+    const sMap = pb.series_map || {};
+    const activeSeriesId = (AppState.stretchSelectedSeriesByPkg && AppState.stretchSelectedSeriesByPkg[pkgIdx]) || pb.default_series_id || "world_series";
+    const activeTelem = sMap[activeSeriesId] || ws || {};
+
+    const lSeed1 = leftArm.seed1 || {};
+    const lSeed2 = leftArm.seed2 || {};
+    const lWcTop = leftArm.wc_top || { team0: {}, team1: {}, prob0: 50, prob1: 50 };
+    const lWcBot = leftArm.wc_bot || { team0: {}, team1: {}, prob0: 50, prob1: 50 };
+    const lDsTop = leftArm.ds_top || { team0: {}, team1: {}, prob0: 55, prob1: 45, best_of: 5 };
+    const lDsBot = leftArm.ds_bot || { team0: {}, team1: {}, prob0: 55, prob1: 45, best_of: 5 };
+    const lLcs = leftArm.lcs || { team0: {}, team1: {}, prob0: 52, prob1: 48, best_of: 7 };
+
+    const rSeed1 = rightArm.seed1 || {};
+    const rSeed2 = rightArm.seed2 || {};
+    const rWcTop = rightArm.wc_top || { team0: {}, team1: {}, prob0: 50, prob1: 50 };
+    const rWcBot = rightArm.wc_bot || { team0: {}, team1: {}, prob0: 50, prob1: 50 };
+    const rDsTop = rightArm.ds_top || { team0: {}, team1: {}, prob0: 55, prob1: 45, best_of: 5 };
+    const rDsBot = rightArm.ds_bot || { team0: {}, team1: {}, prob0: 55, prob1: 45, best_of: 5 };
+    const rLcs = rightArm.lcs || { team0: {}, team1: {}, prob0: 52, prob1: 48, best_of: 7 };
+
+    const lDsTopFav = (lDsTop.prob0 >= 50 ? lDsTop.team0 : lDsTop.team1) || lSeed1;
+    const lDsBotFav = (lDsBot.prob0 >= 50 ? lDsBot.team0 : lDsBot.team1) || lSeed2;
+    const rDsTopFav = (rDsTop.prob0 >= 50 ? rDsTop.team0 : rDsTop.team1) || rSeed1;
+    const rDsBotFav = (rDsBot.prob0 >= 50 ? rDsBot.team0 : rDsBot.team1) || rSeed2;
+
+    const yrStr = String(pkg.season_year || 2026);
+    const yrTop = yrStr.slice(0, 2);
+    const yrBot = yrStr.slice(2);
+    const wsCaption = ws.finished
+      ? (ws.status_label || `${ws.team0?.abbr || 'NL'} vs ${ws.team1?.abbr || 'AL'}`)
+      : `${ws.team0?.abbr || 'NL'} (${Number(ws.team0?.ws_prob || ws.prob0 || 50).toFixed(1)}%) vs ${ws.team1?.abbr || 'AL'} (${Number(ws.team1?.ws_prob || ws.prob1 || 50).toFixed(1)}%)`;
+
+    return `
+      <div class="rounded-xl overflow-hidden shadow-2xl border border-slate-700/80 postseason-poster">
+        <div class="w-full overflow-x-auto">
+          <svg viewBox="0 0 960 545" class="w-full h-auto min-w-[680px] select-none block" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="chromeGrad_${pkgIdx}" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stop-color="#FFFFFF" />
+                <stop offset="48%" stop-color="#CBD5E1" />
+                <stop offset="53%" stop-color="#64748B" />
+                <stop offset="100%" stop-color="#F8FAFC" />
+              </linearGradient>
+              <linearGradient id="goldGrad_${pkgIdx}" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stop-color="#FEF08A" />
+                <stop offset="45%" stop-color="#F59E0B" />
+                <stop offset="100%" stop-color="#B45309" />
+              </linearGradient>
+              <linearGradient id="goldHoriz_${pkgIdx}" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#B45309" />
+                <stop offset="50%" stop-color="#FDE047" />
+                <stop offset="100%" stop-color="#B45309" />
+              </linearGradient>
+              <linearGradient id="silverLine_${pkgIdx}" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#94A3B8" />
+                <stop offset="50%" stop-color="#FFFFFF" />
+                <stop offset="100%" stop-color="#CBD5E1" />
+              </linearGradient>
+              <filter id="dropShadow_${pkgIdx}" x="-10%" y="-10%" width="120%" height="120%">
+                <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000000" flood-opacity="0.7" />
+              </filter>
+              <filter id="goldGlow_${pkgIdx}" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#F59E0B" flood-opacity="0.45" />
+              </filter>
+            </defs>
+
+            <!-- Subtle Background Pennant Stave Silhouette Rays -->
+            <g opacity="0.06" stroke="#94A3B8" stroke-width="4">
+              <line x1="250" y1="545" x2="340" y2="390" />
+              <line x1="295" y1="545" x2="370" y2="395" />
+              <line x1="340" y1="545" x2="400" y2="400" />
+              <line x1="620" y1="545" x2="560" y2="400" />
+              <line x1="665" y1="545" x2="590" y2="395" />
+              <line x1="710" y1="545" x2="620" y2="390" />
+            </g>
+
+            <!-- 1. TOP CENTER MASTHEAD: "POSTSEASON [YEAR]" -->
+            <g filter="url(#dropShadow_${pkgIdx})">
+              <rect x="285" y="18" width="390" height="2.5" fill="url(#goldHoriz_${pkgIdx})" />
+              <rect x="285" y="76" width="390" height="2.5" fill="url(#goldHoriz_${pkgIdx})" />
+              <text x="456" y="66" text-anchor="middle" fill="url(#chromeGrad_${pkgIdx})" font-family="'Oswald', 'Impact', sans-serif" font-weight="700" font-size="52" letter-spacing="2">
+                POSTSEASON
+              </text>
+              <text x="646" y="39" text-anchor="middle" fill="url(#goldGrad_${pkgIdx})" font-family="'Oswald', sans-serif" font-weight="700" font-size="18" letter-spacing="1">${yrTop}</text>
+              <rect x="630" y="43" width="32" height="14" rx="2" fill="#0F172A" stroke="#F8FAFC" stroke-width="1.2" />
+              <rect x="631.5" y="44.5" width="14" height="11" fill="#2563EB" />
+              <rect x="646.5" y="44.5" width="14" height="11" fill="#DC2626" />
+              <circle cx="646" cy="50" r="2.8" fill="#FFFFFF" />
+              <text x="646" y="72" text-anchor="middle" fill="url(#goldGrad_${pkgIdx})" font-family="'Oswald', sans-serif" font-weight="700" font-size="18" letter-spacing="1">${yrBot}</text>
+            </g>
+
+            <!-- 2. STAGE HEADERS: WILD CARD / LDS / LCS -->
+            <g filter="url(#dropShadow_${pkgIdx})" text-anchor="middle" font-family="'Oswald', sans-serif" font-weight="700">
+              <text x="82" y="96" fill="url(#chromeGrad_${pkgIdx})" font-size="18" letter-spacing="1">WILD CARD</text>
+              <line x1="40" y1="100" x2="124" y2="100" stroke="#94A3B8" stroke-width="1.2" />
+              <text x="82" y="114" fill="#CBD5E1" font-size="14" letter-spacing="2.5">SERIES</text>
+              <text x="215" y="142" fill="url(#chromeGrad_${pkgIdx})" font-size="27" letter-spacing="1">${leftArm.ds_title || 'NLDS'}</text>
+              <text x="342" y="178" fill="url(#goldGrad_${pkgIdx})" font-size="27" letter-spacing="1">${leftArm.cs_title || 'NLCS'}</text>
+
+              <text x="878" y="96" fill="url(#chromeGrad_${pkgIdx})" font-size="18" letter-spacing="1">WILD CARD</text>
+              <line x1="836" y1="100" x2="920" y2="100" stroke="#94A3B8" stroke-width="1.2" />
+              <text x="878" y="114" fill="#CBD5E1" font-size="14" letter-spacing="2.5">SERIES</text>
+              <text x="745" y="142" fill="url(#chromeGrad_${pkgIdx})" font-size="27" letter-spacing="1">${rightArm.ds_title || 'ALDS'}</text>
+              <text x="618" y="178" fill="url(#goldGrad_${pkgIdx})" font-size="27" letter-spacing="1">${rightArm.cs_title || 'ALCS'}</text>
+            </g>
+
+            <!-- 3. LEFT SIDE BRACKET LINES & TEAMS -->
+            <g class="bracket-slot-hit" onclick="inspectStretchPosterSeries(${pkgIdx}, 'left_ds_top')" ondblclick="${lSeed1.team_id ? `switchTeamAndGo(${lSeed1.team_id})` : ''}">
+              <text x="26" y="138" fill="#FDE047" font-family="'Inter', sans-serif" font-weight="800" font-size="10.5">${leftArm.abbr || 'NL'} #1 · ${lSeed1.abbr || 'TBD'} ${(lSeed1.nickname || '').toUpperCase().slice(0, 10)} (${lSeed1.record_str || ''})</text>
+              <text x="150" y="152" text-anchor="end" fill="#34D399" font-family="'JetBrains Mono', monospace" font-weight="700" font-size="9.5">1ST-RD BYE · ${Number(lSeed1.ws_prob || 18).toFixed(1)}% WS</text>
+              <polyline points="26,143 154,143 154,154" fill="none" stroke="#E2E8F0" stroke-width="2.5" />
+            </g>
+
+            <g class="bracket-slot-hit" onclick="inspectStretchPosterSeries(${pkgIdx}, 'left_wc_top')">
+              <text x="26" y="198" fill="#FFFFFF" font-family="'Inter', sans-serif" font-weight="800" font-size="10.5">#4 ${lWcTop.team0?.abbr || 'WC1'} ${(lWcTop.team0?.nickname || '').toUpperCase().slice(0, 9)} (${lWcTop.team0?.record_str || ''})</text>
+              <text x="150" y="198" text-anchor="end" fill="${lWcTop.prob0 >= 50 ? '#34D399' : '#94A3B8'}" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="10">${lWcTop.prob0}%</text>
+              <text x="26" y="233" fill="#CBD5E1" font-family="'Inter', sans-serif" font-weight="700" font-size="10.5">#5 ${lWcTop.team1?.abbr || 'WC2'} ${(lWcTop.team1?.nickname || '').toUpperCase().slice(0, 9)} (${lWcTop.team1?.record_str || ''})</text>
+              <text x="150" y="233" text-anchor="end" fill="${lWcTop.prob1 > 50 ? '#34D399' : '#94A3B8'}" font-family="'JetBrains Mono', monospace" font-weight="700" font-size="10">${lWcTop.prob1}%</text>
+              <polyline points="26,203 154,203 154,238 26,238" fill="none" stroke="#E2E8F0" stroke-width="2.5" />
+            </g>
+
+            <g class="bracket-slot-hit" onclick="inspectStretchPosterSeries(${pkgIdx}, 'left_ds_top')">
+              <polyline points="154,154 278,154 278,221 154,221" fill="none" stroke="url(#silverLine_${pkgIdx})" stroke-width="3.5" />
+              <text x="268" y="185" text-anchor="end" fill="#FFFFFF" font-family="'Inter', sans-serif" font-weight="800" font-size="11">${lDsTopFav.abbr || 'TBD'} ${Math.max(lDsTop.prob0 || 55, lDsTop.prob1 || 45)}% ADV</text>
+              <text x="268" y="200" text-anchor="end" fill="#94A3B8" font-family="'Inter', sans-serif" font-weight="600" font-size="10">BEST OF ${lDsTop.best_of || 5}</text>
+            </g>
+
+            <g class="bracket-slot-hit" onclick="inspectStretchPosterSeries(${pkgIdx}, 'left_wc_bot')">
+              <text x="26" y="302" fill="${lWcBot.team0?.is_mirage ? '#FBBF24' : '#FFFFFF'}" font-family="'Inter', sans-serif" font-weight="800" font-size="10.5">#3 ${lWcBot.team0?.abbr || 'SEED3'} ${(lWcBot.team0?.nickname || '').toUpperCase().slice(0, 8)}${lWcBot.team0?.is_mirage ? ' ⚠' : ''} (${lWcBot.team0?.record_str || ''})</text>
+              <text x="150" y="302" text-anchor="end" fill="${lWcBot.prob0 >= 50 ? '#34D399' : '#FBBF24'}" font-family="'JetBrains Mono', monospace" font-weight="700" font-size="10">${lWcBot.prob0}%</text>
+              <text x="26" y="337" fill="#FFFFFF" font-family="'Inter', sans-serif" font-weight="800" font-size="10.5">#6 ${lWcBot.team1?.abbr || 'WC3'} ${(lWcBot.team1?.nickname || '').toUpperCase().slice(0, 9)} (${lWcBot.team1?.record_str || ''})</text>
+              <text x="150" y="337" text-anchor="end" fill="${lWcBot.prob1 > 50 ? '#34D399' : '#94A3B8'}" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="10">${lWcBot.prob1}%${lWcBot.is_road_fav ? '★' : ''}</text>
+              <polyline points="26,307 154,307 154,342 26,342" fill="none" stroke="${lWcBot.team0?.is_mirage ? '#F59E0B' : '#E2E8F0'}" stroke-width="2.5" />
+            </g>
+
+            <g class="bracket-slot-hit" onclick="inspectStretchPosterSeries(${pkgIdx}, 'left_ds_bot')" ondblclick="${lSeed2.team_id ? `switchTeamAndGo(${lSeed2.team_id})` : ''}">
+              <text x="26" y="395" fill="#FDE047" font-family="'Inter', sans-serif" font-weight="800" font-size="10.5">${leftArm.abbr || 'NL'} #2 · ${lSeed2.abbr || 'TBD'} ${(lSeed2.nickname || '').toUpperCase().slice(0, 10)} (${lSeed2.record_str || ''})</text>
+              <text x="150" y="409" text-anchor="end" fill="#34D399" font-family="'JetBrains Mono', monospace" font-weight="700" font-size="9.5">1ST-RD BYE · ${Number(lSeed2.ws_prob || 14).toFixed(1)}% WS</text>
+              <polyline points="26,400 154,400 154,389" fill="none" stroke="#E2E8F0" stroke-width="2.5" />
+              <polyline points="154,324 278,324 278,389 154,389" fill="none" stroke="url(#silverLine_${pkgIdx})" stroke-width="3.5" />
+              <text x="268" y="355" text-anchor="end" fill="#FFFFFF" font-family="'Inter', sans-serif" font-weight="800" font-size="11">${lDsBotFav.abbr || 'TBD'} ${Math.max(lDsBot.prob0 || 55, lDsBot.prob1 || 45)}% ADV</text>
+              <text x="268" y="370" text-anchor="end" fill="#94A3B8" font-family="'Inter', sans-serif" font-weight="600" font-size="10">BEST OF ${lDsBot.best_of || 5}</text>
+            </g>
+
+            <g filter="url(#goldGlow_${pkgIdx})" class="bracket-slot-hit" onclick="inspectStretchPosterSeries(${pkgIdx}, 'left_lcs')">
+              <polyline points="278,188 394,188 394,356 278,356" fill="none" stroke="url(#goldGrad_${pkgIdx})" stroke-width="4.5" />
+              <line x1="394" y1="272" x2="432" y2="272" stroke="url(#goldHoriz_${pkgIdx})" stroke-width="5.5" />
+            </g>
+            <text x="384" y="266" text-anchor="end" fill="#FEF08A" font-family="'Inter', sans-serif" font-weight="800" font-size="11">${lLcs.team0?.abbr || 'NL1'} vs ${lLcs.team1?.abbr || 'NL2'}</text>
+            <text x="384" y="281" text-anchor="end" fill="#CBD5E1" font-family="'Inter', sans-serif" font-weight="600" font-size="10">BEST OF ${lLcs.best_of || 7}</text>
+
+            <text x="26" y="452" fill="#E2E8F0" font-family="'Inter', sans-serif" font-weight="800" font-size="10">HIGHER SEED BALLPARK</text>
+            <text x="26" y="466" fill="#94A3B8" font-family="'Inter', sans-serif" font-weight="600" font-size="9.5">WILD CARD: BEST OF 3</text>
+
+            <!-- 4. RIGHT SIDE BRACKET LINES & TEAMS -->
+            <g class="bracket-slot-hit" onclick="inspectStretchPosterSeries(${pkgIdx}, 'right_ds_top')" ondblclick="${rSeed1.team_id ? `switchTeamAndGo(${rSeed1.team_id})` : ''}">
+              <text x="934" y="138" text-anchor="end" fill="#FDE047" font-family="'Inter', sans-serif" font-weight="800" font-size="10.5">${rightArm.abbr || 'AL'} #1 · ${rSeed1.abbr || 'TBD'} ${(rSeed1.nickname || '').toUpperCase().slice(0, 10)} (${rSeed1.record_str || ''})</text>
+              <text x="810" y="152" fill="#34D399" font-family="'JetBrains Mono', monospace" font-weight="700" font-size="9.5">1ST-RD BYE · ${Number(rSeed1.ws_prob || 18).toFixed(1)}% WS</text>
+              <polyline points="934,143 806,143 806,154" fill="none" stroke="#E2E8F0" stroke-width="2.5" />
+            </g>
+
+            <g class="bracket-slot-hit" onclick="inspectStretchPosterSeries(${pkgIdx}, 'right_wc_top')">
+              <text x="934" y="198" text-anchor="end" fill="#FFFFFF" font-family="'Inter', sans-serif" font-weight="800" font-size="10.5">#4 ${rWcTop.team0?.abbr || 'WC1'} ${(rWcTop.team0?.nickname || '').toUpperCase().slice(0, 9)} (${rWcTop.team0?.record_str || ''})</text>
+              <text x="810" y="198" fill="${rWcTop.prob0 >= 50 ? '#34D399' : '#94A3B8'}" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="10">${rWcTop.prob0}%</text>
+              <text x="934" y="233" text-anchor="end" fill="#CBD5E1" font-family="'Inter', sans-serif" font-weight="700" font-size="10.5">#5 ${rWcTop.team1?.abbr || 'WC2'} ${(rWcTop.team1?.nickname || '').toUpperCase().slice(0, 9)} (${rWcTop.team1?.record_str || ''})</text>
+              <text x="810" y="233" fill="${rWcTop.prob1 > 50 ? '#34D399' : '#94A3B8'}" font-family="'JetBrains Mono', monospace" font-weight="700" font-size="10">${rWcTop.prob1}%</text>
+              <polyline points="934,203 806,203 806,238 934,238" fill="none" stroke="#E2E8F0" stroke-width="2.5" />
+            </g>
+
+            <g class="bracket-slot-hit" onclick="inspectStretchPosterSeries(${pkgIdx}, 'right_ds_top')">
+              <polyline points="806,154 682,154 682,221 806,221" fill="none" stroke="url(#silverLine_${pkgIdx})" stroke-width="3.5" />
+              <text x="692" y="185" fill="#FFFFFF" font-family="'Inter', sans-serif" font-weight="800" font-size="11">${rDsTopFav.abbr || 'TBD'} ${Math.max(rDsTop.prob0 || 55, rDsTop.prob1 || 45)}% ADV</text>
+              <text x="692" y="200" fill="#94A3B8" font-family="'Inter', sans-serif" font-weight="600" font-size="10">BEST OF ${rDsTop.best_of || 5}</text>
+            </g>
+
+            <g class="bracket-slot-hit" onclick="inspectStretchPosterSeries(${pkgIdx}, 'right_wc_bot')">
+              <text x="934" y="302" text-anchor="end" fill="${rWcBot.team0?.is_mirage ? '#FBBF24' : '#FFFFFF'}" font-family="'Inter', sans-serif" font-weight="800" font-size="10.5">#3 ${rWcBot.team0?.abbr || 'SEED3'} ${(rWcBot.team0?.nickname || '').toUpperCase().slice(0, 8)}${rWcBot.team0?.is_mirage ? ' ⚠' : ''} (${rWcBot.team0?.record_str || ''})</text>
+              <text x="810" y="302" fill="${rWcBot.prob0 >= 50 ? '#34D399' : '#FBBF24'}" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="10">${rWcBot.prob0}%</text>
+              <text x="934" y="337" text-anchor="end" fill="#CBD5E1" font-family="'Inter', sans-serif" font-weight="700" font-size="10.5">#6 ${rWcBot.team1?.abbr || 'WC3'} ${(rWcBot.team1?.nickname || '').toUpperCase().slice(0, 9)} (${rWcBot.team1?.record_str || ''})</text>
+              <text x="810" y="337" fill="${rWcBot.prob1 > 50 ? '#34D399' : '#94A3B8'}" font-family="'JetBrains Mono', monospace" font-weight="700" font-size="10">${rWcBot.prob1}%${rWcBot.is_road_fav ? '★' : ''}</text>
+              <polyline points="934,307 806,307 806,342 934,342" fill="none" stroke="${rWcBot.team0?.is_mirage ? '#F59E0B' : '#E2E8F0'}" stroke-width="2.5" />
+            </g>
+
+            <g class="bracket-slot-hit" onclick="inspectStretchPosterSeries(${pkgIdx}, 'right_ds_bot')" ondblclick="${rSeed2.team_id ? `switchTeamAndGo(${rSeed2.team_id})` : ''}">
+              <text x="934" y="395" text-anchor="end" fill="#FDE047" font-family="'Inter', sans-serif" font-weight="800" font-size="10.5">${rightArm.abbr || 'AL'} #2 · ${rSeed2.abbr || 'TBD'} ${(rSeed2.nickname || '').toUpperCase().slice(0, 10)} (${rSeed2.record_str || ''})</text>
+              <text x="810" y="409" fill="#38BDF8" font-family="'JetBrains Mono', monospace" font-weight="700" font-size="9.5">1ST-RD BYE · ${Number(rSeed2.ws_prob || 14).toFixed(1)}% WS</text>
+              <polyline points="934,400 806,400 806,389" fill="none" stroke="#E2E8F0" stroke-width="2.5" />
+              <polyline points="806,324 682,324 682,389 806,389" fill="none" stroke="url(#silverLine_${pkgIdx})" stroke-width="3.5" />
+              <text x="692" y="355" fill="#FFFFFF" font-family="'Inter', sans-serif" font-weight="800" font-size="11">${rDsBotFav.abbr || 'TBD'} ${Math.max(rDsBot.prob0 || 55, rDsBot.prob1 || 45)}% ADV</text>
+              <text x="692" y="370" fill="#94A3B8" font-family="'Inter', sans-serif" font-weight="600" font-size="10">BEST OF ${rDsBot.best_of || 5}</text>
+            </g>
+
+            <g filter="url(#goldGlow_${pkgIdx})" class="bracket-slot-hit" onclick="inspectStretchPosterSeries(${pkgIdx}, 'right_lcs')">
+              <polyline points="682,188 566,188 566,356 682,356" fill="none" stroke="url(#goldGrad_${pkgIdx})" stroke-width="4.5" />
+              <line x1="528" y1="272" x2="566" y2="272" stroke="url(#goldHoriz_${pkgIdx})" stroke-width="5.5" />
+            </g>
+            <text x="576" y="266" fill="#FEF08A" font-family="'Inter', sans-serif" font-weight="800" font-size="11">${rLcs.team0?.abbr || 'AL1'} vs ${rLcs.team1?.abbr || 'AL2'}</text>
+            <text x="576" y="281" fill="#CBD5E1" font-family="'Inter', sans-serif" font-weight="600" font-size="10">BEST OF ${rLcs.best_of || 7}</text>
+
+            <text x="934" y="452" text-anchor="end" fill="#E2E8F0" font-family="'Inter', sans-serif" font-weight="800" font-size="10">HIGHER SEED BALLPARK</text>
+            <text x="934" y="466" text-anchor="end" fill="#94A3B8" font-family="'Inter', sans-serif" font-weight="600" font-size="9.5">WILD CARD: BEST OF 3</text>
+
+            <!-- 5. CENTERPIECE: COMMISSIONER'S TROPHY & WORLD SERIES LOGO -->
+            <g filter="url(#dropShadow_${pkgIdx})" class="bracket-slot-hit" onclick="inspectStretchPosterSeries(${pkgIdx}, 'world_series')">
+              <g stroke="#94A3B8" stroke-width="1.4" opacity="0.65">
+                <line x1="454" y1="186" x2="454" y2="316" />
+                <line x1="460" y1="176" x2="460" y2="316" />
+                <line x1="466" y1="170" x2="466" y2="316" />
+                <line x1="472" y1="166" x2="472" y2="316" />
+                <line x1="478" y1="164" x2="478" y2="316" />
+                <line x1="484" y1="166" x2="484" y2="316" />
+                <line x1="490" y1="170" x2="490" y2="316" />
+                <line x1="496" y1="176" x2="496" y2="316" />
+                <line x1="502" y1="186" x2="502" y2="316" />
+              </g>
+
+              <g stroke="url(#chromeGrad_${pkgIdx})" stroke-width="2">
+                <line x1="448" y1="202" x2="448" y2="318" />
+                <line x1="452" y1="210" x2="452" y2="318" />
+                <line x1="457" y1="218" x2="457" y2="318" />
+                <line x1="463" y1="224" x2="463" y2="318" />
+                <line x1="470" y1="229" x2="470" y2="318" />
+                <line x1="477" y1="232" x2="477" y2="318" />
+                <line x1="484" y1="233" x2="484" y2="318" />
+                <line x1="491" y1="231" x2="491" y2="318" />
+                <line x1="497" y1="226" x2="497" y2="318" />
+                <line x1="503" y1="218" x2="503" y2="318" />
+                <line x1="508" y1="208" x2="508" y2="318" />
+                <line x1="512" y1="196" x2="512" y2="318" />
+              </g>
+
+              <g fill="url(#goldGrad_${pkgIdx})">
+                <polygon points="454,186 462,183 454,180" />
+                <polygon points="460,176 468,173 460,170" />
+                <polygon points="466,170 474,167 466,164" />
+                <polygon points="472,166 480,163 472,160" />
+                <polygon points="478,164 486,161 478,158" />
+                <polygon points="484,166 492,163 484,160" />
+                <polygon points="490,170 498,167 490,164" />
+                <polygon points="496,176 504,173 496,170" />
+                <polygon points="502,186 510,183 502,180" />
+                <polygon points="448,202 456,199 448,196" />
+                <polygon points="452,210 460,207 452,204" />
+                <polygon points="457,218 465,215 457,212" />
+                <polygon points="463,224 471,221 463,218" />
+                <polygon points="470,229 478,226 470,223" />
+                <polygon points="477,232 485,229 477,226" />
+                <polygon points="484,233 492,230 484,227" />
+                <polygon points="491,231 499,228 491,225" />
+                <polygon points="497,226 505,223 497,220" />
+                <polygon points="503,218 511,215 503,212" />
+                <polygon points="508,208 516,205 508,202" />
+                <polygon points="512,196 520,193 512,190" />
+              </g>
+
+              <ellipse cx="480" cy="316" rx="35" ry="6" fill="url(#goldHoriz_${pkgIdx})" />
+              <rect x="442" y="318" width="76" height="8" rx="2" fill="url(#goldHoriz_${pkgIdx})" />
+              <rect x="435" y="326" width="90" height="22" rx="3" fill="url(#chromeGrad_${pkgIdx})" stroke="#475569" stroke-width="1" />
+              <rect x="431" y="346" width="98" height="5" rx="1.5" fill="#64748B" />
+
+              <text x="480" y="370" text-anchor="middle" fill="#FFFFFF" font-family="'Inter', sans-serif" font-weight="800" font-size="11.5" letter-spacing="0.4">
+                ${wsCaption}
+              </text>
+              <text x="480" y="385" text-anchor="middle" fill="#CBD5E1" font-family="'Inter', sans-serif" font-weight="600" font-size="10.5">
+                BEST OF ${ws.best_of || 7}
+              </text>
+
+              <line x1="382" y1="412" x2="458" y2="412" stroke="url(#goldHoriz_${pkgIdx})" stroke-width="2" />
+              <line x1="502" y1="412" x2="578" y2="412" stroke="url(#goldHoriz_${pkgIdx})" stroke-width="2" />
+              <line x1="382" y1="448" x2="458" y2="448" stroke="url(#goldHoriz_${pkgIdx})" stroke-width="2" />
+              <line x1="502" y1="448" x2="578" y2="448" stroke="url(#goldHoriz_${pkgIdx})" stroke-width="2" />
+
+              <text x="454" y="440" text-anchor="end" fill="url(#chromeGrad_${pkgIdx})" font-family="'Oswald', sans-serif" font-weight="700" font-size="28" letter-spacing="1">
+                WORLD
+              </text>
+              <text x="480" y="420" text-anchor="middle" fill="url(#goldGrad_${pkgIdx})" font-family="'Oswald', sans-serif" font-weight="700" font-size="14">${yrTop}</text>
+              <rect x="466" y="423" width="28" height="12" rx="2" fill="#0F172A" stroke="#F8FAFC" stroke-width="1" />
+              <rect x="467" y="424" width="13" height="10" fill="#2563EB" />
+              <rect x="480" y="424" width="13" height="10" fill="#DC2626" />
+              <circle cx="480" cy="429" r="2.3" fill="#FFFFFF" />
+              <text x="480" y="449" text-anchor="middle" fill="url(#goldGrad_${pkgIdx})" font-family="'Oswald', sans-serif" font-weight="700" font-size="14">${yrBot}</text>
+              <text x="506" y="440" text-anchor="start" fill="url(#chromeGrad_${pkgIdx})" font-family="'Oswald', sans-serif" font-weight="700" font-size="28" letter-spacing="1">
+                SERIES
+              </text>
+            </g>
+
+            <!-- 6. INTEGRATED LOWER-THIRD MATCHUP TELEMETRY RIBBON -->
+            <g transform="translate(20, 480)">
+              <rect x="0" y="0" width="920" height="52" rx="6" fill="#091122" fill-opacity="0.92" stroke="#334155" stroke-width="1.2" />
+              <rect x="0" y="0" width="5" height="52" rx="2" fill="#F59E0B" />
+              <text id="svg-si-badge-${pkgIdx}" x="18" y="19" fill="#FBBF24" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="9.5">
+                ${activeTelem.telemetry_badge || '★ CLICK ANY BRACKET FORK TO INSPECT SHORT-SERIES SABERMETRIC TELEMETRY'}
+              </text>
+              <text id="svg-si-title-${pkgIdx}" x="18" y="38" fill="#FFFFFF" font-family="'Inter', sans-serif" font-weight="800" font-size="11.5">
+                ${activeTelem.telemetry_title || ''}
+              </text>
+              <text id="svg-si-metrics-${pkgIdx}" x="904" y="28" text-anchor="end" fill="#34D399" font-family="'JetBrains Mono', monospace" font-weight="700" font-size="10">
+                ${activeTelem.telemetry_metrics || ''}
+              </text>
+            </g>
+          </svg>
+        </div>
+      </div>
+    `;
+  };
+
   const renderSingleLeagueStretchHtml = (pkg, pkgIdx) => {
     const lg = pkg.league || {};
     const bracket = pkg.playoff_bracket || {};
     const rounds = bracket.rounds || [];
     const divRaces = pkg.division_races || [];
     const wildCards = pkg.wild_cards || [];
-    const trajectories = pkg.trajectories || [];
+    const heroKpis = pkg.hero_kpis || {};
+    const stretchLeaders = pkg.stretch_leaders || { batters: [], pitchers: [] };
+    const rsosGauntlet = pkg.rsos_gauntlet || [];
+    const clinchRadar = pkg.clinch_radar || [];
+    const mcMatrix = pkg.monte_carlo_matrix || [];
     const canvasId = `stretch-worm-chart-${lg.league_id}-${pkgIdx}`;
 
-    // 1. Playoff Bracket Tree HTML
-    const bracketHtml = rounds.length ? `
-      <div class="glass-card p-5 border border-amber-500/35 mb-6">
-        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3.5 mb-4">
-          <div class="flex items-center gap-2.5">
-            <div class="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-300 text-lg">
-              <i class="bi bi-diagram-3-fill"></i>
-            </div>
-            <div>
-              <div class="flex items-center gap-2">
-                <h3 class="text-base font-black uppercase tracking-wider text-white mb-0">
-                  ${lg.name} (${lg.abbr}) — ${bracket.is_projected ? 'Projected Playoff Bracket (If Season Ended Today)' : `${pkg.season_year} Official Postseason Bracket`}
-                </h3>
-                <span class="px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold ${bracket.is_projected ? 'bg-sky-500/20 text-sky-300 border border-sky-400/40' : 'bg-amber-500/20 text-amber-300 border border-amber-400/40'}">
-                  ${pkg.phase_badge}
+    const tightRace = heroKpis.tightest_race || {};
+    const tLdr = tightRace.leader || {};
+    const tChs = tightRace.chaser || {};
+    const lProb = Number(tLdr.div_prob || 52);
+    const cProb = Number(tChs.div_prob || 44);
+    const barShareL = Math.max(15, Math.min(85, Math.round((lProb / Math.max(1, lProb + cProb)) * 100)));
+
+    const surgeTm = heroKpis.biggest_surge || tLdr || {};
+    const mirageObj = heroKpis.mirage_alert || {};
+    const mTm = mirageObj.team || tLdr || {};
+    const mRival = mirageObj.rival || tChs || {};
+    const gauntTm = heroKpis.toughest_gauntlet || tChs || {};
+
+    // Check if there are played postseason series games to surface in a quick replay strip below the poster
+    const playedPostseasonSeries = [];
+    rounds.forEach(r => {
+      (r.series || []).forEach(s => {
+        if ((s.games && s.games.length) || s.result0 > 0 || s.result1 > 0) {
+          playedPostseasonSeries.push(s);
+        }
+      });
+    });
+
+    const sl0Short = (divRaces[0] && divRaces[0].sub_league_short) || "AL";
+    const sl1Short = (divRaces.find(d => d.sub_league_short !== sl0Short) || {}).sub_league_short || "NL";
+
+    return `
+      <section class="space-y-4 pb-8 border-b bnn-border last:border-b-0">
+
+        <!-- =============================================================== -->
+        <!-- PROMINENT LEVEL-1 HERO KPI CALLOUT CARDS                        -->
+        <!-- =============================================================== -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+
+          <!-- HERO CARD 1: TIGHTEST PENNANT RACE (CRIMSON ALERT) -->
+          <div class="stretch-hero-kpi stretch-kpi-crimson">
+            <div class="h-1.5 w-full bg-gradient-to-r from-red-600 via-orange-500 to-amber-400"></div>
+            <div class="p-3.5 space-y-2.5">
+              <div class="flex items-center justify-between">
+                <span class="inline-flex items-center gap-1.5 text-[11px] font-mono font-extrabold uppercase tracking-wider text-red-400">
+                  <span class="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
+                  01 · TIGHTEST PENNANT RACE
+                </span>
+                <span class="px-2 py-0.5 rounded-full text-[10.5px] font-mono font-black bg-red-600 text-white shadow-sm">
+                  ${tightRace.tension_score || 92} / 100 TENSION
                 </span>
               </div>
-              <p class="text-xs text-slate-400 mb-0 mt-0.5">
-                Format: ${bracket.playoff_mode || 'Bracket'} • Click any team to open Franchise Hub or click series games to inspect box scores
-              </p>
-            </div>
-          </div>
-          ${bracket.champion ? `
-            <div onclick="switchTeamAndGo(${bracket.champion.team_id})" class="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500/25 to-yellow-500/15 border border-amber-400/60 flex items-center gap-2.5 cursor-pointer hover:scale-[1.02] transition">
-              <img src="${teamLogoUrl(bracket.champion.logo_file_name)}" class="w-8 h-8 object-contain" alt="">
-              <div>
-                <div class="text-[9.5px] font-mono uppercase tracking-widest text-amber-300 font-black">🏆 ${pkg.season_year} LEAGUE CHAMPION</div>
-                <div class="text-sm font-black text-white">${bracket.champion.full_name} (${bracket.champion.record_str})</div>
+
+              <div class="flex items-center justify-between gap-2 pt-0.5">
+                <div class="flex items-center gap-2 min-w-0">
+                  <div class="flex -space-x-1.5 shrink-0">
+                    <div onclick="${tLdr.team_id ? `switchTeamAndGo(${tLdr.team_id})` : ''}" class="w-9 h-9 rounded-lg bg-slate-900 border-2 border-red-500/70 flex items-center justify-center p-1 cursor-pointer shadow" title="${tLdr.full_name || ''}">
+                      <img src="${teamLogoUrl(tLdr.logo_file_name)}" class="w-full h-full object-contain" alt="">
+                    </div>
+                    ${tChs.team_id ? `
+                      <div onclick="switchTeamAndGo(${tChs.team_id})" class="w-9 h-9 rounded-lg bg-slate-900 border-2 border-sky-500/70 flex items-center justify-center p-1 cursor-pointer shadow" title="${tChs.full_name || ''}">
+                        <img src="${teamLogoUrl(tChs.logo_file_name)}" class="w-full h-full object-contain" alt="">
+                      </div>
+                    ` : ""}
+                  </div>
+                  <div class="min-w-0">
+                    <div class="text-sm font-black tracking-tight leading-tight truncate">${tightRace.division_title || 'Division'} ${tightRace.race_status === 'DEAD HEAT' ? 'Dead Heat' : 'Showdown'}</div>
+                    <div class="text-[11px] font-mono bnn-muted truncate">${tLdr.abbr || '—'} (${tLdr.record_str || ''}) vs ${tChs.abbr || '—'} · M#: ${tightRace.magic_str || '-'}</div>
+                  </div>
+                </div>
+                <div class="text-right shrink-0">
+                  <div class="font-display text-2xl font-black tracking-tight text-amber-400 leading-none">${tightRace.lead_str || '0.0 GB'}</div>
+                  <div class="text-[10px] font-mono font-bold uppercase text-red-400 mt-0.5">${tightRace.h2h_left || 3} H2H GMS LEFT</div>
+                </div>
+              </div>
+
+              <div class="space-y-1 pt-0.5">
+                <div class="w-full h-2.5 rounded-full bg-slate-900/80 overflow-hidden flex border border-white/10">
+                  <div class="bg-red-500 h-full" style="width: ${barShareL}%"></div>
+                  <div class="bg-blue-500 h-full" style="width: ${100 - barShareL}%"></div>
+                </div>
+                <div class="flex justify-between text-[11px] font-mono">
+                  <span><strong>${tLdr.abbr || 'LDR'} ${lProb.toFixed(1)}%</strong> (${fmtAvg(tLdr.rsos || 0.500)} rSOS)</span>
+                  <span><strong>${tChs.abbr || 'CHS'} ${cProb.toFixed(1)}%</strong> (${tChs.true_wl_str || ''} TrueWL)</span>
+                </div>
               </div>
             </div>
-          ` : ""}
+          </div>
+
+          <!-- HERO CARD 2: BIGGEST 7-DAY ODDS SURGE (EMERALD MOMENTUM) -->
+          <div onclick="${surgeTm.team_id ? `switchTeamAndGo(${surgeTm.team_id})` : ''}" class="stretch-hero-kpi stretch-kpi-emerald cursor-pointer">
+            <div class="h-1.5 w-full bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400"></div>
+            <div class="p-3.5 space-y-2.5">
+              <div class="flex items-center justify-between">
+                <span class="inline-flex items-center gap-1.5 text-[11px] font-mono font-extrabold uppercase tracking-wider text-emerald-400">
+                  ▲ 02 · 7-DAY ODDS SURGE
+                </span>
+                <span class="px-2 py-0.5 rounded-full text-[10.5px] font-mono font-black bg-emerald-600 text-white shadow-sm">
+                  ${surgeTm.l10_str || '8-2'} LAST 10G
+                </span>
+              </div>
+
+              <div class="flex items-center justify-between gap-2 pt-0.5">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <div class="w-9 h-9 rounded-lg bg-slate-900 border-2 border-emerald-500/70 flex items-center justify-center p-1 shrink-0 shadow">
+                    <img src="${teamLogoUrl(surgeTm.logo_file_name)}" class="w-full h-full object-contain" alt="">
+                  </div>
+                  <div class="min-w-0">
+                    <div class="text-sm font-black tracking-tight leading-tight truncate">${surgeTm.full_name || 'Contender'}</div>
+                    <div class="text-[11px] font-mono bnn-muted truncate">${surgeTm.record_str || ''} · Strk ${surgeTm.streak_str || 'W3'} · M#: ${surgeTm.magic_str || '-'}</div>
+                  </div>
+                </div>
+                <div class="text-right shrink-0">
+                  <div class="font-display text-2xl font-black tracking-tight text-emerald-400 leading-none">${Number(surgeTm.prob_7d_delta || 8.4) >= 0 ? '+' : ''}${Number(surgeTm.prob_7d_delta || 8.4).toFixed(1)}%</div>
+                  <div class="text-[10px] font-mono font-bold uppercase text-emerald-300 mt-0.5">DIV cWPA GAIN</div>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between gap-2 pt-1 border-t bnn-border text-[11px] font-mono">
+                <svg width="78" height="20" viewBox="0 0 78 20" class="shrink-0">
+                  <polyline fill="none" stroke="#10B981" stroke-width="2.2" points="2,17 16,15 30,13 44,10 58,6 76,2" />
+                  <circle cx="76" cy="2" r="2.5" fill="#10B981" />
+                </svg>
+                <div class="text-right truncate">
+                  <span class="font-bold text-emerald-400">${Number(surgeTm.playoff_prob || 85).toFixed(1)}% POFF</span> · <span>${surgeTm.wrc_plus || 108} wRC+</span> · <span>${surgeTm.pitch_plus || 106} P+</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- HERO CARD 3: CLUSTER-LUCK MIRAGE ALERT (AMBER HAZARD) -->
+          <div onclick="${mTm.team_id ? `switchTeamAndGo(${mTm.team_id})` : ''}" class="stretch-hero-kpi stretch-kpi-amber cursor-pointer">
+            <div class="h-1.5 w-full bg-gradient-to-r from-amber-500 via-yellow-400 to-red-500"></div>
+            <div class="p-3.5 space-y-2.5">
+              <div class="flex items-center justify-between">
+                <span class="inline-flex items-center gap-1.5 text-[11px] font-mono font-extrabold uppercase tracking-wider text-amber-400">
+                  ⚠ 03 · MIRAGE LEADER AUDIT
+                </span>
+                <span class="px-2 py-0.5 rounded-full text-[10.5px] font-mono font-black bg-amber-500 text-slate-950 shadow-sm">
+                  ${Number(mTm.run_diff || 0) >= 0 ? '+' : ''}${mTm.run_diff || 0} RUN DIFF
+                </span>
+              </div>
+
+              <div class="flex items-center justify-between gap-2 pt-0.5">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <div class="w-9 h-9 rounded-lg bg-slate-900 border-2 border-amber-400 flex items-center justify-center p-1 shrink-0 shadow">
+                    <img src="${teamLogoUrl(mTm.logo_file_name)}" class="w-full h-full object-contain" alt="">
+                  </div>
+                  <div class="min-w-0">
+                    <div class="text-sm font-black tracking-tight leading-tight truncate">${mTm.full_name || 'Club'} ${mTm.is_mirage ? '⚠' : ''}</div>
+                    <div class="text-[11px] font-mono bnn-muted truncate">${mTm.record_str || ''} Actual vs <strong class="text-amber-400">${mTm.true_wl_str || ''} TrueWL</strong></div>
+                  </div>
+                </div>
+                <div class="text-right shrink-0">
+                  <div class="font-display text-2xl font-black tracking-tight text-amber-400 leading-none">${Number(mTm.luck_diff || 0) >= 0 ? '+' : ''}${Number(mTm.luck_diff || 0).toFixed(1)}W</div>
+                  <div class="text-[10px] font-mono font-bold uppercase text-amber-300 mt-0.5">BASERUNS LUCK</div>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between pt-1 border-t bnn-border text-[11px] font-mono">
+                <span>${mTm.div_rank === 1 ? '1st Place' : `#${mTm.div_rank || 2} in Div`} (${Number(mTm.div_prob || 35).toFixed(1)}% Div)</span>
+                ${mRival.abbr ? `<span class="text-emerald-400 font-bold">vs ${mRival.abbr} (${mRival.true_wl_str || ''} TrueWL)</span>` : `<span class="bnn-muted">Cluster-Luck Watch</span>`}
+              </div>
+            </div>
+          </div>
+
+          <!-- HERO CARD 4: TOUGHEST REMAINING GAUNTLET (COBALT SCHEDULE HAZARD) -->
+          <div onclick="${gauntTm.team_id ? `switchTeamAndGo(${gauntTm.team_id})` : ''}" class="stretch-hero-kpi stretch-kpi-cobalt cursor-pointer">
+            <div class="h-1.5 w-full bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-500"></div>
+            <div class="p-3.5 space-y-2.5">
+              <div class="flex items-center justify-between">
+                <span class="inline-flex items-center gap-1.5 text-[11px] font-mono font-extrabold uppercase tracking-wider text-blue-400">
+                  🛡️ 04 · TOUGHEST GAUNTLET
+                </span>
+                <span class="px-2 py-0.5 rounded-full text-[10.5px] font-mono font-black bg-blue-600 text-white shadow-sm">
+                  #${gauntTm.rsos_rank || 1} ${lg.abbr || 'MLB'} rSOS
+                </span>
+              </div>
+
+              <div class="flex items-center justify-between gap-2 pt-0.5">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <div class="w-9 h-9 rounded-lg bg-slate-900 border-2 border-blue-500/70 flex items-center justify-center p-1 shrink-0 shadow">
+                    <img src="${teamLogoUrl(gauntTm.logo_file_name)}" class="w-full h-full object-contain" alt="">
+                  </div>
+                  <div class="min-w-0">
+                    <div class="text-sm font-black tracking-tight leading-tight truncate">${gauntTm.full_name || 'Contender'}</div>
+                    <div class="text-[11px] font-mono bnn-muted truncate">${gauntTm.record_str || ''} · ${gauntTm.gb === 0 ? 'Div Leader' : `${gauntTm.gb} GB`}</div>
+                  </div>
+                </div>
+                <div class="text-right shrink-0">
+                  <div class="font-display text-2xl font-black tracking-tight text-blue-400 leading-none">${fmtAvg(gauntTm.rsos || 0.535)}</div>
+                  <div class="text-[10px] font-mono font-bold uppercase text-blue-300 mt-0.5">OPP BASERUNS W%</div>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between pt-1 border-t bnn-border text-[11px] font-mono">
+                <span class="text-red-400 font-bold">${gauntTm.games_vs_500 || 14} G vs &gt;.500</span>
+                <span class="bnn-muted truncate">${gauntTm.top_opps_str || 'Div Rivals'} (${Number(gauntTm.playoff_prob || 50).toFixed(0)}% POFF)</span>
+              </div>
+            </div>
+          </div>
+
         </div>
 
-        <div class="bracket-tree-scroll">
-          ${rounds.map((r, rIdx) => {
-            const isFinalRound = rIdx === rounds.length - 1;
-            return `
-              <div class="bracket-round-col">
-                <div class="px-3 py-2 rounded-lg bg-slate-900/90 border border-slate-800 mb-3 flex items-center justify-between">
-                  <span class="font-mono text-xs font-black uppercase tracking-wider ${isFinalRound ? 'text-amber-300' : 'text-sky-300'}">
-                    ${isFinalRound ? '<i class="bi bi-trophy-fill mr-1"></i>' : ''}${r.round_name}
-                  </span>
-                  <span class="text-[10px] font-mono text-slate-400">Best of ${r.best_of}</span>
+        ${viewMode === "matrix" ? `
+          <!-- SECONDARY VIEW: B-REF / FANGRAPHS MONTE CARLO PROBABILITIES MATRIX -->
+          <div class="bnn-card rounded-xl overflow-hidden">
+            <div class="px-4 py-3 bnn-subcard border-t-0 border-x-0 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <span class="text-[11px] font-mono text-amber-400 font-extrabold uppercase">MONTE CARLO PROBABILITIES INDEX · ${lg.name} (${pkg.season_year})</span>
+                <h3 class="text-sm font-black mb-0">Full-League True-Talent BaseRuns, Remaining SOS &amp; Postseason Odds Matrix</h3>
+              </div>
+              <button onclick="setStretchViewMode('portal')" class="px-3 py-1 rounded bg-red-600 text-white text-xs font-mono font-bold">
+                &larr; Back to Playoff Machine Portal
+              </button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-xs font-mono" style="font-variant-numeric: tabular-nums;">
+                <thead>
+                  <tr class="bnn-subcard border-b bnn-border text-[10.5px] uppercase bnn-muted text-right">
+                    <th class="py-2 px-3 text-left">Club</th>
+                    <th class="py-2 px-2 text-left">Div</th>
+                    <th class="py-2 px-2">W-L</th>
+                    <th class="py-2 px-2">BaseRuns</th>
+                    <th class="py-2 px-2">Luck Δ</th>
+                    <th class="py-2 px-2">wRC+</th>
+                    <th class="py-2 px-2">SP Pitch+</th>
+                    <th class="py-2 px-2">Pen Stf+</th>
+                    <th class="py-2 px-2">rSOS</th>
+                    <th class="py-2 px-2">Proj Final</th>
+                    <th class="py-2 px-2">Magic#</th>
+                    <th class="py-2 px-2">Div %</th>
+                    <th class="py-2 px-2">WC %</th>
+                    <th class="py-2 px-2">Playoff %</th>
+                    <th class="py-2 px-2">7d Δ</th>
+                    <th class="py-2 px-3">WS %</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y bnn-border text-right">
+                  ${mcMatrix.map((t, idx) => `
+                    <tr onclick="switchTeamAndGo(${t.team_id})" class="bnn-row-hover cursor-pointer ${t.is_mirage ? 'bg-amber-500/5' : ''}">
+                      <td class="py-2 px-3 text-left font-sans font-bold">
+                        <div class="flex items-center gap-2">
+                          <span class="text-[10px] font-mono bnn-muted w-4">${idx + 1}</span>
+                          <img src="${teamLogoUrl(t.logo_file_name)}" class="w-4 h-4 object-contain" alt="">
+                          <span>${t.full_name} ${t.is_mirage ? '<span class="text-amber-400">⚠</span>' : ''}</span>
+                        </div>
+                      </td>
+                      <td class="py-2 px-2 text-left bnn-muted">${t.short_div_title || ''}</td>
+                      <td class="py-2 px-2 font-bold">${t.record_str}</td>
+                      <td class="py-2 px-2 ${t.is_mirage ? 'text-red-400 font-bold' : 'text-emerald-400'}">${t.true_wl_str}</td>
+                      <td class="py-2 px-2 ${t.luck_diff >= 3.5 ? 'text-amber-400 font-bold' : (t.luck_diff <= -3.0 ? 'text-emerald-400 font-bold' : 'bnn-muted')}">${t.luck_diff >= 0 ? '+' : ''}${Number(t.luck_diff || 0).toFixed(1)}W</td>
+                      <td class="py-2 px-2 font-bold">${t.wrc_plus}</td>
+                      <td class="py-2 px-2 font-bold">${t.sp_pitch_plus}</td>
+                      <td class="py-2 px-2">${t.bullpen_stuff_plus}</td>
+                      <td class="py-2 px-2 ${t.rsos >= 0.515 ? 'text-red-400 font-bold' : (t.rsos <= 0.490 ? 'text-emerald-400' : '')}">${fmtAvg(t.rsos)}</td>
+                      <td class="py-2 px-2 font-bold">${t.proj_final_str || t.record_str}</td>
+                      <td class="py-2 px-2 font-bold text-amber-400">${t.magic_str || '-'}</td>
+                      <td class="py-2 px-2 font-bold text-blue-400">${Number(t.div_prob || 0).toFixed(1)}%</td>
+                      <td class="py-2 px-2">${Number(t.wc_prob || 0).toFixed(1)}%</td>
+                      <td class="py-2 px-2 font-extrabold text-emerald-400">${Number(t.playoff_prob || 0).toFixed(1)}%</td>
+                      <td class="py-2 px-2 ${t.prob_7d_delta >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${t.prob_7d_delta >= 0 ? '+' : ''}${Number(t.prob_7d_delta || 0).toFixed(1)}%</td>
+                      <td class="py-2 px-3 font-extrabold text-amber-400">${Number(t.ws_prob || 0).toFixed(1)}%</td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ` : `
+          <!-- ============================================================= -->
+          <!-- LEVEL 2 & 3: ADAPTIVE 3-COL (16:9) / 4-COL UNSTACKED (21:9)   -->
+          <!-- ============================================================= -->
+          <div class="bnn-stretch-grid">
+
+            <!-- LEFT MARGIN: STRETCH DRIVE STAT LEADERS + rSOS GAUNTLET -->
+            <aside class="bnn-stretch-col-left space-y-3.5">
+              <div class="bnn-card rounded-xl overflow-hidden">
+                <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 flex items-center justify-between">
+                  <div>
+                    <span class="text-[10.5px] font-mono text-red-500 font-extrabold uppercase">LEFT MARGIN · STRETCH MVPs</span>
+                    <h2 class="text-xs sm:text-sm font-extrabold mb-0">Stretch Drive Pacesetters</h2>
+                  </div>
+                  <span class="text-[10.5px] font-mono bnn-muted">cWPA · Process</span>
                 </div>
-                <div class="bracket-round-matches">
-                  ${(r.series || []).map(s => {
-                    const t0 = s.team0 || {};
-                    const t1 = s.team1 || {};
-                    const w0 = s.winner_id && s.winner_id === t0.team_id;
-                    const w1 = s.winner_id && s.winner_id === t1.team_id;
-                    const winsNeeded = s.wins_needed || Math.floor((s.best_of || 7) / 2) + 1;
-                    const statusBadgeCls = s.status_badge === "FINAL"
-                      ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
-                      : (s.status_badge === "LIVE" ? "bg-rose-500/25 text-rose-300 border-rose-400/50 animate-pulse" : "bg-slate-800 text-slate-300 border-slate-700");
+
+                <div class="divide-y bnn-border text-xs">
+                  <div class="px-3.5 py-1.5 font-bold bnn-subcard text-red-500 uppercase font-mono text-[10.5px] flex justify-between">
+                    <span>Batting Leaders</span>
+                    <span>wRC+ · xwOBA</span>
+                  </div>
+                  ${(stretchLeaders.batters || []).map((b, bIdx) => `
+                    <div onclick="openPlayerModal(${b.player_id})" class="px-3.5 py-2 flex justify-between items-center bnn-row-hover cursor-pointer">
+                      <div class="min-w-0 pr-2">
+                        <span class="font-bold truncate block">${bIdx + 1}. ${b.name} (${b.team_abbr})</span>
+                        <div class="font-mono text-[10.5px] bnn-muted">${b.hr} HR · ${b.cwpa_str} · ${b.war} WAR</div>
+                      </div>
+                      <div class="text-right font-mono shrink-0">
+                        <div class="font-extrabold">${b.wrc_plus} wRC+</div>
+                        <span class="px-1 rounded ${b.wrc_plus >= 140 ? 'bnn-pct-95' : 'bnn-pct-80'} font-bold text-[10px]">${fmtAvg(b.xwoba)} xwOBA</span>
+                      </div>
+                    </div>
+                  `).join("") || `<div class="p-3 text-xs font-mono bnn-muted">No qualified batting stats logged.</div>`}
+
+                  <div class="px-3.5 py-1.5 font-bold bnn-subcard text-blue-400 uppercase font-mono text-[10.5px] flex justify-between">
+                    <span>Pitching Leaders</span>
+                    <span>Pitch+ · Stf+ / pSERA</span>
+                  </div>
+                  ${(stretchLeaders.pitchers || []).map((p, pIdx) => `
+                    <div onclick="openPlayerModal(${p.player_id})" class="px-3.5 py-2 flex justify-between items-center bnn-row-hover cursor-pointer">
+                      <div class="min-w-0 pr-2">
+                        <span class="font-bold truncate block">${pIdx + 1}. ${p.name} (${p.team_abbr})</span>
+                        <div class="font-mono text-[10.5px] bnn-muted">${Number(p.era || 0).toFixed(2)} ERA · ${p.cwpa_str} · ${p.k} K</div>
+                      </div>
+                      <div class="text-right font-mono shrink-0">
+                        <div class="font-extrabold">${p.pitch_plus} Pitch+</div>
+                        <span class="px-1 rounded ${p.pitch_plus >= 115 ? 'bnn-pct-95' : 'bnn-pct-80'} font-bold text-[10px]">${p.stuff_plus} Stf+ · ${Number(p.psera || 3.20).toFixed(2)} pSERA</span>
+                      </div>
+                    </div>
+                  `).join("") || `<div class="p-3 text-xs font-mono bnn-muted">No qualified pitching stats logged.</div>`}
+                </div>
+              </div>
+
+              <!-- Remaining Strength of Schedule (rSOS) Gauntlet -->
+              <div class="bnn-card rounded-xl overflow-hidden">
+                <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 flex justify-between items-center">
+                  <div>
+                    <span class="text-[10.5px] font-mono text-blue-400 font-extrabold uppercase">SCHEDULE GAUNTLET</span>
+                    <h3 class="text-xs font-extrabold uppercase mb-0">Remaining SOS (rSOS) &amp; H2H</h3>
+                  </div>
+                  <span class="text-[10.5px] font-mono bnn-muted">Opp BaseRuns W%</span>
+                </div>
+                <div class="divide-y bnn-border text-xs font-mono">
+                  ${rsosGauntlet.map(tm => {
+                    const tierCls = tm.rsos_rank <= 3 ? "bnn-pct-95" : (tm.rsos_rank <= 8 ? "bnn-pct-80" : (tm.rsos_rank >= 22 ? "bnn-pct-05" : "bnn-pct-50"));
                     return `
-                      <div class="bracket-series-card ${isFinalRound ? 'championship-card' : ''} p-3.5">
-                        <div class="flex items-center justify-between text-[10px] font-mono mb-2 pb-1.5 border-b border-slate-800/80">
-                          <span class="px-1.5 py-0.5 rounded border font-extrabold ${statusBadgeCls}">${s.status_badge}</span>
-                          <span class="text-slate-300 font-bold">${s.status_label}</span>
+                      <div onclick="switchTeamAndGo(${tm.team_id})" class="p-2.5 space-y-0.5 bnn-row-hover cursor-pointer">
+                        <div class="flex justify-between items-center">
+                          <span class="font-bold font-sans ${tm.is_mirage ? 'text-amber-400' : ''}">${tm.rsos_rank}. ${tm.full_name} (${tm.record_str}) ${tm.is_mirage ? '⚠' : ''}</span>
+                          <span class="px-1.5 py-0.5 rounded ${tierCls} font-bold text-[10.5px]">${fmtAvg(tm.rsos)} rSOS (#${tm.rsos_rank})</span>
                         </div>
-
-                        <!-- Team 0 Row -->
-                        <div onclick="${t0.team_id ? `switchTeamAndGo(${t0.team_id})` : ''}" class="flex items-center justify-between py-1.5 px-2 rounded-lg ${w0 ? 'bg-emerald-500/15 border border-emerald-500/35' : 'hover:bg-slate-800/60'} cursor-pointer transition mb-1">
-                          <div class="flex items-center gap-2 min-w-0">
-                            <img src="${teamLogoUrl(t0.logo_file_name)}" class="w-6 h-6 object-contain shrink-0" alt="">
-                            <div class="truncate">
-                              <div class="text-xs font-extrabold ${w0 ? 'text-emerald-300' : 'text-white'} truncate">
-                                ${t0.full_name || 'TBD'} ${w0 ? '✓' : ''}
-                              </div>
-                              <div class="text-[10px] font-mono text-slate-400">${t0.record_str || ''} ${t0.seed_label ? `• ${t0.seed_label}` : ''}</div>
-                            </div>
-                          </div>
-                          <div class="flex items-center gap-2 shrink-0">
-                            <div class="flex gap-0.5">
-                              ${Array.from({ length: winsNeeded }, (_, i) => `
-                                <span class="w-2 h-2 rounded-full ${i < s.result0 ? 'bg-amber-400' : 'bg-slate-800 border border-slate-700'}"></span>
-                              `).join("")}
-                            </div>
-                            <span class="font-mono text-base font-black ${s.result0 >= s.result1 ? 'text-white' : 'text-slate-400'} w-4 text-right">${s.result0}</span>
-                          </div>
-                        </div>
-
-                        <!-- Team 1 Row -->
-                        <div onclick="${t1.team_id ? `switchTeamAndGo(${t1.team_id})` : ''}" class="flex items-center justify-between py-1.5 px-2 rounded-lg ${w1 ? 'bg-emerald-500/15 border border-emerald-500/35' : 'hover:bg-slate-800/60'} cursor-pointer transition">
-                          <div class="flex items-center gap-2 min-w-0">
-                            <img src="${teamLogoUrl(t1.logo_file_name)}" class="w-6 h-6 object-contain shrink-0" alt="">
-                            <div class="truncate">
-                              <div class="text-xs font-extrabold ${w1 ? 'text-emerald-300' : 'text-white'} truncate">
-                                ${t1.full_name || 'TBD'} ${w1 ? '✓' : ''}
-                              </div>
-                              <div class="text-[10px] font-mono text-slate-400">${t1.record_str || ''} ${t1.seed_label ? `• ${t1.seed_label}` : ''}</div>
-                            </div>
-                          </div>
-                          <div class="flex items-center gap-2 shrink-0">
-                            <div class="flex gap-0.5">
-                              ${Array.from({ length: winsNeeded }, (_, i) => `
-                                <span class="w-2 h-2 rounded-full ${i < s.result1 ? 'bg-amber-400' : 'bg-slate-800 border border-slate-700'}"></span>
-                              `).join("")}
-                            </div>
-                            <span class="font-mono text-base font-black ${s.result1 >= s.result0 ? 'text-white' : 'text-slate-400'} w-4 text-right">${s.result1}</span>
-                          </div>
-                        </div>
-
-                        <!-- Series Game Scores Strip (if played) -->
-                        ${(s.games && s.games.length) ? `
-                          <div class="mt-2 pt-2 border-t border-slate-800/80 flex flex-wrap gap-1">
-                            ${s.games.map((g, gi) => `
-                              <span onclick="jumpToGameReplayFromFrontPage(${g.game_id})"
-                                    title="Click to replay Game ${gi + 1} (${g.date})"
-                                    class="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 hover:border-amber-400 text-[9.5px] font-mono text-slate-300 cursor-pointer transition">
-                                G${gi + 1}: <b>${g.winner_abbr}</b> ${Math.max(g.away_runs, g.home_runs)}-${Math.min(g.away_runs, g.home_runs)}
-                              </span>
-                            `).join("")}
-                          </div>
-                        ` : ""}
+                        <div class="text-[10.5px] bnn-muted">${tm.games_vs_500} G vs &gt;.500 · ${tm.top_opps_str}</div>
                       </div>
                     `;
                   }).join("")}
                 </div>
               </div>
-            `;
-          }).join("")}
-        </div>
-      </div>
-    ` : "";
+            </aside>
 
-    // 2. Division Pennant Race Cards
-    const divCardsHtml = divRaces.map(dr => {
-      const badgeCls = dr.race_status === "DEAD HEAT"
-        ? "bg-rose-500/20 text-rose-300 border-rose-400/50"
-        : (dr.race_status === "DOWN TO THE WIRE"
-            ? "bg-amber-500/20 text-amber-300 border-amber-400/50"
-            : (dr.race_status === "CLINCHED" ? "bg-emerald-500/20 text-emerald-300 border-emerald-400/50" : "bg-sky-500/20 text-sky-300 border-sky-400/40"));
-      return `
-        <div class="glass-card overflow-hidden border border-slate-800">
-          <div class="px-4 py-3 bg-slate-900/95 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div class="flex items-center gap-2">
-                <i class="bi bi-flag-fill text-rose-400"></i>
-                <h4 class="font-black text-sm uppercase tracking-wider text-white mb-0">${dr.title} Pennant Race</h4>
-              </div>
-              <div class="text-[11px] text-slate-400 mt-0.5">
-                Leader: <b class="text-white">${dr.leader?.full_name || '—'}</b> (${dr.leader?.record_str || ''})
-                ${dr.runner_up ? `• Chaser: <b class="text-slate-200">${dr.runner_up.full_name}</b> (${dr.lead_gb} GB)` : ''}
-              </div>
-            </div>
-            <div class="flex items-center gap-2">
-              <div class="text-right hidden sm:block">
-                <div class="text-[9.5px] font-mono text-slate-400 uppercase">RACE TENSION</div>
-                <div class="w-24 h-1.5 bg-slate-800 rounded-full overflow-hidden mt-0.5">
-                  <div class="h-full bg-gradient-to-r from-sky-400 via-amber-400 to-rose-500" style="width:${dr.closeness_score || 50}%"></div>
+            <!-- CENTER STAGE: SYMMETRICAL MLB BROADCAST POSTSEASON BRACKET POSTER + WORM -->
+            <section class="bnn-stretch-col-center space-y-3.5">
+              ${renderSvgPostseasonPoster(pkg, pkgIdx)}
+
+              ${playedPostseasonSeries.length ? `
+                <!-- Active / Completed Postseason Box Score & Replay Strip -->
+                <div class="bnn-card rounded-xl p-3">
+                  <div class="flex items-center justify-between border-b bnn-border pb-2 mb-2.5">
+                    <span class="text-[10.5px] font-mono font-extrabold uppercase text-amber-400">
+                      <i class="bi bi-play-circle-fill mr-1"></i> Official Postseason Series Results &amp; Pitch-by-Pitch Replay Box Scores
+                    </span>
+                    <span class="text-[10px] font-mono bnn-muted">Click any game chip to launch replay</span>
+                  </div>
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                    ${playedPostseasonSeries.slice(0, 6).map(s => `
+                      <div class="bnn-subcard rounded-lg p-2.5 text-xs">
+                        <div class="flex items-center justify-between font-mono text-[10.5px] mb-1">
+                          <span class="font-extrabold text-amber-400 uppercase">${s.round_name}</span>
+                          <span class="font-bold">${s.status_label}</span>
+                        </div>
+                        <div class="flex items-center justify-between font-bold mb-1.5">
+                          <span onclick="switchTeamAndGo(${s.team0?.team_id})" class="cursor-pointer hover:underline">${s.team0?.full_name || s.team0?.abbr} (${s.result0})</span>
+                          <span class="font-mono bnn-muted">vs</span>
+                          <span onclick="switchTeamAndGo(${s.team1?.team_id})" class="cursor-pointer hover:underline">${s.team1?.full_name || s.team1?.abbr} (${s.result1})</span>
+                        </div>
+                        ${(s.games && s.games.length) ? `
+                          <div class="flex flex-wrap gap-1 pt-1 border-t bnn-border">
+                            ${s.games.map((g, gi) => `
+                              <button onclick="jumpToGameReplayFromFrontPage(${g.game_id})" class="px-1.5 py-0.5 rounded bnn-pill-btn text-[9.5px] font-mono font-bold">
+                                G${gi + 1}: ${g.winner_abbr} ${Math.max(g.away_runs, g.home_runs)}-${Math.min(g.away_runs, g.home_runs)}
+                              </button>
+                            `).join("")}
+                          </div>
+                        ` : ""}
+                      </div>
+                    `).join("")}
+                  </div>
+                </div>
+              ` : ""}
+
+              <!-- Multi-Mode Pennant Trajectory Worm Chart -->
+              <div class="bnn-card rounded-xl overflow-hidden">
+                <div class="px-4 py-2.5 bnn-subcard border-t-0 border-x-0 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <span class="text-[10.5px] font-mono uppercase text-blue-400 font-extrabold">LEVEL 3 · MULTI-MODE PENNANT WORM</span>
+                    <h3 id="stretch-worm-title-${lg.league_id}-${pkgIdx}" class="text-xs sm:text-sm font-extrabold mb-0">
+                      ${wormMode === "500" ? "Cumulative Pennant Race Worm (Games Above / Below .500)" : (wormMode === "xwoba" ? "Rolling 15-Game Team Contact Quality Trajectory (xwOBA)" : "Cumulative Playoff Probability Trajectory (0% – 100%)")}
+                    </h3>
+                  </div>
+                  <div class="inline-flex rounded-lg bnn-card p-0.5 text-[11px] font-mono">
+                    <button id="stretch-worm-btn-odds-${lg.league_id}-${pkgIdx}" onclick="setStretchWormMode('odds')" class="px-2.5 py-0.5 rounded bnn-pill-btn font-bold ${wormMode === 'odds' ? 'active-blue' : ''}">Playoff Odds %</button>
+                    <button id="stretch-worm-btn-500-${lg.league_id}-${pkgIdx}" onclick="setStretchWormMode('500')" class="px-2.5 py-0.5 rounded bnn-pill-btn font-bold ${wormMode === '500' ? 'active-blue' : ''}">Games &gt; .500</button>
+                    <button id="stretch-worm-btn-xwoba-${lg.league_id}-${pkgIdx}" onclick="setStretchWormMode('xwoba')" class="px-2.5 py-0.5 rounded bnn-pill-btn font-bold ${wormMode === 'xwoba' ? 'active-blue' : ''}">Rolling 15G xwOBA</button>
+                  </div>
+                </div>
+                <div class="p-3.5">
+                  <div class="h-[220px] w-full">
+                    <canvas id="${canvasId}"></canvas>
+                  </div>
                 </div>
               </div>
-              <span class="px-2.5 py-1 rounded-lg border text-[10px] font-mono font-extrabold ${badgeCls}">
-                ${dr.race_status}
-              </span>
-            </div>
-          </div>
-          <div class="overflow-x-auto">
-            <table class="saber-table">
-              <thead>
-                <tr>
-                  <th class="text-left">Club</th>
-                  <th class="text-right">W-L</th>
-                  <th class="text-right">PCT</th>
-                  <th class="text-right">GB</th>
-                  <th class="text-right" title="Division Magic / Elimination Number">Magic#</th>
-                  <th class="text-right">L10</th>
-                  <th class="text-right">Strk</th>
-                  <th class="text-right">RD</th>
-                  <th class="text-right">Pyth</th>
-                  <th class="text-right">Playoff%</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${(dr.teams || []).map((t, idx) => {
-                  const mStr = t.magic_str || "-";
-                  const mCls = mStr === "CLINCHED" ? "text-amber-300 font-black" : (mStr === "ELIM" ? "text-slate-500" : "text-sky-300 font-bold");
-                  const l10W = Number(t.l10_w || 0);
-                  const l10Cls = l10W >= 7 ? "text-emerald-400 font-bold" : (l10W <= 3 ? "text-rose-400" : "text-slate-200");
-                  return `
-                    <tr onclick="switchTeamAndGo(${t.team_id})" class="cursor-pointer ${idx === 0 ? 'bg-amber-500/5' : ''}">
-                      <td class="font-bold">
-                        <div class="flex items-center gap-2">
-                          <span class="text-xs font-mono text-slate-500 w-3">${idx + 1}</span>
-                          <img src="${teamLogoUrl(t.logo_file_name)}" class="w-5 h-5 object-contain" alt="">
-                          <span class="text-white hover:text-amber-300 transition">${t.full_name}</span>
-                          <span class="text-[10px] font-mono text-slate-400">(${t.abbr})</span>
+            </section>
+
+            <!-- RIGHT MARGIN: DIVISION & CUTLINE CARDS + CLINCH/ELIM RADAR -->
+            <aside class="bnn-stretch-col-right space-y-3.5">
+              <div class="bnn-card rounded-xl overflow-hidden">
+                <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <span class="text-[10.5px] font-mono text-emerald-400 font-extrabold uppercase">RIGHT MARGIN · CUTLINE MATRIX</span>
+                    <h2 class="text-xs sm:text-sm font-extrabold mb-0">Division &amp; Wild Card Races</h2>
+                  </div>
+                  <div class="inline-flex rounded bnn-card p-0.5 text-[10.5px] font-mono">
+                    <button id="stretch-rf-btn-${pkgIdx}-tight" onclick="setStretchRightFilter('tight', ${pkgIdx})" class="px-2 py-0.5 rounded bnn-pill-btn font-bold ${rightFilter === 'tight' ? 'active' : ''}">Tightest</button>
+                    <button id="stretch-rf-btn-${pkgIdx}-sl0" onclick="setStretchRightFilter('sl0', ${pkgIdx})" class="px-2 py-0.5 rounded bnn-pill-btn font-bold ${rightFilter === 'sl0' ? 'active' : ''}">${sl0Short}</button>
+                    ${divRaces.some(d => d.sub_league_short !== sl0Short) ? `
+                      <button id="stretch-rf-btn-${pkgIdx}-sl1" onclick="setStretchRightFilter('sl1', ${pkgIdx})" class="px-2 py-0.5 rounded bnn-pill-btn font-bold ${rightFilter === 'sl1' ? 'active' : ''}">${sl1Short}</button>
+                    ` : ""}
+                    <button id="stretch-rf-btn-${pkgIdx}-wc" onclick="setStretchRightFilter('wc', ${pkgIdx})" class="bnn-std-only px-2 py-0.5 rounded bnn-pill-btn font-bold ${rightFilter === 'wc' ? 'active' : ''}">WC</button>
+                  </div>
+                </div>
+
+                <div id="stretch-right-races-${pkgIdx}" class="divide-y bnn-border text-xs font-mono" style="font-variant-numeric: tabular-nums;">
+                  ${divRaces.map((dr, dIdx) => {
+                    const slTag = dr.sub_league_short === sl0Short ? "sl0" : "sl1";
+                    const isTight = dIdx < 4 || dr.lead_gb <= 4.5 || dr.has_mirage_leader;
+                    const tags = `${isTight ? 'tight ' : ''} ${slTag}`.trim();
+                    const showInitially = tags.split(" ").includes(rightFilter);
+                    const badgeCls = dr.has_mirage_leader
+                      ? "bg-amber-500/20 text-amber-400 border border-amber-500/40"
+                      : (dr.closeness_score >= 85 ? "bnn-pct-95" : "bnn-pct-80");
+                    const badgeTxt = dr.has_mirage_leader
+                      ? `MIRAGE (${dr.leader?.abbr} ⚠)`
+                      : `${dr.race_status} (${dr.closeness_score}%)`;
+                    return `
+                      <div data-stretch-race="${tags}" style="${showInitially ? '' : 'display:none;'}" class="p-3 space-y-1.5 ${dr.has_mirage_leader ? 'bg-amber-500/5' : ''}">
+                        <div class="flex justify-between items-center font-sans">
+                          <span class="font-extrabold ${dr.has_mirage_leader ? 'text-amber-400' : 'text-blue-400'} uppercase">${dr.short_title} · ${dr.h2h_left || 3} H2H Left</span>
+                          <span class="px-1.5 py-0.5 rounded text-[9.5px] font-mono ${badgeCls} font-bold">${badgeTxt}</span>
                         </div>
-                      </td>
-                      <td class="text-right font-mono font-bold text-white">${t.record_str}</td>
-                      <td class="text-right font-mono text-sky-300 font-bold">${fmtAvg(t.pct)}</td>
-                      <td class="text-right font-mono ${t.gb === 0 ? 'text-amber-300 font-bold' : 'text-slate-300'}">${t.gb === 0 ? 'LEAD' : t.gb.toFixed(1)}</td>
-                      <td class="text-right font-mono text-xs ${mCls}">${mStr}</td>
-                      <td class="text-right font-mono text-xs ${l10Cls}">${t.l10_str || '5-5'}</td>
-                      <td class="text-right font-mono text-xs ${t.streak > 0 ? 'text-emerald-400' : 'text-rose-400'}">${t.streak_str}</td>
-                      <td class="text-right font-mono ${t.run_diff >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${t.run_diff >= 0 ? '+' : ''}${t.run_diff}</td>
-                      <td class="text-right font-mono text-slate-300">${t.pyth_w}-${t.pyth_l}</td>
-                      <td class="text-right font-mono font-bold text-sky-400">${Number(t.playoff_prob || 0).toFixed(0)}%</td>
-                    </tr>
-                  `;
-                }).join("")}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      `;
-    }).join("");
-
-    // 3. Wild Card Bubble & Momentum Trajectory Row
-    const wcHtml = wildCards.map(wc => `
-      <div class="glass-card overflow-hidden border border-slate-800">
-        <div class="px-4 py-2.5 bg-slate-900/95 border-b border-slate-800 flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <i class="bi bi-Scissors text-amber-400"></i>
-            <span class="font-extrabold text-xs uppercase tracking-wider text-white">${wc.sub_league_name} Wild Card & Cutline Tracker</span>
-          </div>
-          <span class="text-[10px] font-mono text-amber-300">Top ${wc.wc_spots} Non-Div Winners Qualify</span>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="saber-table">
-            <thead>
-              <tr>
-                <th class="text-left">Status</th>
-                <th class="text-left">Club</th>
-                <th class="text-right">W-L</th>
-                <th class="text-right">PCT</th>
-                <th class="text-right">WC GB</th>
-                <th class="text-right">L10</th>
-                <th class="text-right">RD</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${(wc.standings || []).slice(0, 8).map((t, idx) => {
-                const isCutlineRow = idx === wc.wc_spots - 1;
-                return `
-                  <tr onclick="switchTeamAndGo(${t.team_id})" class="cursor-pointer ${ isCutlineRow ? 'border-b-2 border-dashed border-amber-400' : '' }">
-                    <td>
-                      <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-extrabold ${t.in_wc_spot ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-slate-800 text-slate-400'}">
-                        ${t.wc_status}
-                      </span>
-                    </td>
-                    <td class="font-bold">
-                      <div class="flex items-center gap-2">
-                        <img src="${teamLogoUrl(t.logo_file_name)}" class="w-4 h-4 object-contain" alt="">
-                        <span class="text-white">${t.full_name}</span>
+                        <table class="w-full text-right text-[11px]">
+                          <thead>
+                            <tr class="bnn-muted border-b bnn-border">
+                              <th class="text-left pb-1">Club</th>
+                              <th class="pb-1">W-L</th>
+                              <th class="pb-1">GB</th>
+                              <th class="pb-1">M#</th>
+                              <th class="pb-1">rSOS</th>
+                              <th class="pb-1">TrueWL</th>
+                              <th class="pb-1">Div%</th>
+                            </tr>
+                          </thead>
+                          <tbody class="divide-y bnn-border">
+                            ${(dr.teams || []).slice(0, 5).map((t, idx) => `
+                              <tr onclick="switchTeamAndGo(${t.team_id})" class="${idx < 2 ? 'font-bold' : 'bnn-muted'} bnn-row-hover cursor-pointer">
+                                <td class="text-left py-1 ${t.is_mirage ? 'text-amber-400' : ''}">${idx + 1}. ${t.abbr}${t.is_mirage ? ' ⚠' : ''}</td>
+                                <td>${t.record_str}</td>
+                                <td class="${t.gb === 0 ? 'text-amber-400' : ''}">${t.gb === 0 ? (dr.lead_gb === 0 ? 'TIED' : '—') : t.gb.toFixed(1)}</td>
+                                <td class="${t.magic_str === 'CLINCHED' ? 'text-amber-400' : 'text-emerald-400'}">${t.magic_str || '-'}</td>
+                                <td class="${t.rsos >= 0.515 ? 'text-red-400 font-bold' : (t.rsos <= 0.490 ? 'text-emerald-400' : '')}">${fmtAvg(t.rsos)}</td>
+                                <td class="${t.is_mirage ? 'text-red-400 font-extrabold' : (t.luck_diff <= -2.5 ? 'text-emerald-400 font-extrabold' : '')}">${t.true_wl_str}</td>
+                                <td class="${t.div_prob >= 45 ? 'text-emerald-400' : 'text-blue-400'}">${Number(t.div_prob || 0).toFixed(1)}%</td>
+                              </tr>
+                            `).join("")}
+                          </tbody>
+                        </table>
                       </div>
-                    </td>
-                    <td class="text-right font-mono font-bold text-white">${t.record_str}</td>
-                    <td class="text-right font-mono text-sky-300">${fmtAvg(t.pct)}</td>
-                    <td class="text-right font-mono font-bold ${t.in_wc_spot ? 'text-emerald-400' : 'text-amber-300'}">${t.wc_gb_str}</td>
-                    <td class="text-right font-mono text-xs">${t.l10_str || '5-5'}</td>
-                    <td class="text-right font-mono ${t.run_diff >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${t.run_diff >= 0 ? '+' : ''}${t.run_diff}</td>
-                  </tr>
-                `;
-              }).join("")}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `).join("");
+                    `;
+                  }).join("")}
 
-    return `
-      <section class="space-y-5 pb-8 border-b border-slate-800/80 last:border-b-0">
-        <!-- League Stretch Header Banner -->
-        <div class="glass-card p-4 bg-gradient-to-r from-slate-900 via-slate-900/95 to-slate-950 border border-slate-700/80 flex flex-wrap items-center justify-between gap-4">
-          <div class="flex items-center gap-3">
-            <span class="px-2.5 py-1 rounded-lg bg-rose-500/20 border border-rose-400/40 text-rose-300 font-mono text-xs font-black">
-              ${lg.level_label || `Level ${lg.level || 1}`}
-            </span>
-            <div>
-              <h2 class="text-lg sm:text-xl font-black text-white tracking-tight mb-0">
-                ${lg.name} (${lg.abbr}) — ${pkg.season_year} Stretch & Postseason Center
-              </h2>
-              <div class="text-xs text-slate-400 font-mono">
-                Schedule Progress: <b class="text-white">${pkg.games_played_avg} / ${pkg.scheduled_games} G (${pkg.pct_complete}%)</b> • ${pkg.phase_badge}
+                  <!-- Wild Card Summary (Shown in 16:9 Right Column; unstacks to Column 4 in 21:9 Ultrawide) -->
+                  <div data-stretch-race="tight wc sl0 sl1" class="bnn-std-only p-3 space-y-1.5">
+                    <div class="flex justify-between items-center font-sans">
+                      <span class="font-extrabold text-red-400 uppercase">Wild Card Cutlines</span>
+                      <span class="text-[10px] font-mono bnn-muted">21:9 Unstacks &rarr;</span>
+                    </div>
+                    <div class="space-y-1 text-[11px]">
+                      ${wildCards.map(wc => `
+                        <div class="flex justify-between">
+                          <span>${wc.sub_league_short || 'WC'} #${wc.wc_spots}: <strong>${wc.cutline_abbr || wc.cutline_team} (${wc.cutline_record})</strong></span>
+                          <span class="text-amber-400">${wc.chaser_abbr ? `${wc.chaser_abbr} ${Number(wc.chaser_gb || 0).toFixed(1)} GB` : 'Cutline Set'}</span>
+                        </div>
+                      `).join("")}
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-          <div class="flex items-center gap-3">
-            <div class="w-36 sm:w-48">
-              <div class="flex justify-between text-[10px] font-mono text-slate-300 mb-1">
-                <span>SEASON PROGRESS</span>
-                <span class="font-bold text-amber-300">${pkg.pct_complete}%</span>
-              </div>
-              <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                <div class="h-full bg-gradient-to-r from-sky-400 via-amber-400 to-emerald-400" style="width:${pkg.pct_complete}%"></div>
-              </div>
-            </div>
-          </div>
-        </div>
 
-        ${bracketHtml}
-
-        <!-- Division Pennant Races Grid -->
-        <div class="grid grid-cols-1 ${divRaces.length > 1 ? 'xl:grid-cols-2' : ''} gap-5">
-          ${divCardsHtml}
-        </div>
-
-        <!-- Wild Card Bubble + Momentum Worm Chart -->
-        <div class="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
-          <div class="xl:col-span-6 space-y-4">
-            ${wcHtml}
-          </div>
-          <div class="xl:col-span-6 glass-card p-4 border border-slate-800">
-            <div class="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
-              <div>
-                <h4 class="font-extrabold text-xs uppercase tracking-wider text-white mb-0">
-                  <i class="bi bi-graph-up text-amber-400 mr-1.5"></i> Pennant Race Momentum Worm (Games Above / Below .500)
-                </h4>
-                <div class="text-[11px] text-slate-400">Cumulative season trajectory across top contenders in ${lg.abbr}</div>
+              <!-- Clinch & Elimination Radar -->
+              <div class="bnn-card rounded-xl overflow-hidden">
+                <div class="px-3.5 py-2 bnn-subcard border-t-0 border-x-0 flex items-center justify-between">
+                  <h3 class="text-xs font-extrabold uppercase tracking-wider mb-0">Clinch &amp; Elimination Radar</h3>
+                  <span class="text-[10.5px] font-mono bnn-muted">Magic# / Elim#</span>
+                </div>
+                <div class="p-3 space-y-1.5 text-xs font-mono">
+                  ${clinchRadar.map((c, cIdx) => c.type === "clinch" ? `
+                    <div onclick="switchTeamAndGo(${c.team_id})" class="flex justify-between cursor-pointer hover:underline">
+                      <span>${c.abbr} (${c.target})</span>
+                      <span class="text-emerald-400 font-bold">${c.magic_str === 'CLINCHED' ? 'CLINCHED ★' : `M#: ${c.magic_str}`}</span>
+                    </div>
+                  ` : `
+                    <div onclick="switchTeamAndGo(${c.team_id})" class="${cIdx > 0 && clinchRadar[cIdx - 1].type === 'clinch' ? 'border-t bnn-border pt-1.5' : ''} flex justify-between text-red-400 cursor-pointer hover:underline">
+                      <span>${c.abbr} (${c.record_str}) · ${c.target}</span>
+                      <span class="font-bold">${c.magic_str === 'ELIM' ? 'ELIMINATED' : `Elim#: ${c.magic_str}`}</span>
+                    </div>
+                  `).join("")}
+                </div>
               </div>
-              <span class="text-[10px] font-mono text-slate-400">${pkg.season_year}</span>
-            </div>
-            <div class="h-[300px] w-full">
-              <canvas id="${canvasId}"></canvas>
-            </div>
+            </aside>
+
+            <!-- 21:9 ULTRAWIDE COLUMN 4: UNSTACKED WILD CARD CUTLINE & BUBBLE TRACKER -->
+            <aside class="bnn-stretch-col-uw">
+              <div class="bnn-card rounded-xl overflow-hidden border-amber-500/40">
+                <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 flex items-center justify-between">
+                  <div>
+                    <span class="text-[10.5px] font-mono text-amber-400 font-extrabold uppercase">21:9 UNSTACKED CUTLINE</span>
+                    <h2 class="text-xs sm:text-sm font-extrabold mb-0">Wild Card Bubble Tracker</h2>
+                  </div>
+                  <span class="text-[10.5px] font-mono bnn-muted">BaseRuns · POFF%</span>
+                </div>
+
+                <div class="p-3 space-y-4 text-xs font-mono" style="font-variant-numeric: tabular-nums;">
+                  ${wildCards.map((wc, wIdx) => `
+                    <div>
+                      <div class="font-sans font-bold ${wIdx === 0 ? 'text-blue-400' : 'text-red-400'} uppercase border-b bnn-border pb-1 mb-1 flex justify-between text-[11px]">
+                        <span>${wc.sub_league_short || wc.sub_league_name} WILD CARD (TOP ${wc.wc_spots})</span>
+                        <span>W-L · WCGB · TrueWL · POFF%</span>
+                      </div>
+                      <div class="space-y-1.5 text-[11px]">
+                        ${(wc.standings || []).slice(0, 6).map((t, idx) => {
+                          const isCut = idx === wc.wc_spots - 1;
+                          return `
+                            <div onclick="switchTeamAndGo(${t.team_id})" class="flex justify-between ${t.in_wc_spot ? 'font-bold' : 'bnn-muted'} ${isCut ? 'border-b-2 border-dashed border-amber-500 pb-1.5' : ''} cursor-pointer bnn-row-hover rounded px-1">
+                              <span>${t.wc_status} ${t.abbr}${t.is_mirage ? ' ⚠' : ''}</span>
+                              <span>${t.record_str} · ${t.wc_gb_str === 'CUTLINE' ? 'CUT' : t.wc_gb_str} · ${t.true_wl_str} · <strong class="${t.in_wc_spot ? 'text-emerald-400' : 'text-blue-400'}">${Number(t.playoff_prob || 0).toFixed(1)}%</strong></span>
+                            </div>
+                          `;
+                        }).join("")}
+                      </div>
+                    </div>
+                  `).join("")}
+                </div>
+              </div>
+            </aside>
+
           </div>
-        </div>
+        `}
       </section>
     `;
   };
 
+  const primaryPkg = packages[0] || {};
+  const primaryLevSeries = primaryPkg.leverage_series || [];
+
   container.innerHTML = `
-    <div class="animate-view space-y-6">
-      <!-- Top Multi-League Selector Bar for "The Stretch" -->
-      <div class="glass-card p-4 border border-rose-500/35 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div class="flex items-center gap-2">
-            <i class="bi bi-flag-fill text-rose-400"></i>
-            <h2 class="text-base font-black uppercase tracking-wider text-white mb-0">
-              “The Stretch” — Multi-League Pennant Races, Magic Numbers & Playoff Brackets
-            </h2>
+    <div class="animate-view ${themeCls} ${vpCls}">
+      <div class="bnn-shell">
+
+        <!-- 1. PERSISTENT HIGH-LEVERAGE PENNANT SERIES & cWPA ODDS SWING TICKER -->
+        <section aria-label="High-Leverage Pennant Race Series Ticker" class="bnn-card border-t-0 border-x-0 px-3 py-1.5">
+          <div class="bnn-stretch-container flex items-center gap-3">
+            <div class="shrink-0 pr-3 border-r bnn-border">
+              <div class="flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-red-600 animate-pulse"></span>
+                <span class="text-xs font-extrabold uppercase tracking-wider">PENNANT LEVERAGE</span>
+              </div>
+              <div class="text-[10.5px] font-mono bnn-muted">${Math.max(0, (primaryPkg.scheduled_games || 162) - (primaryPkg.avg_games_played || 0))} GMS LEFT · ${primaryPkg.season_year || ''}</div>
+            </div>
+
+            <div class="flex items-center gap-2.5 overflow-x-auto pb-0.5 flex-1 text-xs font-mono">
+              ${primaryLevSeries.map(ls => {
+                const borderMap = {
+                  red: "border-l-red-600",
+                  amber: "border-l-amber-500",
+                  emerald: "border-l-emerald-500",
+                  blue: "border-l-blue-500",
+                  purple: "border-l-purple-500",
+                };
+                const textMap = {
+                  red: "text-red-500",
+                  amber: "text-amber-500",
+                  emerald: "text-emerald-400",
+                  blue: "text-blue-400",
+                  purple: "text-purple-400",
+                };
+                return `
+                  <div onclick="${ls.home_team?.team_id ? `switchTeamAndGo(${ls.home_team.team_id})` : ''}" class="w-60 shrink-0 p-1.5 rounded bnn-subcard border-l-4 ${borderMap[ls.accent] || 'border-l-red-600'} cursor-pointer bnn-row-hover">
+                    <div class="flex justify-between mb-0.5">
+                      <span class="font-bold text-[10.5px] truncate ${textMap[ls.accent] || 'text-red-500'}">${ls.tag}</span>
+                      <span class="px-1 rounded ${ls.cwpa_swing >= 10 ? 'bnn-pct-95' : 'bnn-pct-80'} font-bold text-[10px]" title="Championship Win Probability Added Swing">±${ls.cwpa_swing}% cWPA</span>
+                    </div>
+                    <div class="font-sans font-bold truncate">${ls.matchup_str}</div>
+                    <div class="text-[10.5px] bnn-muted truncate">${ls.subtext}</div>
+                  </div>
+                `;
+              }).join("")}
+            </div>
           </div>
-          <p class="text-xs text-slate-400 mb-0 mt-0.5">
-            Toggle one or multiple leagues below to compare division races, wild-card cutlines, and live or projected postseason brackets side-by-side.
-          </p>
-        </div>
-        <div class="flex flex-wrap items-center gap-1.5">
-          <button onclick="toggleStretchLeagueSelection(${AppState.activeLeagueId || (allLeagues[0] && allLeagues[0].league_id) || 100}, 'single')"
-                  class="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-bold transition">
-            Active League Only
-          </button>
-          ${allLeagues.length > 1 ? `
-            <button onclick="toggleStretchLeagueSelection(0, 'all')"
-                    class="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-400/40 text-xs font-bold transition">
-              Compare Multiple Leagues (${Math.min(8, allLeagues.length)})
-            </button>
-          ` : ""}
-        </div>
-      </div>
+        </section>
 
-      ${allLeagues.length > 1 ? `
-        <div class="flex flex-wrap items-center gap-1.5">
-          <span class="text-[11px] font-mono uppercase text-slate-400 font-bold mr-1">Select Leagues:</span>
-          ${allLeagues.map(l => {
-            const isSel = selectedSet.has(l.league_id);
-            return `
-              <button onclick="toggleStretchLeagueSelection(${l.league_id}, 'toggle')"
-                      class="px-3 py-1 rounded-xl text-xs font-mono font-bold transition flex items-center gap-1.5 ${isSel ? 'bg-rose-500 text-white shadow-lg border border-rose-300' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'}">
-                <span>${l.abbr}</span>
-                <span class="text-[10px] opacity-80">(${l.name})</span>
-              </button>
-            `;
-          }).join("")}
-        </div>
-      ` : ""}
+        <!-- 2. LOCKED-IN BNN.COM | OOTP+ BROADCAST SCOREBUG BRAND HEADER -->
+        <header class="bg-gradient-to-r from-[#B91C1C] via-[#991B1B] to-[#1E293B] text-white px-4 py-2 shadow-md border-b border-white/15">
+          <div class="bnn-stretch-container flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-4">
+              <!-- Locked-in Logo 3: [B][N][N] .COM / OOTP+ Broadcast Scorebug Tile SVG -->
+              <svg width="185" height="40" viewBox="0 0 240 54" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="BNN.COM OOTP+ Broadcast Logo" class="shrink-0">
+                <g transform="skewX(-10) translate(12, 8)">
+                  <rect x="0" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
+                  <text x="17" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">B</text>
+                  <rect x="38" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
+                  <text x="55" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">N</text>
+                  <rect x="76" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
+                  <text x="93" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">N</text>
+                  <rect x="114" y="0" width="68" height="23" rx="3" fill="#090D14" stroke="#FFFFFF" stroke-width="1.2"/>
+                  <text x="148" y="16.5" text-anchor="middle" fill="#FFFFFF" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="16">.COM</text>
+                  <rect x="114" y="25" width="68" height="11" rx="2" fill="#F59E0B"/>
+                  <text x="148" y="33.2" text-anchor="middle" fill="#090D14" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="8.5" letter-spacing="1.2">OOTP+</text>
+                </g>
+              </svg>
 
-      <div class="space-y-8">
-        ${packages.map((pkg, idx) => renderSingleLeagueStretchHtml(pkg, idx)).join("")}
+              <div class="hidden xl:flex items-center gap-3 text-xs font-extrabold tracking-wide uppercase">
+                <button onclick="switchTab('frontpage')" class="text-white/75 hover:text-white transition">01. Front Page</button>
+                <span class="text-amber-300 border-b-2 border-amber-300 pb-0.5">02. The Stretch (Pennant Hub)</span>
+                <button onclick="switchTab('world')" class="text-white/75 hover:text-white transition">03. World</button>
+                <button onclick="switchTab('overview')" class="text-white/75 hover:text-white transition">04. Standings</button>
+                <button onclick="switchTab('teamhub')" class="text-white/75 hover:text-white transition">05. Team Hub</button>
+              </div>
+            </div>
+
+            <!-- Right: Data Trust Signals, View Mode, Viewport Ergonomics & Dark/Light Theme -->
+            <div class="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+              <span class="px-2.5 py-1 rounded bg-black/35 border border-white/15 hidden md:inline">
+                SCHEDULE: <strong class="text-amber-300">${primaryPkg.games_played_avg || 0} / ${primaryPkg.scheduled_games || 162} G (${primaryPkg.pct_complete || 0}%)</strong>
+              </span>
+
+              <!-- Portal vs Monte Carlo Matrix Switcher -->
+              <div class="inline-flex items-center rounded-lg bg-black/40 p-0.5 border border-white/20">
+                <button onclick="setStretchViewMode('portal')" class="px-2 py-0.5 rounded font-bold transition ${viewMode === 'portal' ? 'bg-red-600 text-white' : 'text-slate-300 hover:text-white'}">
+                  Playoff Machine ★
+                </button>
+                <button onclick="setStretchViewMode('matrix')" class="px-2 py-0.5 rounded font-bold transition ${viewMode === 'matrix' ? 'bg-red-600 text-white' : 'text-slate-300 hover:text-white'}">
+                  Odds Matrix
+                </button>
+              </div>
+
+              <!-- Viewport Ergonomics Switcher (Auto / 16:9 UHD 3-Col / 21:9 Ultrawide 4-Col) -->
+              <div class="inline-flex items-center rounded-lg bg-black/40 p-0.5 border border-white/20">
+                <button onclick="setStretchViewportMode('auto')" class="px-2 py-0.5 rounded font-bold transition ${vpMode === 'auto' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'}" title="Auto-detect 16:9 vs 21:9 Ultrawide">
+                  Auto
+                </button>
+                <button onclick="setStretchViewportMode('standard')" class="px-2 py-0.5 rounded font-bold transition ${vpMode === 'standard' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'}" title="16:9 Standard UHD (1580px 3-Col)">
+                  16:9 (3-Col)
+                </button>
+                <button onclick="setStretchViewportMode('ultrawide')" class="px-2 py-0.5 rounded font-bold transition ${vpMode === 'ultrawide' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'}" title="21:9 Ultrawide (Unstacked 4-Col)">
+                  21:9 (4-Col)
+                </button>
+              </div>
+
+              <!-- Dark (Default) vs Light Theme Toggle -->
+              <div class="inline-flex items-center rounded-lg bg-black/40 p-0.5 border border-white/20">
+                <button onclick="setStretchTheme('dark')" class="px-2 py-0.5 rounded font-bold transition ${AppState.frontPageTheme !== 'light' ? 'bg-white text-slate-900' : 'text-slate-300 hover:text-white'}">
+                  🌙 Dark
+                </button>
+                <button onclick="setStretchTheme('light')" class="px-2 py-0.5 rounded font-bold transition ${AppState.frontPageTheme === 'light' ? 'bg-amber-400 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">
+                  ☀️ Light
+                </button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <!-- Multi-League Filter Bar (when save has multiple leagues) -->
+        ${allLeagues.length > 1 ? `
+          <div class="px-4 py-2 border-b bnn-border bnn-subcard">
+            <div class="bnn-stretch-container flex flex-wrap items-center justify-between gap-2">
+              <div class="flex flex-wrap items-center gap-1.5">
+                <span class="text-[10.5px] font-mono uppercase bnn-muted font-extrabold mr-1">Leagues:</span>
+                ${allLeagues.map(l => {
+                  const isSel = selectedSet.has(l.league_id);
+                  return `
+                    <button onclick="toggleStretchLeagueSelection(${l.league_id}, 'toggle')"
+                            class="px-2.5 py-0.5 rounded-lg text-[11px] font-mono font-bold transition ${isSel ? 'bg-red-600 text-white shadow' : 'bnn-pill-btn'}">
+                      ${l.abbr} <span class="opacity-75">(${l.name})</span>
+                    </button>
+                  `;
+                }).join("")}
+              </div>
+              <div class="flex items-center gap-1.5 text-[11px] font-mono">
+                <button onclick="toggleStretchLeagueSelection(${AppState.activeLeagueId || (allLeagues[0] && allLeagues[0].league_id) || 100}, 'single')" class="px-2 py-0.5 rounded bnn-pill-btn font-bold">
+                  Active League Only
+                </button>
+                <button onclick="toggleStretchLeagueSelection(0, 'all')" class="px-2 py-0.5 rounded bnn-pill-btn font-bold text-amber-400">
+                  Compare All (${Math.min(8, allLeagues.length)})
+                </button>
+              </div>
+            </div>
+          </div>
+        ` : ""}
+
+        <!-- Main Stretch Hub Content -->
+        <div class="p-3.5 sm:p-4 bnn-stretch-container w-full space-y-8">
+          ${packages.map((pkg, idx) => renderSingleLeagueStretchHtml(pkg, idx)).join("")}
+        </div>
+
       </div>
     </div>
   `;
@@ -9659,7 +11405,7 @@ async function renderStretchTab(container) {
     const lg = pkg.league || {};
     const canvasId = `stretch-worm-chart-${lg.league_id}-${idx}`;
     if (typeof renderStretchTrajectoryChart === "function") {
-      renderStretchTrajectoryChart(canvasId, pkg.trajectories || []);
+      renderStretchTrajectoryChart(canvasId, pkg.trajectories || [], wormMode);
     }
   });
 }
@@ -9667,22 +11413,93 @@ async function renderStretchTab(container) {
 /* ============================================================================
  * 14. ASSOCIATION / WORLD DASHBOARD — HOLISTIC ECOSYSTEM & AFFILIATE PYRAMID
  * ============================================================================ */
+window.setWorldViewMode = function(mode) {
+  AppState.worldViewMode = mode || "portal";
+  const main = document.getElementById("main-view-container");
+  if (main && AppState.activeTab === "world") {
+    renderWorldDashboardTab(main);
+  }
+};
+
+window.setWorldMacroMode = function(mode) {
+  AppState.worldMacroMode = mode || "quadrant";
+  const main = document.getElementById("main-view-container");
+  if (main && AppState.activeTab === "world") {
+    renderWorldDashboardTab(main);
+  }
+};
+
+window.setWorldP4PMode = function(mode) {
+  AppState.worldP4PMode = mode || "mle";
+  const main = document.getElementById("main-view-container");
+  if (main && AppState.activeTab === "world") {
+    renderWorldDashboardTab(main);
+  }
+};
+
+window.setWorldP4PDomain = function(domain) {
+  AppState.worldP4PDomain = domain || "bat";
+  const main = document.getElementById("main-view-container");
+  if (main && AppState.activeTab === "world") {
+    renderWorldDashboardTab(main);
+  }
+};
+
+window.selectWorldPyramidOrg = function(teamId) {
+  AppState.worldSelectedOrgId = Number(teamId);
+  const main = document.getElementById("main-view-container");
+  if (main && AppState.activeTab === "world") {
+    renderWorldDashboardTab(main);
+  }
+};
+
+window.setWorldComparatorOrg = function(side, teamId) {
+  if (side === "A") AppState.worldCmpOrgA = Number(teamId);
+  else AppState.worldCmpOrgB = Number(teamId);
+  const main = document.getElementById("main-view-container");
+  if (main && AppState.activeTab === "world") {
+    renderWorldDashboardTab(main);
+  }
+};
+
+window.setWorldMleSimPlayer = function(idx) {
+  AppState.worldMleSimIdx = Number(idx) || 0;
+  const main = document.getElementById("main-view-container");
+  if (main && AppState.activeTab === "world") {
+    renderWorldDashboardTab(main);
+  }
+};
+
+window.setWorldViewportMode = function(mode) {
+  AppState.frontPageViewportMode = mode || "auto";
+  const main = document.getElementById("main-view-container");
+  if (main && AppState.activeTab === "world") {
+    renderWorldDashboardTab(main);
+  }
+};
+
+window.setWorldTheme = function(theme) {
+  AppState.frontPageTheme = theme === "light" ? "light" : "dark";
+  const main = document.getElementById("main-view-container");
+  if (main && AppState.activeTab === "world") {
+    renderWorldDashboardTab(main);
+  }
+};
+
 window.setWorldTalentChartMode = function(mode) {
   AppState.worldTalentMode = mode;
   if (AppState.worldData && typeof renderWorldTalentChart === "function") {
     renderWorldTalentChart("world-talent-chart", AppState.worldData.talent_distribution, mode);
   }
-  document.querySelectorAll("[data-world-talent-btn]").forEach(btn => {
-    const active = btn.getAttribute("data-world-talent-btn") === mode;
-    btn.classList.toggle("bg-amber-400", active);
-    btn.classList.toggle("text-slate-950", active);
-    btn.classList.toggle("bg-slate-900", !active);
-    btn.classList.toggle("text-slate-300", !active);
-  });
 };
 
 window.filterWorldOrgs = function(query) {
   AppState.worldOrgSearch = String(query || "").trim().toLowerCase();
+  const rows = document.querySelectorAll("[data-org-row]");
+  rows.forEach(r => {
+    const hay = (r.getAttribute("data-org-haystack") || "").toLowerCase();
+    r.classList.toggle("hidden", Boolean(AppState.worldOrgSearch && !hay.includes(AppState.worldOrgSearch)));
+  });
   const cards = document.querySelectorAll("[data-org-card]");
   cards.forEach(c => {
     const hay = (c.getAttribute("data-org-haystack") || "").toLowerCase();
@@ -9696,9 +11513,15 @@ window.jumpToLeagueStretch = async function(lid) {
   await switchTab("stretch");
 };
 
+function fvBadgeHtml(fvVal) {
+  const fv = Number(fvVal) || 50;
+  const cls = fv >= 70 ? "fv-80" : (fv >= 60 ? "fv-65" : (fv >= 50 ? "fv-55" : "fv-45"));
+  return `<span class="fv-badge ${cls}">${fv} FV</span>`;
+}
+
 async function renderWorldDashboardTab(container) {
   if (!AppState.worldData) {
-    showLoading("Synthesizing Holistic Association & World Ecosystem Dashboard...");
+    showLoading("Synthesizing BNN.COM Global Ecosystem, MLE Equivalency & Organizational Affiliate Pyramid...");
     try {
       const params = new URLSearchParams({ save: AppState.activeSave });
       if (AppState.activeYear) params.set("year", AppState.activeYear);
@@ -9710,6 +11533,7 @@ async function renderWorldDashboardTab(container) {
 
   const wd = AppState.worldData || {};
   const kpis = wd.world_kpis || {};
+  const heroKpis = wd.hero_kpis || {};
   const leaguesEco = wd.leagues_ecosystem || [];
   const orgPyramid = wd.organizational_pyramid || [];
   const talentDist = wd.talent_distribution || wd.visuals?.talent_distribution || {};
@@ -9717,423 +11541,1166 @@ async function renderWorldDashboardTab(container) {
   const finQuad = wd.financial_quadrant || wd.visuals?.financial_quadrant || [];
   const histTrends = Array.isArray(wd.historical_trends) ? wd.historical_trends : [];
   const wLeaders = wd.world_leaders || {};
-  const topOrg = orgPyramid[0] || null;
 
-  container.innerHTML = `
-    <div class="animate-view space-y-6">
+  const themeCls = AppState.frontPageTheme === "light" ? "bnn-portal-light" : "bnn-portal-dark";
+  const vpMode = AppState.frontPageViewportMode || "auto";
+  const vpClass = vpMode === "ultrawide" ? "bnn-vp-ultrawide" : (vpMode === "standard" ? "bnn-vp-standard" : "bnn-vp-auto");
+  const viewMode = AppState.worldViewMode || "portal";
+  const macroMode = AppState.worldMacroMode || "quadrant";
+  const p4pMode = AppState.worldP4PMode || "mle";
+  const p4pDomain = AppState.worldP4PDomain || "bat";
 
-      <!-- Association / World Hero Banner & Macro KPIs -->
-      <div class="glass-card p-5 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border border-sky-500/35">
-        <div class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4 mb-4">
-          <div class="flex items-center gap-3.5">
-            <div class="w-11 h-11 rounded-2xl bg-sky-500/20 border border-sky-400/50 flex items-center justify-center text-sky-300 text-2xl shadow-lg">
-              <i class="bi bi-globe-americas"></i>
-            </div>
-            <div>
-              <div class="flex items-center gap-2">
-                <h2 class="text-lg sm:text-2xl font-black tracking-tight text-white mb-0">
-                  Association & World Ecosystem Command Center (${wd.selected_year || ''})
-                </h2>
-                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-extrabold bg-sky-500/20 text-sky-300 border border-sky-400/40">
-                  ${kpis.total_leagues || 1} LEAGUES • ${kpis.total_teams || 0} CLUBS
-                </span>
-              </div>
-              <p class="text-xs text-slate-400 mb-0 mt-0.5">
-                Holistic cross-league analytics, organizational affiliate pyramids (MLB &rarr; Rookie), global player talent/age distributions, international pipelines & financial quadrants.
-              </p>
-            </div>
-          </div>
-          <div class="flex items-center gap-2">
-            <button onclick="switchTab('frontpage')" class="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-700 text-xs font-bold transition">
-              <i class="bi bi-newspaper mr-1"></i> Front Page Gazette
-            </button>
-            <button onclick="switchTab('stretch')" class="px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-400/40 text-xs font-bold transition">
-              <i class="bi bi-flag-fill mr-1"></i> The Stretch
-            </button>
-          </div>
-        </div>
+  // Selected Organization for Broadcast Affiliate Pyramid
+  if (!AppState.worldSelectedOrgId && orgPyramid.length) {
+    AppState.worldSelectedOrgId = orgPyramid[0].team_id;
+  }
+  const selectedOrg = orgPyramid.find(o => o.team_id === Number(AppState.worldSelectedOrgId)) || orgPyramid[0] || {};
+  const selectedOrgRank = Math.max(1, orgPyramid.findIndex(o => o.team_id === selectedOrg.team_id) + 1);
 
-        <!-- 6 Macro World KPI Cards -->
-        <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-          <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
-            <div class="text-[10px] font-mono uppercase text-slate-400 font-bold">ASSOCIATION SCALE</div>
-            <div class="text-xl font-black text-white font-mono mt-0.5">${kpis.total_leagues || 1} Lgs / ${kpis.total_teams || 0} Clubs</div>
-            <div class="text-[10.5px] text-sky-400 font-mono mt-0.5">${Number(kpis.total_games_logged || 0).toLocaleString()} Games Logged</div>
-          </div>
-          <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
-            <div class="text-[10px] font-mono uppercase text-slate-400 font-bold">WORLD PLAYER POOL</div>
-            <div class="text-xl font-black text-emerald-400 font-mono mt-0.5">${Number(kpis.active_players || 0).toLocaleString()}</div>
-            <div class="text-[10.5px] text-slate-300 font-mono mt-0.5">${Number(kpis.rostered_players || 0).toLocaleString()} Rostered • ${Number(kpis.free_agents || 0).toLocaleString()} FA</div>
-          </div>
-          <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
-            <div class="text-[10px] font-mono uppercase text-slate-400 font-bold">ELITE STARS & PROSPECTS</div>
-            <div class="text-xl font-black text-amber-300 font-mono mt-0.5">${kpis.elite_stars_60plus || 0} Stars (60+)</div>
-            <div class="text-[10.5px] text-slate-300 font-mono mt-0.5">${Number(kpis.u24_prospects || 0).toLocaleString()} U-24 Prospects • Avg Age ${kpis.avg_world_age || 25.5}</div>
-          </div>
-          <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
-            <div class="text-[10px] font-mono uppercase text-slate-400 font-bold">GLOBAL RUN ENVIRONMENT</div>
-            <div class="text-xl font-black text-white font-mono mt-0.5">${fmtAvg(kpis.world_avg)}/${fmtAvg(kpis.world_obp)}/${fmtAvg(kpis.world_slg)}</div>
-            <div class="text-[10.5px] text-rose-300 font-mono mt-0.5">${Number(kpis.world_era || 4.15).toFixed(2)} World ERA • ${Number(kpis.world_hr || 0).toLocaleString()} HRs</div>
-          </div>
-          <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
-            <div class="text-[10px] font-mono uppercase text-slate-400 font-bold">WORLD ECONOMY</div>
-            <div class="text-xl font-black text-sky-300 font-mono mt-0.5">${fmtMoney(kpis.total_world_payroll)}</div>
-            <div class="text-[10.5px] text-slate-300 font-mono mt-0.5">Avg ${fmtMoney(kpis.avg_team_payroll)} • Max ${fmtMoney(kpis.max_team_payroll)}</div>
-          </div>
-          <div class="p-3 rounded-xl bg-slate-900/90 border border-amber-500/35">
-            <div class="text-[10px] font-mono uppercase text-amber-300 font-bold">#1 ORG POWER INDEX</div>
-            <div class="text-lg font-black text-white truncate mt-0.5">${topOrg ? topOrg.parent_name : '—'}</div>
-            <div class="text-[10.5px] text-amber-300 font-mono mt-0.5">
-              ${topOrg ? `Index ${topOrg.org_power_index} • Org ${fmtAvg(topOrg.org_pct)} (${topOrg.affiliate_count} Aff)` : 'Single-Level Save'}
-            </div>
-          </div>
-        </div>
-      </div>
+  // Hero KPI 1..4 objects with fallbacks
+  const topOrg = heroKpis.top_org || orgPyramid[0] || {};
+  const topFarm = heroKpis.top_farm || orgPyramid[1] || orgPyramid[0] || {};
+  const mbKing = heroKpis.moneyball_king || finQuad[0] || {};
+  const extEnv = heroKpis.extreme_env_alert || leaguesEco[0] || {};
 
-      <!-- 4 High-Level World Analysis Visuals (2x2 Chart.js Grid) -->
-      <div class="grid grid-cols-1 xl:grid-cols-12 gap-5">
+  const mlbSharePct = Math.max(25, Math.min(75, Math.round(((topOrg.pct || 0.55) / Math.max(0.01, (topOrg.pct || 0.55) + (topOrg.milb_pct || 0.52))) * 100)));
 
-        <!-- Visual 1: League Ecosystem / Historical Environment -->
-        <div class="xl:col-span-6 glass-card p-4 border border-slate-800">
-          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
-            <div>
-              <h3 class="font-extrabold text-xs uppercase tracking-wider text-white mb-0">
-                <i class="bi bi-bar-chart-line-fill text-sky-400 mr-1.5"></i>
-                ${leaguesEco.length > 1 ? 'Association Multi-League Offense (OPS) vs. Pitching (ERA)' : 'World Historical Scoring & ERA Macro Trend'}
-              </h3>
-              <p class="text-[11px] text-slate-400 mb-0">Comparing run environments across all active leagues & levels</p>
-            </div>
-            <span class="text-[10px] font-mono text-sky-400">${leaguesEco.length} Leagues</span>
-          </div>
-          <div class="h-[290px] w-full">
-            <canvas id="world-ecosystem-chart"></canvas>
-          </div>
-        </div>
+  // Helper: Render the Broadcast Organizational Affiliate Pyramid Graphic
+  const renderBroadcastPyramidCardHtml = (isCompactUw = false) => {
+    const affs = selectedOrg.affiliates || [];
+    const topProspList = selectedOrg.top_prospects || [];
+    const orgTop1 = topProspList[0] || (wLeaders.prospects && wLeaders.prospects[0]) || { name: "Top Prospect", pos: "SS", fv: 65, oa: 50, pot: 70 };
 
-        <!-- Visual 2: Global Player Talent & Age Distribution -->
-        <div class="xl:col-span-6 glass-card p-4 border border-slate-800">
-          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
-            <div>
-              <h3 class="font-extrabold text-xs uppercase tracking-wider text-white mb-0">
-                <i class="bi bi-people-fill text-amber-400 mr-1.5"></i> World Player Talent Pyramid & Age Curve
-              </h3>
-              <p class="text-[11px] text-slate-400 mb-0">20–80 Scouting Scale distribution & demographic aging curve across ${Number(kpis.active_players || 0).toLocaleString()} players</p>
-            </div>
-            <div class="flex items-center gap-1">
-              <button data-world-talent-btn="tiers" onclick="setWorldTalentChartMode('tiers')" class="px-2.5 py-1 rounded text-[10px] font-mono font-bold bg-amber-400 text-slate-950">
-                20-80 Tiers
-              </button>
-              <button data-world-talent-btn="ages" onclick="setWorldTalentChartMode('ages')" class="px-2.5 py-1 rounded text-[10px] font-mono font-bold bg-slate-900 text-slate-300 border border-slate-700">
-                Age Curve
-              </button>
-            </div>
-          </div>
-          <div class="h-[290px] w-full">
-            <canvas id="world-talent-chart"></canvas>
-          </div>
-        </div>
+    // Group affiliates into broadcast tiers
+    const tierAAA = affs.filter(a => a.level === 2);
+    const tierAA = affs.filter(a => a.level === 3);
+    const tierA = affs.filter(a => a.level === 4 || a.level === 5);
+    const tierRookie = affs.filter(a => a.level >= 6);
 
-        <!-- Visual 3: Financial Power vs. On-Field Dominance Quadrant -->
-        <div class="xl:col-span-6 glass-card p-4 border border-slate-800">
-          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
-            <div>
-              <h3 class="font-extrabold text-xs uppercase tracking-wider text-white mb-0">
-                <i class="bi bi-cash-coin text-emerald-400 mr-1.5"></i> Financial Power (Payroll/Budget) vs. On-Field Win% Quadrant
-              </h3>
-              <p class="text-[11px] text-slate-400 mb-0">Classifies clubs into Juggernauts, Moneyball Contenders, Rebuilders & Underachievers</p>
-            </div>
-            <span class="text-[10px] font-mono text-emerald-400">Hover dots for club details</span>
-          </div>
-          <div class="h-[290px] w-full">
-            <canvas id="world-financial-chart"></canvas>
-          </div>
-        </div>
-
-        <!-- Visual 4: International Talent Pipeline -->
-        <div class="xl:col-span-6 glass-card p-4 border border-slate-800">
-          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
-            <div>
-              <h3 class="font-extrabold text-xs uppercase tracking-wider text-white mb-0">
-                <i class="bi bi-flag-fill text-emerald-400 mr-1.5"></i> Global International Talent Pipeline (Top Nations)
-              </h3>
-              <p class="text-[11px] text-slate-400 mb-0">Player origins and 60+ OVR star production across the game world</p>
-            </div>
-            <span class="text-[10px] font-mono text-slate-400">Top ${nationsPipe.length} Countries</span>
-          </div>
-          <div class="h-[290px] w-full">
-            <canvas id="world-nations-chart"></canvas>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- All-Leagues Association Ecosystem Table -->
-      <div class="glass-card overflow-hidden border border-slate-800">
-        <div class="px-4 py-3 bg-slate-900/95 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
-          <div class="flex items-center gap-2">
-            <i class="bi bi-diagram-2-fill text-sky-400"></i>
-            <h3 class="font-extrabold text-sm uppercase tracking-wider text-white mb-0">
-              All-Leagues Association Ecosystem Matrix (${leaguesEco.length} Leagues)
-            </h3>
-          </div>
-          <span class="text-xs text-slate-400">Click any league to switch context or inspect its Pennant Race on "The Stretch"</span>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="saber-table">
-            <thead>
-              <tr>
-                <th class="text-left">Level</th>
-                <th class="text-left">League Name</th>
-                <th class="text-right">Teams</th>
-                <th class="text-right">Players</th>
-                <th class="text-right">Games</th>
-                <th class="text-right">Slash (AVG/OBP/SLG)</th>
-                <th class="text-right">OPS</th>
-                <th class="text-right">ERA</th>
-                <th class="text-right">Total HR</th>
-                <th class="text-right">Avg Payroll</th>
-                <th class="text-left">Current Leader / Champion</th>
-                <th class="text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${leaguesEco.map(l => `
-                <tr class="hover:bg-slate-800/50">
-                  <td>
-                    <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold ${l.level === 1 ? 'bg-amber-500/20 text-amber-300 border border-amber-400/40' : 'bg-slate-800 text-slate-300'}">
-                      ${l.level_label}
-                    </span>
-                  </td>
-                  <td class="font-bold">
-                    <div class="flex items-center gap-2">
-                      <span class="text-white">${l.name}</span>
-                      <span class="px-1.5 py-0.5 rounded bg-slate-800 text-sky-300 font-mono text-[10px]">${l.abbr}</span>
-                    </div>
-                  </td>
-                  <td class="text-right font-mono text-white font-bold">${l.teams_count}</td>
-                  <td class="text-right font-mono text-slate-300">${Number(l.rostered_players || 0).toLocaleString()}</td>
-                  <td class="text-right font-mono text-slate-300">${Number(l.games_played || 0).toLocaleString()}</td>
-                  <td class="text-right font-mono text-slate-200">${fmtAvg(l.league_avg)}/${fmtAvg(l.league_obp)}/${fmtAvg(l.league_slg)}</td>
-                  <td class="text-right font-mono font-bold text-sky-300">${fmtAvg(l.league_ops)}</td>
-                  <td class="text-right font-mono font-bold text-amber-300">${Number(l.league_era || 0).toFixed(2)}</td>
-                  <td class="text-right font-mono text-emerald-400">${Number(l.total_hr || 0).toLocaleString()}</td>
-                  <td class="text-right font-mono text-slate-300">${fmtMoney(l.avg_payroll)}</td>
-                  <td>
-                    ${l.leader_team ? `
-                      <div onclick="onLeagueChanged(${l.league_id})" class="flex items-center gap-2 cursor-pointer">
-                        <img src="${teamLogoUrl(l.leader_team.logo_file_name)}" class="w-5 h-5 object-contain" alt="">
-                        <span class="font-bold text-white hover:text-amber-300">${l.leader_team.full_name}</span>
-                        <span class="font-mono text-xs text-emerald-400">(${l.leader_team.record_str})</span>
-                      </div>
-                    ` : '<span class="text-slate-500">—</span>'}
-                  </td>
-                  <td class="text-right">
-                    <div class="inline-flex items-center gap-1.5">
-                      <button onclick="onLeagueChanged(${l.league_id})" class="px-2 py-1 rounded bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-400/40 text-[10px] font-mono font-bold">
-                        Select
-                      </button>
-                      <button onclick="jumpToLeagueStretch(${l.league_id})" class="px-2 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-400/40 text-[10px] font-mono font-bold">
-                        Stretch
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              `).join("")}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Organizational Pyramid & Minor-League Affiliate Explorer -->
-      <div class="glass-card p-5 border border-slate-800">
-        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3.5 mb-4">
-          <div>
+    const renderTierRow = (badgeText, badgeColorCls, tierLabel, mleStr, clubs, fallbackLevelShort) => {
+      if (!clubs.length) {
+        return `
+          <div class="world-tier-medallion rounded-xl p-2.5 flex items-center justify-between gap-2 opacity-75">
             <div class="flex items-center gap-2">
-              <i class="bi bi-building-fill-check text-amber-400"></i>
-              <h3 class="font-extrabold text-sm uppercase tracking-wider text-white mb-0">
-                Organizational Power Pyramid & Minor-League Affiliate Chains (${orgPyramid.length} Franchises)
-              </h3>
+              <span class="px-2 py-0.5 rounded text-[10px] font-mono font-black ${badgeColorCls}">${badgeText}</span>
+              <span class="text-xs font-bold">${tierLabel}</span>
             </div>
-            <p class="text-xs text-slate-400 mb-0 mt-0.5">
-              Ranks every parent organization by composite Organization Power Index (MLB Win% + Farm System Win% across AAA/AA/A/Rookie + U-24 Prospect Depth + Team WAR).
-            </p>
+            <span class="text-[10.5px] font-mono bnn-muted">${mleStr} · Integrated Roster Reserve</span>
           </div>
-          <div class="flex items-center bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5">
-            <i class="bi bi-search text-slate-400 text-xs mr-2"></i>
-            <input type="text" placeholder="Filter Organizations or Affiliates..." oninput="filterWorldOrgs(this.value)" class="bg-transparent text-xs text-white focus:outline-none w-56 font-mono" />
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4 max-h-[680px] overflow-y-auto pr-1">
-          ${orgPyramid.map((org, idx) => {
-            const affs = org.affiliates || [];
-            const hay = `${org.parent_name} ${org.parent_abbr} ${affs.map(a => `${a.full_name} ${a.league_abbr}`).join(" ")}`;
-            return `
-              <div data-org-card data-org-haystack="${hay.replace(/"/g, '&quot;')}"
-                   class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-amber-400/50 transition flex flex-col justify-between">
-                <div>
-                  <div class="flex items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-slate-800">
-                    <div onclick="switchTeamAndGo(${org.parent_team_id})" class="flex items-center gap-2.5 min-w-0 cursor-pointer group">
-                      <span class="w-6 h-6 rounded-lg ${idx < 3 ? 'bg-amber-400 text-slate-950' : 'bg-slate-800 text-slate-300'} font-mono text-xs font-black flex items-center justify-center shrink-0">
-                        ${idx + 1}
-                      </span>
-                      <img src="${teamLogoUrl(org.logo_file_name)}" class="w-8 h-8 object-contain shrink-0" alt="">
-                      <div class="truncate">
-                        <div class="text-sm font-black text-white group-hover:text-amber-300 transition truncate">${org.parent_name}</div>
-                        <div class="text-[10.5px] font-mono text-slate-400">
-                          ${org.league_abbr} • <b>${org.parent_record}</b> (${fmtAvg(org.parent_pct)}) • ${org.parent_war} WAR
-                        </div>
-                      </div>
-                    </div>
-                    <div class="text-right shrink-0">
-                      <div class="text-[9.5px] font-mono text-amber-300 uppercase font-bold">ORG INDEX</div>
-                      <div class="text-base font-black font-mono text-white">${org.org_power_index.toFixed(1)}</div>
-                    </div>
+        `;
+      }
+      return `
+        <div class="grid grid-cols-1 ${clubs.length > 1 && !isCompactUw ? 'md:grid-cols-2' : ''} gap-2">
+          ${clubs.map(c => `
+            <div onclick="onLeagueChanged(${c.league_id})" class="world-tier-medallion rounded-xl p-2.5 cursor-pointer">
+              <div class="flex items-center justify-between gap-2 mb-1.5">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="px-2 py-0.5 rounded text-[10px] font-mono font-black ${badgeColorCls} shrink-0">${c.level_short || fallbackLevelShort}</span>
+                  ${c.logo_file_name ? `<img src="${teamLogoUrl(c.logo_file_name)}" class="w-5 h-5 object-contain shrink-0" alt="">` : ""}
+                  <div class="truncate">
+                    <div class="text-xs font-extrabold truncate">${c.full_name}</div>
+                    <div class="text-[10px] font-mono bnn-muted">${c.league_abbr} · ${Number(c.mle_factor || 0.75).toFixed(2)}x MLE</div>
                   </div>
-
-                  <div class="grid grid-cols-3 gap-2 text-center font-mono text-[11px] mb-3 bg-slate-950/70 p-2 rounded-lg border border-slate-800/80">
-                    <div>
-                      <div class="text-[9.5px] text-slate-400">ORG RECORD</div>
-                      <div class="font-bold text-sky-300">${org.org_w}-${org.org_l} (${fmtAvg(org.org_pct)})</div>
-                    </div>
-                    <div>
-                      <div class="text-[9.5px] text-slate-400">U-24 PROSPECTS</div>
-                      <div class="font-bold text-emerald-400">${org.farm_prospect_count} (Avg ${org.farm_top5_pot} POT)</div>
-                    </div>
-                    <div>
-                      <div class="text-[9.5px] text-slate-400">PAYROLL</div>
-                      <div class="font-bold text-slate-200">${fmtMoney(org.payroll)}</div>
-                    </div>
-                  </div>
-
-                  ${affs.length ? `
-                    <div class="space-y-1">
-                      <div class="text-[9.5px] font-mono uppercase tracking-wider text-slate-400 font-bold mb-1">
-                        Affiliate Farm Chain (${affs.length} Clubs)
-                      </div>
-                      ${affs.slice(0, 6).map(a => `
-                        <div onclick="onLeagueChanged(${a.league_id})" class="flex items-center justify-between text-[11px] font-mono py-1 px-2 rounded bg-slate-950/60 hover:bg-slate-800/80 cursor-pointer transition">
-                          <div class="flex items-center gap-1.5 truncate">
-                            <span class="px-1.5 py-0.2 rounded bg-slate-800 text-amber-300 text-[9.5px] font-bold w-11 text-center shrink-0">${a.level_short}</span>
-                            <span class="text-slate-200 truncate">${a.full_name}</span>
-                            <span class="text-[9.5px] text-slate-500">(${a.league_abbr})</span>
-                          </div>
-                          <span class="font-bold ${a.pct >= 0.500 ? 'text-emerald-400' : 'text-slate-400'} shrink-0 ml-2">${a.record_str}</span>
-                        </div>
-                      `).join("")}
-                    </div>
-                  ` : `<div class="text-[11px] text-slate-500 font-mono text-center py-2">Standalone Club (No Minor League Affiliates)</div>`}
+                </div>
+                <div class="text-right font-mono shrink-0">
+                  <div class="text-xs font-black ${c.pct >= 0.500 ? 'text-emerald-400' : 'text-amber-400'}">${c.record_str} (${fmtAvg(c.pct)})</div>
+                  <div class="text-[9.5px] bnn-muted">Top: ${c.top_prospect_name} (${c.top_prospect_fv || 50} FV)</div>
                 </div>
               </div>
+              <div class="w-full h-1.5 rounded-full bg-slate-900/90 overflow-hidden border border-white/10">
+                <div class="h-full bg-gradient-to-r from-sky-500 via-emerald-400 to-amber-400" style="width: ${c.talent_bar_pct || 68}%"></div>
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      `;
+    };
+
+    return `
+      <div class="bnn-card rounded-xl overflow-hidden">
+        <div class="px-4 py-2.5 bnn-subcard border-t-0 border-x-0 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span class="text-[10.5px] font-mono text-sky-400 font-extrabold uppercase">
+              ${isCompactUw ? '21:9 FOURTH COLUMN · AFFILIATE PYRAMID' : 'CENTER STAGE · BROADCAST AFFILIATE HIERARCHY GRAPHIC'}
+            </span>
+            <h3 class="text-xs sm:text-sm font-extrabold mb-0">
+              Interactive Organizational Affiliate Pyramid (${selectedOrg.full_name || 'Organization'})
+            </h3>
+          </div>
+          <div class="flex items-center gap-1.5 text-[11px] font-mono">
+            <span class="bnn-muted hidden sm:inline">Inspect Franchise:</span>
+            <select onchange="selectWorldPyramidOrg(this.value)" class="bnn-card px-2 py-1 rounded text-[11px] font-mono font-bold focus:outline-none">
+              ${orgPyramid.map((o, i) => `
+                <option value="${o.team_id}" ${o.team_id === selectedOrg.team_id ? 'selected' : ''}>
+                  #${i + 1} ${o.abbr} — ${o.full_name} (${o.org_power_index.toFixed(1)} Pwr)
+                </option>
+              `).join("")}
+            </select>
+          </div>
+        </div>
+
+        <!-- Quick Top-8 Franchise Selector Ribbon -->
+        <div class="px-3.5 py-2 border-b bnn-border flex items-center gap-1.5 overflow-x-auto text-[11px] font-mono">
+          <span class="text-[10px] uppercase bnn-muted font-bold shrink-0">Quick Select:</span>
+          ${orgPyramid.slice(0, 10).map((o, idx) => {
+            const isSel = o.team_id === selectedOrg.team_id;
+            return `
+              <button onclick="selectWorldPyramidOrg(${o.team_id})"
+                      class="px-2 py-0.5 rounded-lg font-bold shrink-0 flex items-center gap-1 transition ${isSel ? 'bg-sky-500 text-slate-950 font-black shadow' : 'bnn-pill-btn'}">
+                <span>#${idx + 1}</span>
+                <span>${o.abbr}</span>
+              </button>
             `;
           }).join("")}
         </div>
-      </div>
 
-      <!-- Global Pound-for-Pound Leaders & Top World Prospects -->
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <!-- Top World Batters -->
-        <div class="glass-card p-4 border border-slate-800">
-          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
-            <h4 class="font-extrabold text-xs uppercase tracking-wider text-white mb-0">
-              <i class="bi bi-trophy-fill text-amber-400 mr-1.5"></i> Global Batting WAR Leaders (All Leagues)
-            </h4>
-            <span class="text-[10px] font-mono text-slate-400">${wd.selected_year || ''}</span>
-          </div>
-          <div class="space-y-2">
-            ${(wLeaders.batters || []).slice(0, 8).map((p, i) => `
-              <div onclick="openPlayerModal(${p.player_id})" class="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-800/70 cursor-pointer transition text-xs">
-                <div class="flex items-center gap-2 min-w-0">
-                  <span class="font-mono font-bold text-slate-500 w-4">${i + 1}</span>
-                  <img src="${playerPicUrl(p.player_id)}" class="w-6 h-8 object-cover rounded border border-slate-700" alt="">
-                  <div class="truncate">
-                    <div class="font-bold text-white truncate">${p.name}</div>
-                    <div class="text-[10px] font-mono text-slate-400">${p.league_abbr} • ${p.team_abbr} • ${p.position}</div>
+        <!-- Broadcast Pyramid Visual Canvas (Non-Terminal Sports Broadcast Graphic) -->
+        <div class="world-pyramid-canvas p-4 space-y-2.5">
+
+          <!-- TIER 1 APEX: PARENT MAJOR LEAGUE CLUB -->
+          <div onclick="switchTeamAndGo(${selectedOrg.team_id})"
+               class="world-tier-medallion rounded-xl p-3.5 border-2 border-amber-400/60 cursor-pointer relative overflow-hidden">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div class="flex items-center gap-3 min-w-0">
+                <div class="w-11 h-11 rounded-xl bg-slate-900 border-2 border-amber-400 flex items-center justify-center p-1.5 shrink-0 shadow-md">
+                  <img src="${teamLogoUrl(selectedOrg.logo_file_name)}" class="w-full h-full object-contain" alt="">
+                </div>
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="px-2 py-0.5 rounded bg-amber-400 text-slate-950 text-[10px] font-mono font-black uppercase">
+                      LVL 1 · ${selectedOrg.league_abbr || 'MLB'} PARENT APEX
+                    </span>
+                    <span class="text-[10.5px] font-mono text-sky-400 font-bold">1.00x MLE BASELINE</span>
+                  </div>
+                  <div class="text-base font-black tracking-tight truncate mt-0.5">${selectedOrg.full_name || 'Parent Club'}</div>
+                  <div class="text-[11px] font-mono bnn-muted">
+                    Actual: <strong>${selectedOrg.record_str}</strong> (${fmtAvg(selectedOrg.pct)}) · BaseRuns: <strong class="text-emerald-400">${selectedOrg.baseruns_record_str || selectedOrg.record_str}</strong> · ${selectedOrg.wrc_plus || 100} wRC+ / ${selectedOrg.pitch_plus || 100} Pitch+
                   </div>
                 </div>
-                <div class="text-right font-mono shrink-0">
-                  <div class="font-black text-sky-400">${Number(p.war).toFixed(1)} WAR</div>
-                  <div class="text-[10px] text-slate-400">${fmtAvg(p.avg)} • ${p.hr} HR</div>
-                </div>
               </div>
-            `).join("")}
+              <div class="text-right font-mono shrink-0">
+                <div class="text-[10px] uppercase text-amber-400 font-bold">ORG POWER #${selectedOrgRank}</div>
+                <div class="font-display text-2xl font-black text-amber-400 leading-none">${Number(selectedOrg.org_power_index || 80).toFixed(1)}</div>
+                <div class="text-[10.5px] text-emerald-400 font-bold mt-0.5">${selectedOrg.total_war || 0} MLB WAR · ${fmtMoney(selectedOrg.payroll)}</div>
+              </div>
+            </div>
           </div>
-        </div>
 
-        <!-- Top World Pitchers -->
-        <div class="glass-card p-4 border border-slate-800">
-          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
-            <h4 class="font-extrabold text-xs uppercase tracking-wider text-white mb-0">
-              <i class="bi bi-lightning-fill text-emerald-400 mr-1.5"></i> Global Pitching WAR Leaders (All Leagues)
-            </h4>
-            <span class="text-[10px] font-mono text-slate-400">${wd.selected_year || ''}</span>
+          <!-- PROSPECT CALL-UP CONNECTOR ARROW -->
+          <div class="flex items-center justify-center gap-2 text-[10.5px] font-mono text-sky-400 font-bold py-0.5">
+            <span>▲ CALL-UP PIPELINE</span>
+            <span class="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/35 text-[10px]">
+              #1 Org Prospect: ${orgTop1.name} (${orgTop1.position || orgTop1.pos || 'P'}) · ${orgTop1.fv || 65} FV
+            </span>
+            <span>▲</span>
           </div>
-          <div class="space-y-2">
-            ${(wLeaders.pitchers || []).slice(0, 8).map((p, i) => `
-              <div onclick="openPlayerModal(${p.player_id})" class="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-800/70 cursor-pointer transition text-xs">
-                <div class="flex items-center gap-2 min-w-0">
-                  <span class="font-mono font-bold text-slate-500 w-4">${i + 1}</span>
-                  <img src="${playerPicUrl(p.player_id)}" class="w-6 h-8 object-cover rounded border border-slate-700" alt="">
-                  <div class="truncate">
-                    <div class="font-bold text-white truncate">${p.name}</div>
-                    <div class="text-[10px] font-mono text-slate-400">${p.league_abbr} • ${p.team_abbr} • ${p.ip} IP</div>
-                  </div>
-                </div>
-                <div class="text-right font-mono shrink-0">
-                  <div class="font-black text-emerald-400">${Number(p.war).toFixed(1)} WAR</div>
-                  <div class="text-[10px] text-slate-400">${Number(p.era).toFixed(2)} ERA • ${p.k} K</div>
-                </div>
-              </div>
-            `).join("")}
-          </div>
-        </div>
 
-        <!-- Top World U-24 Prospects -->
-        <div class="glass-card p-4 border border-slate-800">
-          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
-            <h4 class="font-extrabold text-xs uppercase tracking-wider text-white mb-0">
-              <i class="bi bi-stars text-purple-400 mr-1.5"></i> Top World U-24 Prospects (20–80 Scale)
-            </h4>
-            <span class="text-[10px] font-mono text-slate-400">OVR / POT</span>
-          </div>
-          <div class="space-y-2">
-            ${(wLeaders.prospects || []).slice(0, 8).map((p, i) => `
-              <div onclick="openPlayerModal(${p.player_id})" class="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-800/70 cursor-pointer transition text-xs">
-                <div class="flex items-center gap-2 min-w-0">
-                  <span class="font-mono font-bold text-slate-500 w-4">${i + 1}</span>
-                  <img src="${playerPicUrl(p.player_id)}" class="w-6 h-8 object-cover rounded border border-slate-700" alt="">
-                  <div class="truncate">
-                    <div class="font-bold text-white truncate">${p.name} <span class="text-[10px] text-slate-400">(Age ${p.age})</span></div>
-                    <div class="text-[10px] font-mono text-slate-400">${p.league_abbr} • ${p.team_abbr} • ${p.position}</div>
-                  </div>
-                </div>
-                <div class="text-right font-mono shrink-0">
-                  ${rtgBadge(p.oa, p.pot)}
-                </div>
+          <!-- TIER 2: TRIPLE-A (AAA) -->
+          ${renderTierRow("AAA", "bg-sky-500 text-slate-950", "Triple-A International / PCL", "0.85x MLE", tierAAA, "AAA")}
+
+          <!-- TIER 3: DOUBLE-A (AA) -->
+          ${renderTierRow("AA", "bg-emerald-500 text-slate-950", "Double-A Upper Minors Crucible", "0.74x MLE", tierAA, "AA")}
+
+          <!-- TIER 4: HIGH-A / SINGLE-A (A+ / A) -->
+          ${renderTierRow("A+ / A", "bg-purple-500 text-white", "Full-Season Class-A Development", "0.61x–0.66x MLE", tierA, "A+")}
+
+          <!-- TIER 5: ROOKIE / COMPLEX (ROK / DSL) -->
+          ${renderTierRow("ROK", "bg-rose-500 text-white", "Rookie Complex & DSL Academy", "0.48x MLE", tierRookie, "ROK")}
+
+          <!-- Top-5 Organizational U-24 Prospect Strip -->
+          ${topProspList.length ? `
+            <div class="pt-2 border-t border-white/10">
+              <div class="flex items-center justify-between text-[10.5px] font-mono uppercase bnn-muted font-bold mb-1.5">
+                <span>Top Organizational U-24 Prospects (20–80 Future Value)</span>
+                <span class="text-emerald-400">${selectedOrg.farm_prospects_count || 0} Total U-24 · Top-5 Avg ${selectedOrg.farm_top5_pot || 55} POT</span>
               </div>
-            `).join("")}
-          </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-1.5">
+                ${topProspList.slice(0, 5).map((pr, pi) => `
+                  <div onclick="openPlayerModal(${pr.player_id})" class="p-2 rounded-lg bnn-subcard bnn-row-hover cursor-pointer flex items-center justify-between gap-1.5 text-[11px] font-mono">
+                    <div class="truncate">
+                      <div class="font-sans font-bold truncate">${pi + 1}. ${pr.name}</div>
+                      <div class="text-[10px] bnn-muted">${pr.pos} · Age ${pr.age} · ${pr.level_short}</div>
+                    </div>
+                    ${fvBadgeHtml(pr.fv)}
+                  </div>
+                `).join("")}
+              </div>
+            </div>
+          ` : ""}
         </div>
       </div>
+    `;
+  };
 
+  // Helper: Render Interactive Multi-Mode Macro Analytics Suite (PLACED ABOVE THE PYRAMID IN CENTER STAGE)
+  const renderMacroAnalyticsSuiteHtml = () => {
+    // Compute SVG coordinates for Quadrant mode
+    const maxPay = Math.max(180, ...finQuad.map(f => Number(f.payroll_m || 100)));
+    const minPay = Math.min(20, ...finQuad.map(f => Number(f.payroll_m || 40)));
+    const avgPayM = finQuad.length
+      ? finQuad.reduce((acc, f) => acc + Number(f.payroll_m || 0), 0) / finQuad.length
+      : 110;
+
+    const quadDotsSvg = finQuad.map(fq => {
+      const px = 70 + Math.min(1, Math.max(0, (Number(fq.payroll_m || 80) - minPay * 0.85) / Math.max(10, maxPay * 1.08 - minPay * 0.85))) * 640;
+      const py = 235 - Math.min(1, Math.max(0, (Number(fq.baseruns_pct || fq.pct || 0.500) - 0.320) / 0.360)) * 200;
+      const dotColor =
+        fq.quadrant === "Juggernaut" ? "#38BDF8" :
+        fq.quadrant === "Moneyball Contender" ? "#10B981" :
+        fq.quadrant === "Underachiever" ? "#F59E0B" : "#F43F5E";
+      const isSelected = fq.team_id === selectedOrg.team_id;
+      return `
+        <g onclick="selectWorldPyramidOrg(${fq.team_id})" class="cursor-pointer">
+          ${isSelected ? `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="12" fill="none" stroke="#FBBF24" stroke-width="2" stroke-dasharray="3,2"/>` : ""}
+          <circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${isSelected ? 7.5 : 6}" fill="${dotColor}" fill-opacity="0.88" stroke="#0F172A" stroke-width="1.5">
+            <title>${fq.full_name} (${fq.record_str}) · Payroll $${fq.payroll_m}M (#${fq.payroll_rank}) · BaseRuns ${fmtAvg(fq.baseruns_pct)} (#${fq.baseruns_rank}) · $${fq.cost_per_war_m}M/WAR</title>
+          </circle>
+          <text x="${px.toFixed(1)}" y="${(py - 9).toFixed(1)}" text-anchor="middle" fill="#E2E8F0" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="9.5">${fq.abbr}</text>
+        </g>
+      `;
+    }).join("");
+
+    const avgPayX = 70 + Math.min(1, Math.max(0, (avgPayM - minPay * 0.85) / Math.max(10, maxPay * 1.08 - minPay * 0.85))) * 640;
+    const win500Y = 235 - ((0.500 - 0.320) / 0.360) * 200;
+
+    const ovrTiers = talentDist.ovr_tiers || [];
+    const ageBrackets = talentDist.age_brackets || [];
+    const maxTierCount = Math.max(1, ...ovrTiers.map(t => Number(t.count || 0)));
+    const maxAgeCount = Math.max(1, ...ageBrackets.map(a => Number(a.count || 0)));
+
+    return `
+      <div class="bnn-card rounded-xl overflow-hidden">
+        <div class="px-4 py-2.5 bnn-subcard border-t-0 border-x-0 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span class="text-[10.5px] font-mono uppercase text-emerald-400 font-extrabold">
+              CENTER STAGE TOP · INTERACTIVE MACRO ANALYTICS SUITE
+            </span>
+            <h3 class="text-xs sm:text-sm font-extrabold mb-0">
+              ${macroMode === "talent"
+                ? "Global 20–80 Scouting Scale Distribution & Demographic Aging Curve"
+                : macroMode === "runenv"
+                ? "Multi-League Run Environment (wOBA / FIP / ERA) & MLE Translation Factors"
+                : "Payroll Power vs. BaseRuns Win% Efficiency Quadrant ($/WAR & Surplus)"}
+            </h3>
+          </div>
+          <div class="inline-flex rounded-lg bnn-card p-0.5 text-[11px] font-mono">
+            <button onclick="setWorldMacroMode('quadrant')" class="px-2.5 py-1 rounded bnn-pill-btn font-bold ${macroMode === 'quadrant' ? 'active-blue' : ''}">
+              A. Payroll Quadrant
+            </button>
+            <button onclick="setWorldMacroMode('talent')" class="px-2.5 py-1 rounded bnn-pill-btn font-bold ${macroMode === 'talent' ? 'active-blue' : ''}">
+              B. 20–80 &amp; Age Curve
+            </button>
+            <button onclick="setWorldMacroMode('runenv')" class="px-2.5 py-1 rounded bnn-pill-btn font-bold ${macroMode === 'runenv' ? 'active-blue' : ''}">
+              C. Run Env &amp; MLE
+            </button>
+          </div>
+        </div>
+
+        <div class="p-3.5">
+          ${macroMode === "quadrant" ? `
+            <!-- MODE A: PAYROLL POWER VS BASERUNS WIN% EFFICIENCY QUADRANT -->
+            <div class="space-y-3">
+              <div class="w-full overflow-hidden rounded-xl border bnn-border bg-[#090D14] p-2">
+                <svg viewBox="0 0 750 265" class="w-full h-auto block select-none">
+                  <!-- Quadrant Tints -->
+                  <rect x="70" y="25" width="${Math.max(10, avgPayX - 70)}" height="${Math.max(10, win500Y - 25)}" fill="#10B981" fill-opacity="0.07" />
+                  <rect x="${avgPayX}" y="25" width="${Math.max(10, 710 - avgPayX)}" height="${Math.max(10, win500Y - 25)}" fill="#38BDF8" fill-opacity="0.07" />
+                  <rect x="70" y="${win500Y}" width="${Math.max(10, avgPayX - 70)}" height="${Math.max(10, 235 - win500Y)}" fill="#F43F5E" fill-opacity="0.06" />
+                  <rect x="${avgPayX}" y="${win500Y}" width="${Math.max(10, 710 - avgPayX)}" height="${Math.max(10, 235 - win500Y)}" fill="#F59E0B" fill-opacity="0.06" />
+
+                  <!-- Crosshairs -->
+                  <line x1="${avgPayX}" y1="25" x2="${avgPayX}" y2="235" stroke="#64748B" stroke-width="1.2" stroke-dasharray="4,4" />
+                  <line x1="70" y1="${win500Y}" x2="710" y2="${win500Y}" stroke="#64748B" stroke-width="1.2" stroke-dasharray="4,4" />
+
+                  <!-- Quadrant Corner Labels -->
+                  <text x="80" y="42" fill="#34D399" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="10">MONEYBALL CONTENDERS (LOW $ / HIGH W%)</text>
+                  <text x="700" y="42" text-anchor="end" fill="#38BDF8" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="10">FINANCIAL JUGGERNAUTS (HIGH $ / HIGH W%)</text>
+                  <text x="80" y="226" fill="#FB7185" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="10">TANKING / REBUILDERS (LOW $ / LOW W%)</text>
+                  <text x="700" y="226" text-anchor="end" fill="#FBBF24" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="10">OVERPAID UNDERACHIEVERS (HIGH $ / LOW W%)</text>
+
+                  <!-- Axis Labels -->
+                  <text x="390" y="256" text-anchor="middle" fill="#94A3B8" font-family="'JetBrains Mono', monospace" font-weight="700" font-size="10">CLUB PAYROLL ($M) · AVG $${avgPayM.toFixed(1)}M — CLICK ANY CLUB DOT TO INSPECT PYRAMID BELOW</text>
+                  <text x="20" y="135" text-anchor="middle" transform="rotate(-90 20 135)" fill="#94A3B8" font-family="'JetBrains Mono', monospace" font-weight="700" font-size="10">BASERUNS WIN%</text>
+
+                  ${quadDotsSvg}
+                </svg>
+              </div>
+
+              <!-- Quadrant Efficiency Callout Strip -->
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+                ${["Moneyball Contender", "Juggernaut", "Underachiever", "Rebuilding"].map(qName => {
+                  const qClubs = finQuad.filter(f => f.quadrant === qName);
+                  const bestQ = qClubs[0] || {};
+                  const badgeTone =
+                    qName === "Moneyball Contender" ? "text-emerald-400" :
+                    qName === "Juggernaut" ? "text-sky-400" :
+                    qName === "Underachiever" ? "text-amber-400" : "text-rose-400";
+                  return `
+                    <div class="bnn-subcard rounded-lg p-2">
+                      <div class="text-[10px] font-extrabold uppercase ${badgeTone}">${qName} (${qClubs.length})</div>
+                      <div class="font-sans font-bold truncate mt-0.5">${bestQ.full_name || '—'}</div>
+                      <div class="text-[10.5px] bnn-muted">${bestQ.abbr ? `$${bestQ.payroll_m}M · $${bestQ.cost_per_war_m}M/WAR` : 'No clubs'}</div>
+                    </div>
+                  `;
+                }).join("")}
+              </div>
+            </div>
+          ` : macroMode === "talent" ? `
+            <!-- MODE B: GLOBAL 20-80 SCOUTING SCALE & DEMOGRAPHIC AGE CURVE -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="bnn-subcard rounded-xl p-3 space-y-2">
+                <div class="flex items-center justify-between border-b bnn-border pb-1.5">
+                  <span class="text-[10.5px] font-mono font-extrabold uppercase text-amber-400">20–80 Scouting Scale Pyramid (OVR)</span>
+                  <span class="text-[10px] font-mono bnn-muted">${Number(kpis.active_players || 0).toLocaleString()} Active Players</span>
+                </div>
+                <div class="space-y-2">
+                  ${ovrTiers.map((t, ti) => {
+                    const wPct = Math.max(4, Math.round((Number(t.count || 0) / maxTierCount) * 100));
+                    const barClr = ti === 0 ? "bg-rose-500" : (ti === 1 ? "bg-amber-400" : (ti === 2 ? "bg-emerald-400" : (ti === 3 ? "bg-sky-400" : "bg-slate-500")));
+                    return `
+                      <div class="space-y-0.5 text-xs font-mono">
+                        <div class="flex justify-between">
+                          <span class="font-bold">${t.tier}</span>
+                          <span><strong>${Number(t.count || 0).toLocaleString()}</strong> (${t.batters} Bat / ${t.pitchers} Pit)</span>
+                        </div>
+                        <div class="w-full h-2 rounded-full bg-slate-900 overflow-hidden">
+                          <div class="h-full ${barClr}" style="width: ${wPct}%"></div>
+                        </div>
+                      </div>
+                    `;
+                  }).join("")}
+                </div>
+              </div>
+
+              <div class="bnn-subcard rounded-xl p-3 space-y-2">
+                <div class="flex items-center justify-between border-b bnn-border pb-1.5">
+                  <span class="text-[10.5px] font-mono font-extrabold uppercase text-sky-400">Demographic Aging Curve (OVR vs POT)</span>
+                  <span class="text-[10px] font-mono bnn-muted">Avg World Age: ${kpis.avg_world_age || 25.5}</span>
+                </div>
+                <div class="space-y-2">
+                  ${ageBrackets.map(ab => {
+                    const wPct = Math.max(6, Math.round((Number(ab.count || 0) / maxAgeCount) * 100));
+                    return `
+                      <div class="space-y-0.5 text-xs font-mono">
+                        <div class="flex justify-between">
+                          <span class="font-bold">Age ${ab.bracket}</span>
+                          <span><strong>${Number(ab.count || 0).toLocaleString()}</strong> · Avg ${ab.avg_ovr} OVR / <strong class="text-amber-400">${ab.avg_pot} POT</strong></span>
+                        </div>
+                        <div class="w-full h-2 rounded-full bg-slate-900 overflow-hidden">
+                          <div class="h-full bg-gradient-to-r from-sky-500 to-emerald-400" style="width: ${wPct}%"></div>
+                        </div>
+                      </div>
+                    `;
+                  }).join("")}
+                </div>
+              </div>
+            </div>
+          ` : `
+            <!-- MODE C: MULTI-LEAGUE RUN ENVIRONMENT (wOBA / FIP / ERA & MLE) -->
+            <div class="space-y-3">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                ${leaguesEco.map(le => {
+                  const rpgW = Math.min(100, Math.max(25, Math.round((Number(le.runs_per_game || 4.5) / 6.5) * 100)));
+                  return `
+                    <div onclick="onLeagueChanged(${le.league_id})" class="bnn-subcard rounded-xl p-2.5 cursor-pointer bnn-row-hover font-mono text-xs">
+                      <div class="flex items-center justify-between mb-1">
+                        <div class="flex items-center gap-1.5">
+                          <span class="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 font-bold text-[10px]">${le.abbr}</span>
+                          <span class="font-sans font-extrabold text-xs">${le.name}</span>
+                        </div>
+                        <span class="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold text-[10px]">${Number(le.mle_factor || 1.0).toFixed(2)}x MLE</span>
+                      </div>
+                      <div class="flex justify-between text-[11px] bnn-muted mb-1">
+                        <span>R/G: <strong class="text-white">${Number(le.runs_per_game || 4.5).toFixed(2)}</strong> (${le.rpg_shift_pct >= 0 ? '+' : ''}${le.rpg_shift_pct}%)</span>
+                        <span>wOBA: <strong>${fmtAvg(le.lg_woba || 0.320)}</strong></span>
+                        <span>ERA/FIP: <strong class="text-amber-400">${Number(le.lg_era || 4.15).toFixed(2)}</strong> / ${Number(le.lg_fip || 4.05).toFixed(2)}</span>
+                        <span>HR Fac: <strong>${Number(le.park_hr_factor || 1.0).toFixed(2)}x</strong></span>
+                      </div>
+                      <div class="w-full h-1.5 rounded-full bg-slate-900 overflow-hidden">
+                        <div class="h-full bg-gradient-to-r from-emerald-400 via-sky-400 to-rose-500" style="width: ${rpgW}%"></div>
+                      </div>
+                    </div>
+                  `;
+                }).join("")}
+              </div>
+              <div class="h-[195px] w-full">
+                <canvas id="world-ecosystem-chart"></canvas>
+              </div>
+            </div>
+          `}
+        </div>
+      </div>
+    `;
+  };
+
+  // Build P4P Leaderboard rows for Left Margin
+  const rawBatters = wLeaders.batters || [];
+  const rawPitchers = wLeaders.pitchers || [];
+  const rawProspects = wLeaders.prospects || [];
+
+  const sortedBatters = [...rawBatters].sort((a, b) =>
+    p4pMode === "mle"
+      ? (Number(b.mle_war || b.war || 0) - Number(a.mle_war || a.war || 0))
+      : (Number(b.war || 0) - Number(a.war || 0))
+  );
+  const sortedPitchers = [...rawPitchers].sort((a, b) =>
+    p4pMode === "mle"
+      ? (Number(b.mle_war || b.war || 0) - Number(a.mle_war || a.war || 0))
+      : (Number(b.war || 0) - Number(a.war || 0))
+  );
+
+  // Archetype 4 Comparator Clubs
+  const cmpOrgA = orgPyramid.find(o => o.team_id === Number(AppState.worldCmpOrgA)) || orgPyramid[0] || {};
+  const cmpOrgB = orgPyramid.find(o => o.team_id === Number(AppState.worldCmpOrgB)) || orgPyramid[1] || orgPyramid[0] || {};
+  const simPlayers = [...sortedBatters.slice(0, 6), ...rawProspects.slice(0, 4)];
+  const activeSimPlayer = simPlayers[AppState.worldMleSimIdx] || simPlayers[0] || {
+    name: "Prospect Sample", league_abbr: "AAA", team_abbr: "ORG", position: "SS",
+    avg: 0.304, ops: 0.912, hr: 24, war: 5.2, mle_war: 4.4, wrc_plus: 146, mle_wrc_plus: 124, xwoba: 0.388, mle_factor: 0.85
+  };
+
+  container.innerHTML = `
+    <div id="world-bnn-root" class="animate-view ${themeCls} ${vpClass} -mx-2 sm:-mx-4 -mt-2 pb-10">
+      <div class="bnn-shell min-h-screen">
+
+        <!-- =============================================================== -->
+        <!-- 1. TOP STRIP: MULTI-LEAGUE PULSE & MLE RUN-ENVIRONMENT TICKER   -->
+        <!-- =============================================================== -->
+        <section class="bnn-card border-t-0 border-x-0 px-3 py-2">
+          <div class="bnn-stretch-container flex items-center gap-3">
+            <div class="shrink-0 pr-3 border-r bnn-border">
+              <div class="flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span class="text-xs font-extrabold uppercase tracking-wider">ASSOCIATION PULSE</span>
+              </div>
+              <div class="text-[10.5px] font-mono bnn-muted">${kpis.total_leagues || 1} LGs · ${kpis.total_teams || 0} CLUBS · ${wd.selected_year || ''}</div>
+            </div>
+
+            <div class="flex items-center gap-2.5 overflow-x-auto pb-0.5 flex-1 text-xs font-mono">
+              ${leaguesEco.map(le => {
+                const isLvl1 = le.level === 1;
+                const ldr = le.leader_team || le.champion || {};
+                return `
+                  <div onclick="onLeagueChanged(${le.league_id})"
+                       class="w-64 shrink-0 p-1.5 rounded bnn-subcard border-l-4 ${isLvl1 ? 'border-l-amber-400' : 'border-l-sky-500'} cursor-pointer bnn-row-hover">
+                    <div class="flex items-center justify-between mb-0.5">
+                      <span class="font-bold text-[10.5px] ${isLvl1 ? 'text-amber-400' : 'text-sky-400'}">${le.level_label} · ${le.abbr}</span>
+                      <span class="px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-300 font-bold text-[10px]" title="Major League Equivalency Multiplier">${Number(le.mle_factor || 1.0).toFixed(2)}x MLE</span>
+                    </div>
+                    <div class="font-sans font-bold truncate">${le.name} (${le.teams_count} Clubs)</div>
+                    <div class="text-[10.5px] bnn-muted truncate">
+                      ${Number(le.runs_per_game || 4.5).toFixed(2)} R/G · ${fmtAvg(le.lg_ops)} OPS · ${Number(le.lg_era || 4.15).toFixed(2)} ERA · Ldr: <strong class="text-emerald-400">${ldr.abbr || '—'}</strong>
+                    </div>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          </div>
+        </section>
+
+        <!-- =============================================================== -->
+        <!-- 2. LOCKED-IN BNN.COM | OOTP+ SCOREBUG HEADER & 4-ARCHETYPE BAR  -->
+        <!-- =============================================================== -->
+        <header class="bg-gradient-to-r from-[#0F172A] via-[#1E293B] to-[#0B132B] text-white px-4 py-2 shadow-md border-b border-white/15">
+          <div class="bnn-stretch-container flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-4">
+              <!-- Locked-in Logo 3: [B][N][N] .COM / OOTP+ Broadcast Scorebug Tile SVG -->
+              <svg width="185" height="40" viewBox="0 0 240 54" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="BNN.COM OOTP+ Broadcast Logo" class="shrink-0">
+                <g transform="skewX(-10) translate(12, 8)">
+                  <rect x="0" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
+                  <text x="17" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">B</text>
+                  <rect x="38" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
+                  <text x="55" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">N</text>
+                  <rect x="76" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
+                  <text x="93" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">N</text>
+                  <rect x="114" y="0" width="68" height="23" rx="3" fill="#090D14" stroke="#FFFFFF" stroke-width="1.2"/>
+                  <text x="148" y="16.5" text-anchor="middle" fill="#FFFFFF" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="16">.COM</text>
+                  <rect x="114" y="25" width="68" height="11" rx="2" fill="#F59E0B"/>
+                  <text x="148" y="33.2" text-anchor="middle" fill="#090D14" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="8.5" letter-spacing="1.2">OOTP+</text>
+                </g>
+              </svg>
+
+              <div class="hidden xl:flex items-center gap-3 text-xs font-extrabold tracking-wide uppercase">
+                <button onclick="switchTab('frontpage')" class="text-white/75 hover:text-white transition">01. Front Page</button>
+                <button onclick="switchTab('stretch')" class="text-white/75 hover:text-white transition">02. The Stretch</button>
+                <span class="text-amber-300 border-b-2 border-amber-300 pb-0.5">03. World &amp; Association</span>
+                <button onclick="switchTab('overview')" class="text-white/75 hover:text-white transition">04. Standings</button>
+                <button onclick="switchTab('teamhub')" class="text-white/75 hover:text-white transition">05. Team Hub</button>
+              </div>
+            </div>
+
+            <!-- Right Controls: 4-Archetype Switcher, Viewport Simulator & Dark/Light Theme -->
+            <div class="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+              <span class="px-2.5 py-1 rounded bg-black/35 border border-white/15 hidden 2xl:inline">
+                POOL: <strong class="text-emerald-400">${Number(kpis.active_players || 0).toLocaleString()} PLAYERS · ${kpis.u24_prospects || 0} U-24</strong>
+              </span>
+
+              <!-- 4-Archetype Mode Switcher -->
+              <div class="inline-flex items-center rounded-lg bg-black/45 p-0.5 border border-white/20">
+                <button onclick="setWorldViewMode('portal')" class="px-2 py-0.5 rounded font-bold transition ${viewMode === 'portal' ? 'bg-sky-500 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">
+                  1. Ecosystem Portal ★
+                </button>
+                <button onclick="setWorldViewMode('almanac')" class="px-2 py-0.5 rounded font-bold transition ${viewMode === 'almanac' ? 'bg-sky-500 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">
+                  2. "The Board" Almanac
+                </button>
+                <button onclick="setWorldViewMode('atlas')" class="px-2 py-0.5 rounded font-bold transition ${viewMode === 'atlas' ? 'bg-sky-500 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">
+                  3. Global Atlas
+                </button>
+                <button onclick="setWorldViewMode('comparator')" class="px-2 py-0.5 rounded font-bold transition ${viewMode === 'comparator' ? 'bg-sky-500 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">
+                  4. FO Comparator
+                </button>
+              </div>
+
+              <!-- Viewport Ergonomics Simulator -->
+              <div class="inline-flex items-center rounded-lg bg-black/45 p-0.5 border border-white/20">
+                <button onclick="setWorldViewportMode('auto')" class="px-2 py-0.5 rounded font-bold transition ${vpMode === 'auto' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'}" title="Auto-detect 16:9 vs 21:9 Ultrawide">
+                  Auto
+                </button>
+                <button onclick="setWorldViewportMode('standard')" class="px-2 py-0.5 rounded font-bold transition ${vpMode === 'standard' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'}" title="Standard 16:9 UHD (1580px 3-Col)">
+                  16:9 (3-Col)
+                </button>
+                <button onclick="setWorldViewportMode('ultrawide')" class="px-2 py-0.5 rounded font-bold transition ${vpMode === 'ultrawide' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'}" title="21:9 Ultrawide (Full-Bleed 4-Col Unstacked)">
+                  21:9 (4-Col)
+                </button>
+              </div>
+
+              <!-- Dark vs Light Theme -->
+              <div class="inline-flex items-center rounded-lg bg-black/45 p-0.5 border border-white/20">
+                <button onclick="setWorldTheme('dark')" class="px-2 py-0.5 rounded font-bold transition ${AppState.frontPageTheme !== 'light' ? 'bg-white text-slate-900' : 'text-slate-300 hover:text-white'}">
+                  🌙 Dark
+                </button>
+                <button onclick="setWorldTheme('light')" class="px-2 py-0.5 rounded font-bold transition ${AppState.frontPageTheme === 'light' ? 'bg-amber-400 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">
+                  ☀️ Light
+                </button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <!-- =============================================================== -->
+        <!-- MAIN WORLD & ASSOCIATION BODY                                   -->
+        <!-- =============================================================== -->
+        <div class="p-3.5 sm:p-4 bnn-stretch-container w-full space-y-4">
+
+          <!-- ============================================================= -->
+          <!-- LEVEL 1: 4 PROMINENT HERO KPI CALLOUT CARDS                   -->
+          <!-- ============================================================= -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+
+            <!-- HERO CARD 1: #1 ORGANIZATIONAL POWER INDEX (CRIMSON APEX) -->
+            <div onclick="${topOrg.team_id ? `selectWorldPyramidOrg(${topOrg.team_id})` : ''}" class="stretch-hero-kpi stretch-kpi-crimson cursor-pointer">
+              <div class="h-1.5 w-full bg-gradient-to-r from-red-600 via-orange-500 to-amber-400"></div>
+              <div class="p-3.5 space-y-2.5">
+                <div class="flex items-center justify-between">
+                  <span class="inline-flex items-center gap-1.5 text-[11px] font-mono font-extrabold uppercase tracking-wider text-red-400">
+                    <span class="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
+                    01 · #1 ORG POWER INDEX
+                  </span>
+                  <span class="px-2 py-0.5 rounded-full text-[10.5px] font-mono font-black bg-red-600 text-white shadow-sm">
+                    ${topOrg.affiliates_count || 0} AFFILIATES
+                  </span>
+                </div>
+
+                <div class="flex items-center justify-between gap-2 pt-0.5">
+                  <div class="flex items-center gap-2.5 min-w-0">
+                    <div class="w-9 h-9 rounded-lg bg-slate-900 border-2 border-red-500/70 flex items-center justify-center p-1 shrink-0 shadow">
+                      <img src="${teamLogoUrl(topOrg.logo_file_name)}" class="w-full h-full object-contain" alt="">
+                    </div>
+                    <div class="min-w-0">
+                      <div class="text-sm font-black tracking-tight leading-tight truncate">${topOrg.full_name || 'Organization'}</div>
+                      <div class="text-[11px] font-mono bnn-muted truncate">MLB ${topOrg.record_str || ''} · Org ${topOrg.org_record_str || ''} (${fmtAvg(topOrg.org_pct)})</div>
+                    </div>
+                  </div>
+                  <div class="text-right shrink-0">
+                    <div class="font-display text-2xl font-black tracking-tight text-amber-400 leading-none">${Number(topOrg.org_power_index || 88.5).toFixed(1)}</div>
+                    <div class="text-[10px] font-mono font-bold uppercase text-red-400 mt-0.5">POWER SCORE</div>
+                  </div>
+                </div>
+
+                <div class="space-y-1 pt-0.5">
+                  <div class="w-full h-2 rounded-full bg-slate-900/80 overflow-hidden flex border border-white/10">
+                    <div class="bg-red-500 h-full" style="width: ${mlbSharePct}%"></div>
+                    <div class="bg-sky-400 h-full" style="width: ${100 - mlbSharePct}%"></div>
+                  </div>
+                  <div class="flex justify-between text-[11px] font-mono">
+                    <span><strong>MLB ${fmtAvg(topOrg.pct)}</strong> (${topOrg.total_war || 0} WAR)</span>
+                    <span><strong>MiLB ${fmtAvg(topOrg.milb_pct)}</strong> (${topOrg.farm_prospects_count || 0} U-24)</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- HERO CARD 2: #1 FARM SYSTEM & U-24 PROSPECT FACTORY (EMERALD PIPELINE) -->
+            <div onclick="${topFarm.team_id ? `selectWorldPyramidOrg(${topFarm.team_id})` : ''}" class="stretch-hero-kpi stretch-kpi-emerald cursor-pointer">
+              <div class="h-1.5 w-full bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400"></div>
+              <div class="p-3.5 space-y-2.5">
+                <div class="flex items-center justify-between">
+                  <span class="inline-flex items-center gap-1.5 text-[11px] font-mono font-extrabold uppercase tracking-wider text-emerald-400">
+                    ★ 02 · #1 FARM &amp; PROSPECT FACTORY
+                  </span>
+                  <span class="px-2 py-0.5 rounded-full text-[10.5px] font-mono font-black bg-emerald-600 text-white shadow-sm">
+                    ${topFarm.farm_prospects_count || 0} U-24 PROSPECTS
+                  </span>
+                </div>
+
+                <div class="flex items-center justify-between gap-2 pt-0.5">
+                  <div class="flex items-center gap-2.5 min-w-0">
+                    <div class="w-9 h-9 rounded-lg bg-slate-900 border-2 border-emerald-500/70 flex items-center justify-center p-1 shrink-0 shadow">
+                      <img src="${teamLogoUrl(topFarm.logo_file_name)}" class="w-full h-full object-contain" alt="">
+                    </div>
+                    <div class="min-w-0">
+                      <div class="text-sm font-black tracking-tight leading-tight truncate">${topFarm.full_name || 'Farm Leader'}</div>
+                      <div class="text-[11px] font-mono bnn-muted truncate">MiLB W-L: <strong>${topFarm.milb_record_str || topFarm.org_record_str || ''}</strong> (${fmtAvg(topFarm.milb_pct)})</div>
+                    </div>
+                  </div>
+                  <div class="text-right shrink-0">
+                    <div class="font-display text-2xl font-black tracking-tight text-emerald-400 leading-none">${Number(topFarm.farm_top5_pot || 62).toFixed(1)}</div>
+                    <div class="text-[10px] font-mono font-bold uppercase text-emerald-300 mt-0.5">TOP-5 AVG FV/POT</div>
+                  </div>
+                </div>
+
+                <div class="flex items-center justify-between pt-1 border-t bnn-border text-[11px] font-mono">
+                  <span class="truncate">Crown Jewel: <strong class="text-emerald-400">${(topFarm.top_prospects && topFarm.top_prospects[0] && topFarm.top_prospects[0].name) || 'Top U-24'}</strong></span>
+                  ${fvBadgeHtml((topFarm.top_prospects && topFarm.top_prospects[0] && topFarm.top_prospects[0].fv) || 65)}
+                </div>
+              </div>
+            </div>
+
+            <!-- HERO CARD 3: MONEYBALL PAYROLL EFFICIENCY KING (AMBER VALUE) -->
+            <div onclick="${mbKing.team_id ? `selectWorldPyramidOrg(${mbKing.team_id})` : ''}" class="stretch-hero-kpi stretch-kpi-amber cursor-pointer">
+              <div class="h-1.5 w-full bg-gradient-to-r from-amber-500 via-yellow-400 to-emerald-500"></div>
+              <div class="p-3.5 space-y-2.5">
+                <div class="flex items-center justify-between">
+                  <span class="inline-flex items-center gap-1.5 text-[11px] font-mono font-extrabold uppercase tracking-wider text-amber-400">
+                    $ 03 · MONEYBALL EFFICIENCY KING
+                  </span>
+                  <span class="px-2 py-0.5 rounded-full text-[10.5px] font-mono font-black bg-amber-500 text-slate-950 shadow-sm">
+                    ${Number(mbKing.rank_delta || 0) >= 0 ? '+' : ''}${mbKing.rank_delta || 0} PAY RANK Δ
+                  </span>
+                </div>
+
+                <div class="flex items-center justify-between gap-2 pt-0.5">
+                  <div class="flex items-center gap-2.5 min-w-0">
+                    <div class="w-9 h-9 rounded-lg bg-slate-900 border-2 border-amber-400 flex items-center justify-center p-1 shrink-0 shadow">
+                      <img src="${teamLogoUrl(mbKing.logo_file_name)}" class="w-full h-full object-contain" alt="">
+                    </div>
+                    <div class="min-w-0">
+                      <div class="text-sm font-black tracking-tight leading-tight truncate">${mbKing.full_name || 'Moneyball Club'}</div>
+                      <div class="text-[11px] font-mono bnn-muted truncate">$${mbKing.payroll_m || 0}M Pay (#${mbKing.payroll_rank || 15}) vs <strong class="text-amber-400">#${mbKing.baseruns_rank || 1} BaseRuns</strong></div>
+                    </div>
+                  </div>
+                  <div class="text-right shrink-0">
+                    <div class="font-display text-2xl font-black tracking-tight text-amber-400 leading-none">$${Number(mbKing.cost_per_war_m || 2.1).toFixed(2)}M</div>
+                    <div class="text-[10px] font-mono font-bold uppercase text-amber-300 mt-0.5">COST PER WAR</div>
+                  </div>
+                </div>
+
+                <div class="flex items-center justify-between pt-1 border-t bnn-border text-[11px] font-mono">
+                  <span>Actual: <strong>${mbKing.record_str || ''}</strong> (${fmtAvg(mbKing.pct)})</span>
+                  <span class="text-emerald-400 font-bold">Surplus: ${Number(mbKing.surplus_m || 0) >= 0 ? '+' : ''}$${Number(mbKing.surplus_m || 0).toFixed(1)}M</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- HERO CARD 4: EXTREME RUN ENVIRONMENT ALERT (COBALT CONTEXT) -->
+            <div onclick="${extEnv.league_id ? `onLeagueChanged(${extEnv.league_id})` : ''}" class="stretch-hero-kpi stretch-kpi-cobalt cursor-pointer">
+              <div class="h-1.5 w-full bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-500"></div>
+              <div class="p-3.5 space-y-2.5">
+                <div class="flex items-center justify-between">
+                  <span class="inline-flex items-center gap-1.5 text-[11px] font-mono font-extrabold uppercase tracking-wider text-blue-400">
+                    ⚡ 04 · RUN ENVIRONMENT ALERT
+                  </span>
+                  <span class="px-2 py-0.5 rounded-full text-[10.5px] font-mono font-black bg-blue-600 text-white shadow-sm">
+                    ${Number(extEnv.mle_factor || 1.0).toFixed(2)}x MLE MULT
+                  </span>
+                </div>
+
+                <div class="flex items-center justify-between gap-2 pt-0.5">
+                  <div class="min-w-0">
+                    <div class="text-sm font-black tracking-tight leading-tight truncate">${extEnv.name || 'League'} (${extEnv.abbr || 'MLB'})</div>
+                    <div class="text-[11px] font-mono bnn-muted truncate">${extEnv.level_label || 'Major League'} · ${fmtAvg(extEnv.lg_woba || 0.325)} wOBA · ${Number(extEnv.lg_fip || 4.10).toFixed(2)} FIP</div>
+                  </div>
+                  <div class="text-right shrink-0">
+                    <div class="font-display text-2xl font-black tracking-tight text-blue-400 leading-none">${Number(extEnv.runs_per_game || 4.55).toFixed(2)}</div>
+                    <div class="text-[10px] font-mono font-bold uppercase text-blue-300 mt-0.5">RUNS / GAME</div>
+                  </div>
+                </div>
+
+                <div class="flex items-center justify-between pt-1 border-t bnn-border text-[11px] font-mono">
+                  <span>Slash: <strong>${fmtAvg(extEnv.lg_avg)}/${fmtAvg(extEnv.lg_obp)}/${fmtAvg(extEnv.lg_slg)}</strong></span>
+                  <span class="text-amber-400 font-bold">Park HR: ${Number(extEnv.park_hr_factor || 1.0).toFixed(2)}x</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          ${viewMode === "almanac" ? `
+            <!-- =========================================================== -->
+            <!-- ARCHETYPE 2: BASEBALL AMERICA / FANGRAPHS "THE BOARD"       -->
+            <!-- =========================================================== -->
+            <div class="bnn-card rounded-xl overflow-hidden">
+              <div class="px-4 py-3 bnn-subcard border-t-0 border-x-0 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span class="text-[11px] font-mono text-amber-400 font-extrabold uppercase">ARCHETYPE 2 · BASEBALL AMERICA / FANGRAPHS "THE BOARD" ALMANAC</span>
+                  <h3 class="text-sm font-black mb-0">Complete Vertical Organizational Farm Trees (MLB &rarr; AAA &rarr; AA &rarr; A+ &rarr; A &rarr; Rookie) &amp; FV Prospect Matrix</h3>
+                </div>
+                <div class="flex items-center gap-2">
+                  <input type="text" placeholder="Filter Organizations or Affiliates..." oninput="filterWorldOrgs(this.value)" class="bnn-card px-3 py-1 rounded-lg text-xs font-mono focus:outline-none w-56" />
+                  <button onclick="setWorldViewMode('portal')" class="px-3 py-1 rounded bg-sky-500 text-slate-950 text-xs font-mono font-black">
+                    &larr; Back to Ecosystem Portal
+                  </button>
+                </div>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="w-full text-xs font-mono" style="font-variant-numeric: tabular-nums;">
+                  <thead>
+                    <tr class="bnn-subcard border-b bnn-border text-[10.5px] uppercase bnn-muted text-left">
+                      <th class="py-2 px-3">Rk / Parent Organization</th>
+                      <th class="py-2 px-2 text-right">Org Index</th>
+                      <th class="py-2 px-2 text-right">MLB W-L</th>
+                      <th class="py-2 px-2 text-right">MiLB W-L</th>
+                      <th class="py-2 px-2 text-right">U-24 / Avg FV</th>
+                      <th class="py-2 px-2">Triple-A (0.85x)</th>
+                      <th class="py-2 px-2">Double-A (0.74x)</th>
+                      <th class="py-2 px-2">Class A+/A (0.64x)</th>
+                      <th class="py-2 px-2">Rookie (0.48x)</th>
+                      <th class="py-2 px-3">#1 Prospect (FV)</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y bnn-border">
+                    ${orgPyramid.map((org, idx) => {
+                      const affs = org.affiliates || [];
+                      const aAAA = affs.find(a => a.level === 2);
+                      const aAA = affs.find(a => a.level === 3);
+                      const aA = affs.find(a => a.level === 4 || a.level === 5);
+                      const aRok = affs.find(a => a.level >= 6);
+                      const topP = (org.top_prospects && org.top_prospects[0]) || null;
+                      const hay = `${org.full_name} ${org.abbr} ${affs.map(a => a.full_name).join(" ")}`;
+                      return `
+                        <tr data-org-row data-org-haystack="${hay.replace(/"/g, '&quot;')}" onclick="selectWorldPyramidOrg(${org.team_id}); setWorldViewMode('portal');" class="bnn-row-hover cursor-pointer">
+                          <td class="py-2 px-3 font-sans font-bold">
+                            <div class="flex items-center gap-2">
+                              <span class="font-mono text-[10.5px] bnn-muted w-5">#${idx + 1}</span>
+                              <img src="${teamLogoUrl(org.logo_file_name)}" class="w-5 h-5 object-contain" alt="">
+                              <span>${org.full_name}</span>
+                            </div>
+                          </td>
+                          <td class="py-2 px-2 text-right font-black text-amber-400">${org.org_power_index.toFixed(1)}</td>
+                          <td class="py-2 px-2 text-right font-bold">${org.record_str} (${fmtAvg(org.pct)})</td>
+                          <td class="py-2 px-2 text-right text-sky-400 font-bold">${org.milb_record_str} (${fmtAvg(org.milb_pct)})</td>
+                          <td class="py-2 px-2 text-right text-emerald-400 font-bold">${org.farm_prospects_count} · ${org.farm_top5_pot} FV</td>
+                          <td class="py-2 px-2 truncate max-w-[150px]">${aAAA ? `<span class="font-sans font-semibold">${aAAA.full_name}</span> <span class="text-emerald-400">(${aAAA.record_str})</span>` : '<span class="bnn-muted">—</span>'}</td>
+                          <td class="py-2 px-2 truncate max-w-[150px]">${aAA ? `<span class="font-sans font-semibold">${aAA.full_name}</span> <span class="text-emerald-400">(${aAA.record_str})</span>` : '<span class="bnn-muted">—</span>'}</td>
+                          <td class="py-2 px-2 truncate max-w-[150px]">${aA ? `<span class="font-sans font-semibold">${aA.full_name}</span> <span class="text-emerald-400">(${aA.record_str})</span>` : '<span class="bnn-muted">—</span>'}</td>
+                          <td class="py-2 px-2 truncate max-w-[150px]">${aRok ? `<span class="font-sans font-semibold">${aRok.full_name}</span> <span class="text-emerald-400">(${aRok.record_str})</span>` : '<span class="bnn-muted">—</span>'}</td>
+                          <td class="py-2 px-3">${topP ? `<span class="font-sans font-bold">${topP.name} (${topP.pos})</span> ${fvBadgeHtml(topP.fv)}` : '<span class="bnn-muted">—</span>'}</td>
+                        </tr>
+                      `;
+                    }).join("")}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          ` : viewMode === "atlas" ? `
+            <!-- =========================================================== -->
+            <!-- ARCHETYPE 3: WBC / TRANSFERMARKT GLOBAL FEDERATION ATLAS    -->
+            <!-- =========================================================== -->
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+              <div class="lg:col-span-7 bnn-card rounded-xl overflow-hidden">
+                <div class="px-4 py-3 bnn-subcard border-t-0 border-x-0 flex items-center justify-between">
+                  <div>
+                    <span class="text-[10.5px] font-mono text-emerald-400 font-extrabold uppercase">ARCHETYPE 3 · GEOPOLITICAL TALENT ORIGINS</span>
+                    <h3 class="text-sm font-black mb-0">World Baseball Federation Talent Pipeline (${kpis.total_nations || nationsPipe.length} Nations · ${kpis.international_pct || 0}% International)</h3>
+                  </div>
+                  <button onclick="setWorldViewMode('portal')" class="px-3 py-1 rounded bg-sky-500 text-slate-950 text-xs font-mono font-black">
+                    &larr; Portal
+                  </button>
+                </div>
+                <div class="overflow-x-auto">
+                  <table class="w-full text-xs font-mono">
+                    <thead>
+                      <tr class="bnn-subcard border-b bnn-border text-[10.5px] uppercase bnn-muted text-right">
+                        <th class="py-2 px-3 text-left">Nation / Federation</th>
+                        <th class="py-2 px-2">Active Players</th>
+                        <th class="py-2 px-2">World Share</th>
+                        <th class="py-2 px-2">60+ OVR Stars</th>
+                        <th class="py-2 px-2">U-24 Prospects</th>
+                        <th class="py-2 px-2">Avg OVR</th>
+                        <th class="py-2 px-3 text-left">Flagship Star</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y bnn-border text-right">
+                      ${nationsPipe.map((n, ni) => `
+                        <tr class="bnn-row-hover">
+                          <td class="py-2 px-3 text-left font-sans font-bold">
+                            <span class="font-mono text-[10px] bnn-muted mr-1.5">#${ni + 1}</span>
+                            <span class="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 font-mono text-[10px] mr-1.5">${n.abbr}</span>
+                            <span>${n.name}</span>
+                          </td>
+                          <td class="py-2 px-2 font-bold">${Number(n.player_count || 0).toLocaleString()}</td>
+                          <td class="py-2 px-2 text-sky-400 font-bold">${n.share_pct}%</td>
+                          <td class="py-2 px-2 text-amber-400 font-bold">${n.stars_count}</td>
+                          <td class="py-2 px-2 text-emerald-400 font-bold">${n.u24_count || 0}</td>
+                          <td class="py-2 px-2">${n.avg_oa}</td>
+                          <td class="py-2 px-3 text-left">
+                            ${n.top_player_id ? `<span onclick="openPlayerModal(${n.top_player_id})" class="font-sans font-bold text-amber-300 hover:underline cursor-pointer">${n.top_player_name} (${n.top_player_oa} OVR)</span>` : '—'}
+                          </td>
+                        </tr>
+                      `).join("")}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="lg:col-span-5 bnn-card rounded-xl overflow-hidden">
+                <div class="px-4 py-3 bnn-subcard border-t-0 border-x-0">
+                  <span class="text-[10.5px] font-mono text-sky-400 font-extrabold uppercase">INTER-LEAGUE EQUIVALENCY MATRIX</span>
+                  <h3 class="text-sm font-black mb-0">Major League Equivalency (MLE) Translation Table</h3>
+                </div>
+                <div class="p-3.5 space-y-2.5 text-xs font-mono">
+                  ${leaguesEco.map(le => `
+                    <div onclick="onLeagueChanged(${le.league_id})" class="bnn-subcard rounded-lg p-2.5 cursor-pointer bnn-row-hover">
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="font-sans font-bold text-sm">${le.name} (${le.abbr})</span>
+                        <span class="px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-black">${Number(le.mle_factor || 1.0).toFixed(2)}x MLE</span>
+                      </div>
+                      <div class="flex justify-between text-[11px] bnn-muted">
+                        <span>Level: <strong>${le.level_label}</strong></span>
+                        <span>R/G: <strong>${Number(le.runs_per_game || 4.5).toFixed(2)}</strong></span>
+                        <span>wOBA: <strong>${fmtAvg(le.lg_woba || 0.320)}</strong></span>
+                        <span>ERA: <strong>${Number(le.lg_era || 4.15).toFixed(2)}</strong></span>
+                      </div>
+                    </div>
+                  `).join("")}
+                </div>
+              </div>
+            </div>
+
+          ` : viewMode === "comparator" ? `
+            <!-- =========================================================== -->
+            <!-- ARCHETYPE 4: FRONT OFFICE MULTI-LEAGUE COMPARATOR & MLE SIM -->
+            <!-- =========================================================== -->
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+              <div class="lg:col-span-7 bnn-card rounded-xl overflow-hidden">
+                <div class="px-4 py-3 bnn-subcard border-t-0 border-x-0 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <span class="text-[10.5px] font-mono text-amber-400 font-extrabold uppercase">ARCHETYPE 4 · HEAD-TO-HEAD ORGANIZATION AUDITOR</span>
+                    <h3 class="text-sm font-black mb-0">Side-by-Side Franchise &amp; Affiliate Chain Comparator</h3>
+                  </div>
+                  <div class="flex items-center gap-2 text-xs font-mono">
+                    <select onchange="setWorldComparatorOrg('A', this.value)" class="bnn-card px-2 py-1 rounded font-bold">
+                      ${orgPyramid.map(o => `<option value="${o.team_id}" ${o.team_id === cmpOrgA.team_id ? 'selected' : ''}>Club A: ${o.full_name}</option>`).join("")}
+                    </select>
+                    <span class="font-bold bnn-muted">vs</span>
+                    <select onchange="setWorldComparatorOrg('B', this.value)" class="bnn-card px-2 py-1 rounded font-bold">
+                      ${orgPyramid.map(o => `<option value="${o.team_id}" ${o.team_id === cmpOrgB.team_id ? 'selected' : ''}>Club B: ${o.full_name}</option>`).join("")}
+                    </select>
+                  </div>
+                </div>
+                <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  ${[cmpOrgA, cmpOrgB].map((co, ci) => `
+                    <div class="bnn-subcard rounded-xl p-3.5 space-y-2.5 border-t-4 ${ci === 0 ? 'border-t-sky-400' : 'border-t-amber-400'}">
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2.5">
+                          <img src="${teamLogoUrl(co.logo_file_name)}" class="w-8 h-8 object-contain" alt="">
+                          <div>
+                            <div class="text-sm font-black">${co.full_name || 'Organization'}</div>
+                            <div class="text-[11px] font-mono bnn-muted">MLB ${co.record_str} · BaseRuns ${co.baseruns_record_str || co.record_str}</div>
+                          </div>
+                        </div>
+                        <div class="text-right font-mono">
+                          <div class="text-lg font-black text-amber-400">${Number(co.org_power_index || 80).toFixed(1)}</div>
+                          <div class="text-[9.5px] bnn-muted">ORG INDEX</div>
+                        </div>
+                      </div>
+                      <div class="grid grid-cols-3 gap-2 text-center font-mono text-xs p-2 rounded bnn-card">
+                        <div><div class="text-[9.5px] bnn-muted">MiLB W%</div><div class="font-bold text-sky-400">${fmtAvg(co.milb_pct)}</div></div>
+                        <div><div class="text-[9.5px] bnn-muted">U-24 / FV</div><div class="font-bold text-emerald-400">${co.farm_prospects_count} (${co.farm_top5_pot})</div></div>
+                        <div><div class="text-[9.5px] bnn-muted">$/WAR</div><div class="font-bold text-amber-400">$${co.cost_per_war_m}M</div></div>
+                      </div>
+                      <div class="space-y-1 font-mono text-xs">
+                        ${(co.affiliates || []).map(af => `
+                          <div class="flex items-center justify-between py-1 px-2 rounded bnn-card">
+                            <span><strong class="text-sky-400">${af.level_short}</strong> · ${af.full_name}</span>
+                            <span class="font-bold ${af.pct >= 0.500 ? 'text-emerald-400' : 'bnn-muted'}">${af.record_str} (${fmtAvg(af.pct)})</span>
+                          </div>
+                        `).join("") || `<div class="text-xs bnn-muted py-2">No minor-league affiliates</div>`}
+                      </div>
+                    </div>
+                  `).join("")}
+                </div>
+              </div>
+
+              <div class="lg:col-span-5 bnn-card rounded-xl overflow-hidden">
+                <div class="px-4 py-3 bnn-subcard border-t-0 border-x-0 flex items-center justify-between">
+                  <div>
+                    <span class="text-[10.5px] font-mono text-emerald-400 font-extrabold uppercase">MLE STAT TRANSLATOR</span>
+                    <h3 class="text-sm font-black mb-0">Raw League Line &rarr; MLB Equivalency (MLE)</h3>
+                  </div>
+                  <select onchange="setWorldMleSimPlayer(this.value)" class="bnn-card px-2 py-1 rounded text-xs font-mono font-bold">
+                    ${simPlayers.map((sp, si) => `<option value="${si}" ${si === AppState.worldMleSimIdx ? 'selected' : ''}>${sp.name} (${sp.league_abbr} · ${sp.team_abbr})</option>`).join("")}
+                  </select>
+                </div>
+                <div class="p-4 space-y-3 font-mono text-xs">
+                  <div class="bnn-subcard rounded-xl p-3 flex items-center justify-between">
+                    <div>
+                      <div class="font-sans text-sm font-black">${activeSimPlayer.name} (${activeSimPlayer.position || 'P'})</div>
+                      <div class="text-[11px] bnn-muted">${activeSimPlayer.league_abbr} · ${activeSimPlayer.team_abbr} · Translation Mult: <strong class="text-amber-400">${Number(activeSimPlayer.mle_factor || 0.85).toFixed(2)}x MLE</strong></div>
+                    </div>
+                    ${activeSimPlayer.fv ? fvBadgeHtml(activeSimPlayer.fv) : `<span class="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 font-bold">MLB READY</span>`}
+                  </div>
+                  <div class="grid grid-cols-2 gap-3">
+                    <div class="bnn-subcard rounded-xl p-3 space-y-1">
+                      <div class="text-[10px] uppercase bnn-muted font-bold">RAW LEAGUE PRODUCTION</div>
+                      <div class="text-lg font-black">${Number(activeSimPlayer.war || 3.2).toFixed(1)} WAR</div>
+                      <div>wRC+: <strong>${activeSimPlayer.wrc_plus || 125}</strong> · xwOBA: <strong>${fmtAvg(activeSimPlayer.xwoba || 0.360)}</strong></div>
+                      <div>OPS: <strong>${fmtAvg(activeSimPlayer.ops || 0.845)}</strong> · HR: <strong>${activeSimPlayer.hr || 18}</strong></div>
+                    </div>
+                    <div class="bnn-subcard rounded-xl p-3 space-y-1 border border-emerald-500/40">
+                      <div class="text-[10px] uppercase text-emerald-400 font-bold">MLB EQUIVALENT (MLE-ADJ)</div>
+                      <div class="text-lg font-black text-emerald-400">${Number(activeSimPlayer.mle_war || activeSimPlayer.war || 2.8).toFixed(1)} MLE WAR</div>
+                      <div>MLE wRC+: <strong class="text-emerald-400">${activeSimPlayer.mle_wrc_plus || 110}</strong></div>
+                      <div>Proj MLB Role: <strong>${Number(activeSimPlayer.mle_war || 3.0) >= 3.5 ? 'All-Star Impact' : 'Everyday Regular'}</strong></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          ` : `
+            <!-- =========================================================== -->
+            <!-- ARCHETYPE 1 (PRIMARY): BNN.COM GLOBAL ECOSYSTEM PORTAL      -->
+            <!-- =========================================================== -->
+            <div class="bnn-world-grid">
+
+              <!-- ========================================================= -->
+              <!-- LEFT MARGIN: GLOBAL POUND-FOR-POUND LEADERS + INTL PIPE   -->
+              <!-- ========================================================= -->
+              <aside class="bnn-world-col-left space-y-3.5">
+
+                <!-- Global Pound-for-Pound Leaders (MLE-Adj vs Raw) -->
+                <div class="bnn-card rounded-xl overflow-hidden">
+                  <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 space-y-2">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <span class="text-[10.5px] font-mono text-amber-400 font-extrabold uppercase">LEFT MARGIN · POUND-FOR-POUND</span>
+                        <h2 class="text-xs sm:text-sm font-extrabold mb-0">Global All-League Leaders</h2>
+                      </div>
+                      <div class="inline-flex rounded bnn-card p-0.5 text-[10px] font-mono">
+                        <button onclick="setWorldP4PMode('mle')" class="px-1.5 py-0.5 rounded bnn-pill-btn font-bold ${p4pMode === 'mle' ? 'active-blue' : ''}">MLE-Adj</button>
+                        <button onclick="setWorldP4PMode('raw')" class="px-1.5 py-0.5 rounded bnn-pill-btn font-bold ${p4pMode === 'raw' ? 'active-blue' : ''}">Raw</button>
+                      </div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-1 text-[10.5px] font-mono">
+                      <button onclick="setWorldP4PDomain('bat')" class="py-1 rounded bnn-pill-btn font-bold ${p4pDomain === 'bat' ? 'active-red' : ''}">Batters</button>
+                      <button onclick="setWorldP4PDomain('pit')" class="py-1 rounded bnn-pill-btn font-bold ${p4pDomain === 'pit' ? 'active-red' : ''}">Pitchers</button>
+                      <button onclick="setWorldP4PDomain('prosp')" class="py-1 rounded bnn-pill-btn font-bold ${p4pDomain === 'prosp' ? 'active-red' : ''}">U-24 FV</button>
+                    </div>
+                  </div>
+
+                  <div class="divide-y bnn-border text-xs">
+                    ${p4pDomain === "bat" ? sortedBatters.slice(0, 8).map((b, bi) => {
+                      const dispWar = p4pMode === "mle" ? Number(b.mle_war || b.war || 0).toFixed(1) : Number(b.war || 0).toFixed(1);
+                      const dispWrc = p4pMode === "mle" ? (b.mle_wrc_plus || b.wrc_plus || 130) : (b.wrc_plus || 135);
+                      return `
+                        <div onclick="openPlayerModal(${b.player_id})" class="px-3.5 py-2 flex items-center justify-between bnn-row-hover cursor-pointer">
+                          <div class="min-w-0 pr-2">
+                            <span class="font-bold truncate block">${bi + 1}. ${b.name} (${b.team_abbr})</span>
+                            <div class="font-mono text-[10.5px] bnn-muted">${b.league_abbr} (${Number(b.mle_factor || 1.0).toFixed(2)}x) · ${b.position} · ${b.hr} HR</div>
+                          </div>
+                          <div class="text-right font-mono shrink-0">
+                            <div class="font-extrabold text-sky-400">${dispWar} ${p4pMode === 'mle' ? 'mWAR' : 'WAR'}</div>
+                            <span class="px-1 rounded bnn-pct-95 font-bold text-[10px]">${dispWrc} wRC+ · ${fmtAvg(b.xwoba)} xwOBA</span>
+                          </div>
+                        </div>
+                      `;
+                    }).join("") : p4pDomain === "pit" ? sortedPitchers.slice(0, 8).map((p, pi) => {
+                      const dispWar = p4pMode === "mle" ? Number(p.mle_war || p.war || 0).toFixed(1) : Number(p.war || 0).toFixed(1);
+                      const dispFip = p4pMode === "mle" ? Number(p.mle_fip || p.fip || p.era || 3.20).toFixed(2) : Number(p.fip || p.era || 3.10).toFixed(2);
+                      return `
+                        <div onclick="openPlayerModal(${p.player_id})" class="px-3.5 py-2 flex items-center justify-between bnn-row-hover cursor-pointer">
+                          <div class="min-w-0 pr-2">
+                            <span class="font-bold truncate block">${pi + 1}. ${p.name} (${p.team_abbr})</span>
+                            <div class="font-mono text-[10.5px] bnn-muted">${p.league_abbr} (${Number(p.mle_factor || 1.0).toFixed(2)}x) · ${p.ip} IP · ${p.k} K</div>
+                          </div>
+                          <div class="text-right font-mono shrink-0">
+                            <div class="font-extrabold text-emerald-400">${dispWar} ${p4pMode === 'mle' ? 'mWAR' : 'WAR'}</div>
+                            <span class="px-1 rounded bnn-pct-95 font-bold text-[10px]">${p.pitch_plus || 115} P+ · ${dispFip} FIP</span>
+                          </div>
+                        </div>
+                      `;
+                    }).join("") : rawProspects.slice(0, 8).map((pr, pri) => `
+                      <div onclick="openPlayerModal(${pr.player_id})" class="px-3.5 py-2 flex items-center justify-between bnn-row-hover cursor-pointer">
+                        <div class="min-w-0 pr-2">
+                          <span class="font-bold truncate block">${pri + 1}. ${pr.name} (Age ${pr.age})</span>
+                          <div class="font-mono text-[10.5px] bnn-muted">${pr.league_abbr} · ${pr.team_abbr} · ${pr.position} · ETA ${pr.eta || ''}</div>
+                        </div>
+                        <div class="text-right font-mono shrink-0">
+                          ${fvBadgeHtml(pr.fv || pr.pot)}
+                          <div class="text-[10px] bnn-muted mt-0.5">${pr.oa} OVR / ${pr.pot} POT</div>
+                        </div>
+                      </div>
+                    `).join("")}
+                  </div>
+                </div>
+
+                <!-- International Talent Pipeline (Top Nations) -->
+                <div class="bnn-card rounded-xl overflow-hidden">
+                  <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 flex items-center justify-between">
+                    <div>
+                      <span class="text-[10.5px] font-mono text-emerald-400 font-extrabold uppercase">GLOBAL TALENT ORIGINS</span>
+                      <h3 class="text-xs font-extrabold uppercase mb-0">International Pipeline (${kpis.international_pct || 0}% Intl)</h3>
+                    </div>
+                    <span class="text-[10.5px] font-mono bnn-muted">60+ Stars · U-24</span>
+                  </div>
+                  <div class="divide-y bnn-border text-xs font-mono">
+                    ${nationsPipe.slice(0, 8).map((n, ni) => `
+                      <div class="p-2.5 space-y-1 bnn-row-hover">
+                        <div class="flex items-center justify-between">
+                          <span class="font-sans font-bold">${ni + 1}. ${n.name} <span class="text-[10px] font-mono text-sky-400">(${n.abbr})</span></span>
+                          <span class="font-bold">${Number(n.player_count || 0).toLocaleString()} <span class="text-sky-400">(${n.share_pct}%)</span></span>
+                        </div>
+                        <div class="w-full h-1.5 rounded-full bg-slate-900 overflow-hidden">
+                          <div class="h-full bg-gradient-to-r from-emerald-400 to-sky-400" style="width: ${Math.min(100, Math.max(6, n.share_pct * 1.4))}%"></div>
+                        </div>
+                        <div class="flex justify-between text-[10.5px] bnn-muted">
+                          <span><strong class="text-amber-400">${n.stars_count}</strong> Stars (60+) · <strong class="text-emerald-400">${n.u24_count || 0}</strong> U-24</span>
+                          ${n.top_player_id ? `<span onclick="openPlayerModal(${n.top_player_id})" class="text-sky-300 hover:underline cursor-pointer truncate max-w-[130px]">★ ${n.top_player_name}</span>` : ''}
+                        </div>
+                      </div>
+                    `).join("")}
+                  </div>
+                </div>
+
+              </aside>
+
+              <!-- ========================================================= -->
+              <!-- CENTER STAGE: 1. MACRO SUITE (TOP) + 2. PYRAMID (BELOW)   -->
+              <!-- ========================================================= -->
+              <section class="bnn-world-col-center space-y-3.5">
+                <!-- 1. ABOVE THE PYRAMID: INTERACTIVE MULTI-MODE MACRO ANALYTICS SUITE -->
+                ${renderMacroAnalyticsSuiteHtml()}
+
+                <!-- 2. BELOW MACRO SUITE: BROADCAST ORGANIZATIONAL AFFILIATE PYRAMID -->
+                ${renderBroadcastPyramidCardHtml(false)}
+              </section>
+
+              <!-- ========================================================= -->
+              <!-- RIGHT MARGIN: ALL-LEAGUES AGATE + ORG POWER RANKINGS      -->
+              <!-- ========================================================= -->
+              <aside class="bnn-world-col-right space-y-3.5">
+
+                <!-- All-Leagues Association Ecosystem Agate Matrix -->
+                <div class="bnn-card rounded-xl overflow-hidden">
+                  <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 flex items-center justify-between">
+                    <div>
+                      <span class="text-[10.5px] font-mono text-sky-400 font-extrabold uppercase">RIGHT MARGIN · ECOSYSTEM AGATE</span>
+                      <h2 class="text-xs sm:text-sm font-extrabold mb-0">All-Leagues Matrix (${leaguesEco.length})</h2>
+                    </div>
+                    <span class="text-[10px] font-mono bnn-muted">MLE · R/G · ERA</span>
+                  </div>
+                  <div class="overflow-x-auto">
+                    <table class="w-full text-[11px] font-mono" style="font-variant-numeric: tabular-nums;">
+                      <thead>
+                        <tr class="bnn-subcard border-b bnn-border text-[10px] uppercase bnn-muted text-right">
+                          <th class="py-1.5 px-2 text-left">Lg / Lvl</th>
+                          <th class="py-1.5 px-1.5">MLE</th>
+                          <th class="py-1.5 px-1.5">R/G</th>
+                          <th class="py-1.5 px-1.5">OPS</th>
+                          <th class="py-1.5 px-1.5">ERA</th>
+                          <th class="py-1.5 px-2 text-left">Leader</th>
+                        </tr>
+                      </thead>
+                      <tbody class="divide-y bnn-border text-right">
+                        ${leaguesEco.map(le => {
+                          const ldr = le.leader_team || le.champion || {};
+                          return `
+                            <tr onclick="onLeagueChanged(${le.league_id})" class="bnn-row-hover cursor-pointer">
+                              <td class="py-1.5 px-2 text-left font-sans font-bold">
+                                <span class="px-1 py-0.2 rounded ${le.level === 1 ? 'bg-amber-400 text-slate-950' : 'bg-sky-500/20 text-sky-300'} font-mono text-[9.5px] font-black mr-1">${le.abbr}</span>
+                                <span class="truncate">${le.level_label}</span>
+                              </td>
+                              <td class="py-1.5 px-1.5 text-amber-400 font-bold">${Number(le.mle_factor || 1.0).toFixed(2)}x</td>
+                              <td class="py-1.5 px-1.5 font-bold">${Number(le.runs_per_game || 4.5).toFixed(2)}</td>
+                              <td class="py-1.5 px-1.5 text-sky-400">${fmtAvg(le.lg_ops)}</td>
+                              <td class="py-1.5 px-1.5">${Number(le.lg_era || 4.15).toFixed(2)}</td>
+                              <td class="py-1.5 px-2 text-left text-emerald-400 font-bold truncate">${ldr.abbr || '—'}</td>
+                            </tr>
+                          `;
+                        }).join("")}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <!-- Searchable Organizational Power Rankings -->
+                <div class="bnn-card rounded-xl overflow-hidden">
+                  <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 space-y-2">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <span class="text-[10.5px] font-mono text-amber-400 font-extrabold uppercase">FRANCHISE POWER INDEX</span>
+                        <h3 class="text-xs sm:text-sm font-extrabold mb-0">Organizational Rankings (${orgPyramid.length})</h3>
+                      </div>
+                      <span class="text-[10px] font-mono bnn-muted">Click to Inspect</span>
+                    </div>
+                    <div class="flex items-center bnn-card rounded-lg px-2.5 py-1">
+                      <i class="bi bi-search bnn-muted text-[10px] mr-1.5"></i>
+                      <input type="text" value="${AppState.worldOrgSearch || ''}" placeholder="Search clubs or affiliates..." oninput="filterWorldOrgs(this.value)" class="bg-transparent text-xs font-mono focus:outline-none w-full" />
+                    </div>
+                  </div>
+
+                  <div class="max-h-[520px] overflow-y-auto divide-y bnn-border text-[11px] font-mono">
+                    ${orgPyramid.map((org, idx) => {
+                      const isSel = org.team_id === selectedOrg.team_id;
+                      const hay = `${org.full_name} ${org.abbr} ${(org.affiliates || []).map(a => a.full_name).join(" ")}`;
+                      return `
+                        <div data-org-row data-org-haystack="${hay.replace(/"/g, '&quot;')}"
+                             onclick="selectWorldPyramidOrg(${org.team_id})"
+                             class="p-2.5 bnn-row-hover cursor-pointer flex items-center justify-between gap-2 ${isSel ? 'bg-sky-500/15 border-l-4 border-l-amber-400' : ''}">
+                          <div class="flex items-center gap-2 min-w-0">
+                            <span class="w-5 text-center font-black ${idx < 3 ? 'text-amber-400' : 'bnn-muted'}">${idx + 1}</span>
+                            <img src="${teamLogoUrl(org.logo_file_name)}" class="w-5 h-5 object-contain shrink-0" alt="">
+                            <div class="truncate">
+                              <div class="font-sans font-bold text-xs truncate">${org.full_name}</div>
+                              <div class="text-[10px] bnn-muted">MLB ${org.record_str} · MiLB ${fmtAvg(org.milb_pct)} · ${org.farm_prospects_count} U-24</div>
+                            </div>
+                          </div>
+                          <div class="text-right shrink-0">
+                            <div class="font-black text-amber-400 text-xs">${org.org_power_index.toFixed(1)}</div>
+                            <div class="text-[9.5px] bnn-muted">$${org.payroll_m}M</div>
+                          </div>
+                        </div>
+                      `;
+                    }).join("")}
+                  </div>
+                </div>
+
+              </aside>
+
+              <!-- ========================================================= -->
+              <!-- 21:9 ULTRAWIDE 4TH COLUMN: UNSTACKED PYRAMID & PROSPECTS  -->
+              <!-- ========================================================= -->
+              <aside class="bnn-world-col-uw">
+                ${renderBroadcastPyramidCardHtml(true)}
+              </aside>
+
+            </div>
+          `}
+
+        </div>
+      </div>
     </div>
   `;
 
-  // Render the 4 Chart.js Visuals on the World Dashboard
-  if (typeof renderWorldEcosystemChart === "function") {
+  // If Macro Mode C (Run Environment) is active, render the Chart.js ecosystem chart canvas
+  if (viewMode === "portal" && macroMode === "runenv" && typeof renderWorldEcosystemChart === "function") {
     renderWorldEcosystemChart("world-ecosystem-chart", leaguesEco, histTrends);
-  }
-  if (typeof renderWorldTalentChart === "function") {
-    renderWorldTalentChart("world-talent-chart", talentDist, AppState.worldTalentMode || "tiers");
-  }
-  if (typeof renderWorldFinancialQuadrantChart === "function") {
-    renderWorldFinancialQuadrantChart("world-financial-chart", finQuad);
-  }
-  if (typeof renderWorldNationsChart === "function") {
-    renderWorldNationsChart("world-nations-chart", nationsPipe);
   }
 }
 
 document.addEventListener("DOMContentLoaded", initApp);
+
 
 

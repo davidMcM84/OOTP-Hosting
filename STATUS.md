@@ -1,13 +1,13 @@
-# OOTP Hosting - Project Status Summary
+# OOTP+ (`OOTP Hosting`) - Project Status Summary
 
 **Cataloged by Antigravity Agent**
-**Timestamp:** 2026-10-21T23:28:00-04:00
+**Timestamp:** 2026-11-01T11:30:00-05:00
 
 ---
 
 ## 1. Project Overview & Purpose
 
-The **OOTP Hosting** suite is an autonomous local web server, online league hosting environment, and StatsPlus analytics platform designed for Out of the Park Baseball 27. It automatically discovers active `.lg` saves, parses and imports monthly/yearly simulation CSV dumps, box scores, almanac files, and player rating snapshots, and serves comprehensive analytics, Statcast visualizers, Cooperstown Hall of Fame JAWS profiles, League Evolution blueprints, and online league reporting portals at `http://localhost:8080`.
+**OOTP+** is an autonomous local web server, online league hosting environment, and broadcast-grade sabermetric & Statcast analytics platform designed for Out of the Park Baseball 27 (with OOTP 26/25 backward compatibility). It automatically discovers active `.lg` saves, parses and imports 71+ CSV tables and monthly/yearly simulation dumps, box scores, almanac files, and player rating snapshots into SQLite (`WAL`), and serves 14 comprehensive analytical hubs—including the BNN.COM | OOTP+ Portal, "The Stretch" Pennant Hub, World & Association Dashboard, Team Franchise 5-Year Roadmap, 3D Statcast Spray Visualizers, Cooperstown Hall of Fame JAWS profiles, League Evolution blueprints, and StatsPlus portals—at `http://localhost:8080`. Screen-by-screen documentation with screenshots lives in `/docs`.
 
 - **Local Path:** `D:\Code\Projects\OOTP Hosting`
 - **GitHub Repository:** `https://github.com/davidMcM84/OOTP-Hosting`

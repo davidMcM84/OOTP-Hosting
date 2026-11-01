@@ -3,12 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OOTP 27 Analytics, Statcast & League Hosting Suite</title>
+  <title>OOTP+ — Sabermetrics, Statcast & League Hosting</title>
+  <link rel="icon" type="image/svg+xml" href="/static/img/ootp_plus_icon.svg" />
 
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700;800&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400&family=Playfair+Display:ital,wght@0,700;0,800;0,900;1,700;1,800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700;800&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400&family=Oswald:wght@600;700&family=Playfair+Display:ital,wght@0,700;0,800;0,900;1,700;1,800&family=Space+Grotesk:wght@600;700;800&display=swap" rel="stylesheet">
 
   <!-- Bootstrap 5.3 CSS & Bootstrap Icons -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -35,6 +36,8 @@
             mono: ['JetBrains Mono', 'monospace'],
             serif: ['Playfair Display', 'Georgia', 'serif'],
             editorial: ['Newsreader', 'Georgia', 'serif'],
+            display: ['Space Grotesk', 'Inter', 'sans-serif'],
+            poster: ['Oswald', 'Impact', 'sans-serif'],
           },
           colors: {
             white: '#dbdbdb',
@@ -77,7 +80,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 
   <!-- Custom Broadcast CSS -->
-  <link rel="stylesheet" href="/static/css/app.css?v=20261022bugfix" />
+  <link rel="stylesheet" href="/static/css/app.css?v=20261026worldv1" />
 </head>
 <body class="antialiased selection:bg-slate-200 selection:text-slate-950">
 
@@ -95,15 +98,13 @@
     <div class="w-full max-w-none mx-auto px-4 lg:px-6 uw:px-8 py-2 flex flex-wrap items-center justify-between gap-2.5">
       <!-- Brand Identity -->
       <div class="flex items-center gap-3">
-        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-slate-200 to-slate-400 flex items-center justify-center text-slate-950 font-black text-lg shadow-lg border border-slate-300">
-          <i class="bi bi-diamond-half"></i>
-        </div>
+        <img src="/static/img/ootp_plus_icon.svg" alt="OOTP+ Logo" class="w-9 h-9 rounded-xl shadow-lg border border-cyan-400/40 shrink-0" />
         <div>
           <div class="flex items-center gap-2">
-            <h1 class="text-sm sm:text-base font-black tracking-tight text-white mb-0">OOTP 27 COMMAND SUITE</h1>
-            <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-slate-800 text-white border border-slate-600 font-mono">ULTRAWIDE EDITION</span>
+            <h1 class="text-base sm:text-lg font-black tracking-tight text-white mb-0">OOTP<span style="color:#22D3EE;">+</span></h1>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-slate-800 text-white border border-slate-600 font-mono">SABERMETRICS • STATCAST • LEAGUE HOSTING</span>
           </div>
-          <p class="text-[10.5px] text-slate-400 mb-0 hidden sm:block">Multi-League & Year Browser • Sabermetrics • Spray Charts • Evolution Hub • BNN & Almanac Portal</p>
+          <p class="text-[10.5px] text-slate-400 mb-0 hidden sm:block">Multi-League & Year Browser • Spray Charts • Franchise Hub • Evolution Workshop • BNN & Almanac Portal</p>
         </div>
       </div>
 
@@ -166,7 +167,7 @@
     <div class="w-full max-w-none mx-auto px-4 lg:px-6 uw:px-8 py-1.5 border-t border-slate-800/80 flex items-center justify-between gap-2 overflow-x-auto">
       <div class="flex items-center gap-1.5">
         <button data-tab="frontpage" onclick="switchTab('frontpage')" class="nav-tab-btn active">
-          <i class="bi bi-newspaper text-amber-300"></i> Front Page Gazette
+          <i class="bi bi-broadcast-pin text-red-500"></i> BNN.COM Front Page
         </button>
         <button data-tab="stretch" onclick="switchTab('stretch')" class="nav-tab-btn">
           <i class="bi bi-flag-fill text-rose-400"></i> The Stretch
@@ -248,7 +249,7 @@
     <div class="w-full max-w-[96vw] uw:max-w-[2400px] mx-auto glass-card border border-sky-500/40 shadow-2xl overflow-hidden">
       <div class="px-5 py-3 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
         <div class="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-sky-400">
-          <i class="bi bi-person-badge-fill"></i> OOTP 27 Player Analytical Dossier — Baseball Savant + FanGraphs + Scouting Card
+          <i class="bi bi-person-badge-fill"></i> OOTP+ Player Analytical Dossier — Baseball Savant + FanGraphs + Scouting Card
         </div>
         <div class="flex items-center gap-2">
           <button onclick="pinCurrentModalPlayerToDock()" class="px-3 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-400/50 text-xs font-bold transition flex items-center gap-1.5" title="Pin this player to the right-hand Ultrawide Side Dock so you can keep browsing tables">
@@ -268,7 +269,7 @@
     <div class="max-w-lg w-full glass-card border border-emerald-500/40 shadow-2xl overflow-hidden">
       <div class="px-5 py-3.5 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
         <h3 class="text-sm font-extrabold uppercase tracking-wider text-emerald-400 mb-0">
-          <i class="bi bi-cloud-upload-fill mr-1.5"></i> OOTP 27 Online League & CSV Import Center
+          <i class="bi bi-cloud-upload-fill mr-1.5"></i> OOTP+ Online League & CSV Import Center
         </h3>
         <button onclick="closeOnlineModal()" class="text-slate-400 hover:text-white"><i class="bi bi-x-lg"></i></button>
       </div>
@@ -304,9 +305,9 @@
           </div>
           <div>
             <h3 class="text-sm font-black uppercase tracking-wider text-white mb-0">
-              OOTP 27 Command Suite — Setup & Functionality Verification Wizard
+              OOTP+ — Setup & Functionality Verification Wizard
             </h3>
-            <p class="text-[11px] text-slate-400 mb-0">Configure OOTP Saved Games Paths • Ingest Saves or Load Demo League • Run 8-Point System Self-Test</p>
+            <p class="text-[11px] text-slate-400 mb-0">Configure OOTP Saved Games Paths • Ingest Saves or Load Demo League • Run 9-Point System Self-Test</p>
           </div>
         </div>
         <button onclick="closeSetupWizardModal()" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 flex items-center justify-center transition">
@@ -319,7 +320,7 @@
 
   <!-- Bootstrap JS Bundle + App Controllers -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="/static/js/charts.js?v=20261022bugfix"></script>
-  <script src="/static/js/app.js?v=20261022bugfix"></script>
+  <script src="/static/js/charts.js?v=20261026worldv1"></script>
+  <script src="/static/js/app.js?v=20261026worldv1"></script>
 </body>
 </html>

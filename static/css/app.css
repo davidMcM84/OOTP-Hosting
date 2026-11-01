@@ -620,5 +620,442 @@ select option {
   line-height: 1.25;
 }
 
+/* ============================================================================
+   4. BNN.COM | OOTP+ SPORTS BROADCAST LEAGUE PORTAL (TAB 01 FRONT PAGE)
+   Dark (Default) + Light Broadcast Themes • 16:9 UHD vs. 21:9 Ultrawide Wall
+   ============================================================================ */
+.bnn-portal-dark {
+  --bnn-bg: #0B0E14;
+  --bnn-card: #131822;
+  --bnn-subcard: #1A2130;
+  --bnn-hover: #212A3D;
+  --bnn-border: #263042;
+  --bnn-text: #F3F4F6;
+  --bnn-muted: #9CA3AF;
+  --bnn-header-bg: #0F141D;
+  --bnn-ticker-bg: #07090D;
+  --bnn-accent: #CC0000;
+  --bnn-blue: #2563EB;
+  --bnn-shadow: 0 10px 26px -6px rgba(0, 0, 0, 0.65);
+  --bnn-hero-grad: linear-gradient(135deg, #1E1118 0%, #131822 55%, #0F1E2E 100%);
+  color: var(--bnn-text);
+}
+
+.bnn-portal-light {
+  --bnn-bg: #EDEFF2;
+  --bnn-card: #FFFFFF;
+  --bnn-subcard: #F7F8FA;
+  --bnn-hover: #F0F3F8;
+  --bnn-border: #D5D9E0;
+  --bnn-text: #111827;
+  --bnn-muted: #4B5563;
+  --bnn-header-bg: #121417;
+  --bnn-ticker-bg: #FFFFFF;
+  --bnn-accent: #CC0000;
+  --bnn-blue: #1D4ED8;
+  --bnn-shadow: 0 4px 14px -2px rgba(17, 24, 39, 0.08);
+  --bnn-hero-grad: linear-gradient(135deg, #FFF5F5 0%, #FFFFFF 55%, #F0F7FF 100%);
+  color: var(--bnn-text);
+}
+
+.bnn-shell {
+  background-color: var(--bnn-bg);
+  color: var(--bnn-text);
+  border: 1px solid var(--bnn-border);
+  border-radius: 14px;
+  overflow: hidden;
+  transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+
+.bnn-card {
+  background-color: var(--bnn-card);
+  border: 1px solid var(--bnn-border);
+  box-shadow: var(--bnn-shadow);
+  color: var(--bnn-text);
+}
+
+.bnn-subcard {
+  background-color: var(--bnn-subcard);
+  border: 1px solid var(--bnn-border);
+  color: var(--bnn-text);
+}
+
+.bnn-border {
+  border-color: var(--bnn-border);
+}
+
+.bnn-muted {
+  color: var(--bnn-muted);
+}
+
+.bnn-hero-bg {
+  background: var(--bnn-hero-grad);
+}
+
+.bnn-row-hover {
+  transition: background-color 0.12s ease;
+}
+
+.bnn-row-hover:hover {
+  background-color: var(--bnn-hover);
+}
+
+.bnn-score-chip {
+  background-color: var(--bnn-card);
+  border-right: 1px solid var(--bnn-border);
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.bnn-score-chip:hover {
+  background-color: var(--bnn-hover);
+}
+
+.bnn-score-chip.is-active {
+  background-color: var(--bnn-subcard);
+  box-shadow: inset 0 -3px 0 0 #CC0000;
+}
+
+.bnn-pill-btn {
+  border: 1px solid var(--bnn-border);
+  background-color: var(--bnn-subcard);
+  color: var(--bnn-muted);
+  transition: all 0.12s ease;
+}
+
+.bnn-pill-btn:hover {
+  color: var(--bnn-text);
+  border-color: #64748B;
+}
+
+.bnn-pill-btn.active {
+  background-color: var(--bnn-accent);
+  color: #FFFFFF;
+  border-color: var(--bnn-accent);
+}
+
+.bnn-pill-btn.active-blue {
+  background-color: var(--bnn-blue);
+  color: #FFFFFF;
+  border-color: var(--bnn-blue);
+}
+
+/* Savant Diverging Process Percentile Pills */
+.bnn-pct-95 { background: #B91C1C; color: #FFFFFF; border: 1px solid #EF4444; }
+.bnn-pct-80 { background: #C2410C; color: #FFFFFF; border: 1px solid #F97316; }
+.bnn-pct-50 { background: #374151; color: #F3F4F6; border: 1px solid #6B7280; }
+.bnn-pct-20 { background: #0369A1; color: #FFFFFF; border: 1px solid #38BDF8; }
+.bnn-pct-05 { background: #1E3A8A; color: #FFFFFF; border: 1px solid #60A5FA; }
+
+/* Adaptive Viewport Modes: 16:9 Standard UHD vs 21:9 Ultrawide 5-Col Wall */
+.bnn-vp-standard .bnn-uw-only {
+  display: none !important;
+}
+.bnn-vp-standard .bnn-std-only {
+  display: block !important;
+}
+
+.bnn-vp-ultrawide .bnn-portal-grid {
+  display: grid !important;
+  grid-template-columns: 18fr 19fr 26fr 19fr 18fr !important;
+  gap: 0.85rem !important;
+  align-items: start;
+}
+.bnn-vp-ultrawide .bnn-portal-grid > .bnn-col-item {
+  grid-column: span 1 / span 1 !important;
+}
+.bnn-vp-ultrawide .bnn-uw-only {
+  display: flex !important;
+}
+.bnn-vp-ultrawide .bnn-std-only {
+  display: none !important;
+}
+
+.bnn-vp-auto .bnn-uw-only {
+  display: none !important;
+}
+.bnn-vp-auto .bnn-std-only {
+  display: block !important;
+}
+@media (min-width: 2150px) {
+  .bnn-vp-auto .bnn-portal-grid {
+    display: grid !important;
+    grid-template-columns: 18fr 19fr 26fr 19fr 18fr !important;
+    gap: 0.85rem !important;
+    align-items: start;
+  }
+  .bnn-vp-auto .bnn-portal-grid > .bnn-col-item {
+    grid-column: span 1 / span 1 !important;
+  }
+  .bnn-vp-auto .bnn-uw-only {
+    display: flex !important;
+  }
+  .bnn-vp-auto .bnn-std-only {
+    display: none !important;
+  }
+}
+
+/* ============================================================================
+   5. TAB 02 ("THE STRETCH") — PROMINENT HERO KPI CARDS & MLB BROADCAST POSTER
+   ============================================================================ */
+.stretch-hero-kpi {
+  position: relative;
+  background-color: var(--bnn-card);
+  border: 1px solid var(--bnn-border);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.bnn-portal-dark .stretch-hero-kpi {
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.58), 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.bnn-portal-light .stretch-hero-kpi {
+  box-shadow: 0 8px 20px -4px rgba(15, 23, 42, 0.08);
+}
+
+.stretch-hero-kpi:hover {
+  transform: translateY(-2px);
+}
+
+.bnn-portal-dark .stretch-kpi-crimson {
+  background: linear-gradient(160deg, rgba(220, 38, 38, 0.20) 0%, rgba(19, 24, 34, 0.96) 56%);
+  border-color: rgba(239, 68, 68, 0.52);
+}
+.bnn-portal-dark .stretch-kpi-emerald {
+  background: linear-gradient(160deg, rgba(16, 185, 129, 0.20) 0%, rgba(19, 24, 34, 0.96) 56%);
+  border-color: rgba(16, 185, 129, 0.52);
+}
+.bnn-portal-dark .stretch-kpi-amber {
+  background: linear-gradient(160deg, rgba(245, 158, 11, 0.21) 0%, rgba(19, 24, 34, 0.96) 56%);
+  border-color: rgba(245, 158, 11, 0.56);
+}
+.bnn-portal-dark .stretch-kpi-cobalt {
+  background: linear-gradient(160deg, rgba(59, 130, 246, 0.20) 0%, rgba(19, 24, 34, 0.96) 56%);
+  border-color: rgba(59, 130, 246, 0.52);
+}
+
+.bnn-portal-light .stretch-kpi-crimson {
+  background: linear-gradient(160deg, rgba(220, 38, 38, 0.10) 0%, #FFFFFF 62%);
+  border-color: rgba(220, 38, 38, 0.45);
+}
+.bnn-portal-light .stretch-kpi-emerald {
+  background: linear-gradient(160deg, rgba(16, 185, 129, 0.11) 0%, #FFFFFF 62%);
+  border-color: rgba(16, 185, 129, 0.45);
+}
+.bnn-portal-light .stretch-kpi-amber {
+  background: linear-gradient(160deg, rgba(245, 158, 11, 0.14) 0%, #FFFFFF 62%);
+  border-color: rgba(217, 119, 6, 0.50);
+}
+.bnn-portal-light .stretch-kpi-cobalt {
+  background: linear-gradient(160deg, rgba(37, 99, 235, 0.10) 0%, #FFFFFF 62%);
+  border-color: rgba(37, 99, 235, 0.45);
+}
+
+/* MLB Postseason Broadcast Poster Canvas (Symmetrical Trophy Graphic) */
+.postseason-poster {
+  background:
+    radial-gradient(ellipse at 50% 48%, rgba(26, 54, 104, 0.62) 0%, rgba(7, 15, 32, 0.96) 62%, #040914 100%);
+  color: #F8FAFC;
+  position: relative;
+  overflow: hidden;
+}
+
+.bracket-slot-hit {
+  cursor: pointer;
+  transition: filter 0.15s ease, opacity 0.15s ease;
+}
+
+.bracket-slot-hit:hover {
+  filter: drop-shadow(0 0 6px rgba(250, 204, 21, 0.80));
+}
+
+/* Stretch Hub 16:9 UHD (3-Col) vs. 21:9 Ultrawide (4-Col Unstacked Cockpit) */
+.bnn-vp-standard .bnn-stretch-container {
+  max-width: 1580px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.bnn-stretch-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 0.875rem;
+  align-items: start;
+}
+
+.bnn-stretch-col-left   { grid-column: span 3 / span 3; }
+.bnn-stretch-col-center { grid-column: span 6 / span 6; }
+.bnn-stretch-col-right  { grid-column: span 3 / span 3; }
+.bnn-stretch-col-uw     { display: none; }
+
+.bnn-vp-ultrawide .bnn-stretch-container {
+  max-width: 100%;
+}
+
+.bnn-vp-ultrawide .bnn-stretch-grid {
+  grid-template-columns: 18fr 44fr 20fr 18fr !important;
+  gap: 0.875rem !important;
+}
+
+.bnn-vp-ultrawide .bnn-stretch-col-left,
+.bnn-vp-ultrawide .bnn-stretch-col-center,
+.bnn-vp-ultrawide .bnn-stretch-col-right {
+  grid-column: auto !important;
+}
+
+.bnn-vp-ultrawide .bnn-stretch-col-uw {
+  display: flex !important;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+@media (min-width: 2150px) {
+  .bnn-vp-auto .bnn-stretch-grid {
+    grid-template-columns: 18fr 44fr 20fr 18fr !important;
+    gap: 0.875rem !important;
+  }
+  .bnn-vp-auto .bnn-stretch-col-left,
+  .bnn-vp-auto .bnn-stretch-col-center,
+  .bnn-vp-auto .bnn-stretch-col-right {
+    grid-column: auto !important;
+  }
+  .bnn-vp-auto .bnn-stretch-col-uw {
+    display: flex !important;
+    flex-direction: column;
+    gap: 0.875rem;
+  }
+}
+
+@media (max-width: 1120px) {
+  .bnn-stretch-grid,
+  .bnn-vp-ultrawide .bnn-stretch-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .bnn-stretch-col-left,
+  .bnn-stretch-col-center,
+  .bnn-stretch-col-right {
+    grid-column: span 1 / span 1 !important;
+  }
+}
+
+/* ============================================================================
+ * TAB 03: WORLD & ASSOCIATION HUB — BROADCAST PYRAMID, FV BADGES & 4-COL GRID
+ * ============================================================================ */
+.world-pyramid-canvas {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.12) 0%, transparent 62%),
+    linear-gradient(180deg, rgba(19, 24, 34, 0.96) 0%, rgba(11, 14, 20, 0.99) 100%);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.bnn-portal-light .world-pyramid-canvas {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(3, 105, 161, 0.09) 0%, transparent 62%),
+    linear-gradient(180deg, #FFFFFF 0%, #F1F5F9 100%);
+  border: 1px solid #CBD5E1;
+}
+
+.world-tier-medallion {
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.98) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.world-tier-medallion:hover {
+  transform: translateY(-1px);
+  border-color: rgba(56, 189, 248, 0.65);
+  box-shadow: 0 6px 16px rgba(2, 132, 199, 0.22);
+}
+
+.bnn-portal-light .world-tier-medallion {
+  background: linear-gradient(135deg, #FFFFFF 0%, #F8FAFC 100%);
+  border: 1px solid #CBD5E1;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
+}
+
+/* 20-80 Future Value (FV) Scouting Badges */
+.fv-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 800;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+.fv-80, .fv-70 { background: rgba(232, 23, 93, 0.18); color: #FB7185; border: 1px solid rgba(232, 23, 93, 0.45); }
+.fv-65, .fv-60 { background: rgba(245, 158, 11, 0.18); color: #FBBF24; border: 1px solid rgba(245, 158, 11, 0.45); }
+.fv-55, .fv-50 { background: rgba(16, 185, 129, 0.18); color: #34D399; border: 1px solid rgba(16, 185, 129, 0.45); }
+.fv-45, .fv-40 { background: rgba(56, 189, 248, 0.16); color: #38BDF8; border: 1px solid rgba(56, 189, 248, 0.38); }
+
+.bnn-portal-light .fv-80, .bnn-portal-light .fv-70 { background: #FFE4E6; color: #BE123C; border-color: #FDA4AF; }
+.bnn-portal-light .fv-65, .bnn-portal-light .fv-60 { background: #FEF3C7; color: #B45309; border-color: #FCD34D; }
+.bnn-portal-light .fv-55, .bnn-portal-light .fv-50 { background: #D1FAE5; color: #047857; border-color: #6EE7B7; }
+.bnn-portal-light .fv-45, .bnn-portal-light .fv-40 { background: #E0F2FE; color: #0369A1; border-color: #7DD3FC; }
+
+/* Tab 03 Adaptive 16:9 3-Col vs 21:9 4-Col Grid */
+.bnn-world-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+.bnn-world-col-left { grid-column: span 3 / span 3; }
+.bnn-world-col-center { grid-column: span 6 / span 6; }
+.bnn-world-col-right { grid-column: span 3 / span 3; }
+.bnn-world-col-uw { display: none; }
+
+.bnn-vp-ultrawide .bnn-world-grid {
+  grid-template-columns: 18fr 44fr 20fr 18fr !important;
+  gap: 0.875rem !important;
+}
+.bnn-vp-ultrawide .bnn-world-col-left,
+.bnn-vp-ultrawide .bnn-world-col-center,
+.bnn-vp-ultrawide .bnn-world-col-right {
+  grid-column: auto !important;
+}
+.bnn-vp-ultrawide .bnn-world-col-uw {
+  display: flex !important;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+@media (min-width: 2150px) {
+  .bnn-vp-auto .bnn-world-grid {
+    grid-template-columns: 18fr 44fr 20fr 18fr !important;
+    gap: 0.875rem !important;
+  }
+  .bnn-vp-auto .bnn-world-col-left,
+  .bnn-vp-auto .bnn-world-col-center,
+  .bnn-vp-auto .bnn-world-col-right {
+    grid-column: auto !important;
+  }
+  .bnn-vp-auto .bnn-world-col-uw {
+    display: flex !important;
+    flex-direction: column;
+    gap: 0.875rem;
+  }
+}
+
+@media (max-width: 1120px) {
+  .bnn-world-grid,
+  .bnn-vp-ultrawide .bnn-world-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .bnn-world-col-left,
+  .bnn-world-col-center,
+  .bnn-world-col-right {
+    grid-column: span 1 / span 1 !important;
+  }
+}
+
+
+
+
 
 

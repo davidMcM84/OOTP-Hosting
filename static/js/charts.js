@@ -1184,16 +1184,17 @@ function renderPositionalSupplyChart(canvasId, positionalSupply) {
 }
 
 /**
- * 18. "The Stretch" — Pennant Race Momentum Worm Chart (Games Above/Below .500)
+ * 18. "The Stretch" — Multi-Mode Pennant Race Momentum Worm Chart
+ * Supports modes: "odds" (Playoff Odds %), "500" (Games > .500), "xwoba" (Rolling 15G xwOBA)
  */
-function renderStretchTrajectoryChart(canvasId, trajectories) {
+function renderStretchTrajectoryChart(canvasId, trajectories, mode = "odds") {
   destroyChart(canvasId);
   const ctx = document.getElementById(canvasId);
   if (!ctx || !Array.isArray(trajectories) || !trajectories.length) return;
 
   const palette = [
-    "#f59e0b", "#38bdf8", "#10b981", "#f43f5e",
-    "#a855f7", "#eab308", "#06b6d4", "#ec4899",
+    "#10b981", "#3b82f6", "#a855f7", "#f59e0b",
+    "#ef4444", "#06b6d4", "#ec4899", "#eab308",
   ];
   const maxPts = Math.max(...trajectories.map(t => (t.points || []).length), 1);
   const labels = Array.from({ length: maxPts }, (_, i) => {
@@ -1201,20 +1202,34 @@ function renderStretchTrajectoryChart(canvasId, trajectories) {
     return sample ? `G${sample.g}` : `Pt ${i + 1}`;
   });
 
-  const datasets = trajectories.slice(0, 8).map((tm, idx) => {
-    const col = palette[idx % palette.length];
+  const datasets = trajectories.slice(0, 6).map((tm, idx) => {
+    const col = tm.color || palette[idx % palette.length];
+    const pts = tm.points || [];
+    const seriesData = pts.map(p => {
+      if (mode === "500") return Number(p.above_500 ?? 0);
+      if (mode === "xwoba") return Number(p.rolling_xwoba ?? 0.320);
+      return Number(p.playoff_prob ?? 50.0);
+    });
+    const suffix = mode === "odds"
+      ? `${Number(tm.playoff_prob ?? seriesData[seriesData.length - 1] ?? 50).toFixed(0)}%${tm.is_mirage ? ' ⚠' : ''}`
+      : `${tm.record_str || ''}${tm.is_mirage ? ' ⚠' : ''}`;
     return {
-      label: `${tm.abbr} (${tm.record_str})`,
-      data: (tm.points || []).map(p => p.above_500),
+      label: `${tm.abbr} (${suffix})`,
+      data: seriesData,
       borderColor: col,
       backgroundColor: col + "22",
-      borderWidth: idx < 2 ? 3 : 2,
+      borderWidth: idx < 2 ? 3 : 2.2,
+      borderDash: tm.is_mirage ? [5, 3] : [],
       pointRadius: 2,
       pointHoverRadius: 5,
       tension: 0.28,
       fill: false,
     };
   });
+
+  const yTitle = mode === "500"
+    ? "Games Above / Below .500"
+    : (mode === "xwoba" ? "Rolling 15G xwOBA" : "Cumulative Playoff Probability (%)");
 
   window._chartInstances[canvasId] = new Chart(ctx, {
     type: "line",
@@ -1226,30 +1241,49 @@ function renderStretchTrajectoryChart(canvasId, trajectories) {
       plugins: {
         legend: {
           position: "top",
-          labels: { color: "#dbdbdb", font: { size: 10.5, weight: "700" }, boxWidth: 12 },
+          labels: { color: "#94a3b8", font: { size: 10.5, family: "JetBrains Mono, monospace", weight: "700" }, boxWidth: 12 },
         },
         tooltip: {
           callbacks: {
             label: (context) => {
               const v = Number(context.parsed.y || 0);
-              return ` ${context.dataset.label}: ${v >= 0 ? "+" : ""}${v} games vs .500`;
+              if (mode === "500") {
+                return ` ${context.dataset.label}: ${v >= 0 ? "+" : ""}${v} games vs .500`;
+              }
+              if (mode === "xwoba") {
+                return ` ${context.dataset.label}: .${Math.round(v * 1000).toString().padStart(3, "0")} xwOBA`;
+              }
+              return ` ${context.dataset.label}: ${v.toFixed(1)}% Playoff Odds`;
             },
           },
         },
       },
       scales: {
         x: {
-          grid: { color: "rgba(95, 96, 98, 0.16)" },
-          ticks: { color: "#999999", font: { size: 10 } },
+          grid: { color: "rgba(148, 163, 184, 0.14)" },
+          ticks: { color: "#94a3b8", font: { size: 10, family: "JetBrains Mono, monospace" } },
         },
         y: {
-          title: { display: true, text: "Games Above / Below .500", color: "#dbdbdb", font: { size: 10, weight: "700" } },
+          min: mode === "odds" ? 0 : undefined,
+          max: mode === "odds" ? 100 : undefined,
+          title: { display: true, text: yTitle, color: "#94a3b8", font: { size: 10, family: "JetBrains Mono, monospace", weight: "700" } },
           grid: {
-            color: (c) => (c.tick && c.tick.value === 0 ? "rgba(245, 158, 11, 0.55)" : "rgba(95, 96, 98, 0.18)"),
+            color: (c) => {
+              const tv = c.tick && c.tick.value;
+              if ((mode === "odds" && tv === 50) || (mode === "500" && tv === 0) || (mode === "xwoba" && Math.abs(tv - 0.320) < 0.005)) {
+                return "rgba(245, 158, 11, 0.55)";
+              }
+              return "rgba(148, 163, 184, 0.14)";
+            },
           },
           ticks: {
-            color: "#dbdbdb",
-            callback: (v) => (v > 0 ? `+${v}` : v),
+            color: "#94a3b8",
+            font: { size: 10, family: "JetBrains Mono, monospace" },
+            callback: (v) => {
+              if (mode === "500") return v > 0 ? `+${v}` : v;
+              if (mode === "xwoba") return `.${Math.round(Number(v) * 1000).toString().padStart(3, "0")}`;
+              return `${v}%`;
+            },
           },
         },
       },

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0D131F"/>
+      <stop offset="100%" stop-color="#070A10"/>
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="8" y1="54" x2="56" y2="8" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#06B6D4"/>
+      <stop offset="100%" stop-color="#38BDF8"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#bgGrad)" stroke="#1E293B" stroke-width="2"/>
+  <!-- Outfield Fan Arc -->
+  <path d="M12 31 C22 13, 42 13, 52 31 L32 52 Z" stroke="url(#cyanGrad)" stroke-width="3.5" stroke-linejoin="round" fill="none"/>
+  <!-- Inner Infield Diamond -->
+  <path d="M32 23 L42 33 L32 43 L22 33 Z" stroke="#E2E8F0" stroke-width="3" stroke-linejoin="round" fill="none"/>
+  <!-- Statcast Trajectory Vector -->
+  <path d="M30 35 L52 13" stroke="#22D3EE" stroke-width="3.8" stroke-linecap="round"/>
+  <path d="M45 12 L54 11 L53 20 Z" fill="#22D3EE"/>
+</svg>
