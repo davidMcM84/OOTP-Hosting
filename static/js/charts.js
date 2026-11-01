@@ -347,146 +347,292 @@ function renderBallparkSpraySVG(containerId, sprayData, opts = {}) {
 }
 
 /**
- * Renders an Interactive Graphical Baseball Diamond Depth Chart for the Team Dashboard
+ * Suffix-aware short last name formatter (prevents "George Lombard Jr." -> "Jr.")
  */
-function renderGraphicalDepthChartDiamond(containerId, depthChartData, selectedPos = "SS") {
+function shortLastName(fullName) {
+  if (!fullName) return "—";
+  const parts = String(fullName).trim().split(/\s+/);
+  if (parts.length <= 1) return parts[0] || "—";
+  const suffixes = new Set(["jr.", "jr", "sr.", "sr", "ii", "iii", "iv", "v"]);
+  const last = parts[parts.length - 1];
+  if (parts.length >= 3 && suffixes.has(last.toLowerCase())) {
+    return `${parts[parts.length - 2]} ${last}`;
+  }
+  return last;
+}
+
+/**
+ * Renders an MLB Network / Baseball Savant Broadcast-Style Interactive Graphical Baseball Diamond Depth Chart
+ */
+function renderGraphicalDepthChartDiamond(containerId, depthChartData, selectedPos = "SS", teamObj = null) {
   const el = document.getElementById(containerId);
   if (!el || !depthChartData || !depthChartData.positions) return;
 
   const positions = depthChartData.positions;
   const rotation = depthChartData.rotation || [];
+  const bullpen = depthChartData.bullpen || [];
   const ace = rotation[0] || null;
-  const spSum = depthChartData.sp_summary || { grade: "B", color: "#38bdf8", unit_war: 0, fip: 4.00 };
+  const closer = bullpen[0] || null;
+  const spSum = depthChartData.sp_summary || { grade: "B", color: "#38bdf8", unit_war: 0, war_diff: 0, fip: 4.00, stuff_plus: 100, percentile: 55 };
+  const rpSum = depthChartData.rp_summary || { grade: "B", color: "#38bdf8", unit_war: 0, war_diff: 0, fip: 4.00, stuff_plus: 100, percentile: 55 };
 
-  // Coordinates (% of container width/height) for the 9 fielding positions + SP mound card
+  const park = (teamObj && teamObj.park) || {};
+  const dists = Array.isArray(park.distances) && park.distances.length >= 7
+    ? park.distances
+    : [330, 368, 386, 405, 386, 368, 330];
+  const parkName = park.name || (teamObj ? `${teamObj.abbr} Ballpark` : "Club Stadium");
+  const pfHr = Math.round((Number(park.hr) || 1.0) * 100);
+
+  const haloColorForPct = pct => {
+    const p = Number(pct) || 50;
+    if (p >= 82) return "#ef4444"; // Savant Elite Crimson
+    if (p >= 65) return "#f97316"; // Above-Avg Warm Orange
+    if (p >= 42) return "#94a3b8"; // Neutral Slate
+    if (p >= 25) return "#38bdf8"; // Cool Sky
+    return "#3b82f6";              // Lagging Cobalt
+  };
+
+  // Non-overlapping coordinates across 640px height container (9 field nodes)
   const diamondCoords = [
-    { pos: "CF", left: "50%", top: "13%" },
-    { pos: "LF", left: "19%", top: "24%" },
-    { pos: "RF", left: "81%", top: "24%" },
-    { pos: "SS", left: "35%", top: "44%" },
-    { pos: "2B", left: "65%", top: "44%" },
-    { pos: "3B", left: "18%", top: "59%" },
-    { pos: "1B", left: "82%", top: "59%" },
-    { pos: "C",  left: "50%", top: "86%" },
-    { pos: "DH", left: "16%", top: "84%" },
+    { pos: "CF", left: "50%",   top: "13.5%" },
+    { pos: "LF", left: "17%",   top: "24.5%" },
+    { pos: "RF", left: "83%",   top: "24.5%" },
+    { pos: "SS", left: "34%",   top: "41.5%" },
+    { pos: "2B", left: "66%",   top: "41.5%" },
+    { pos: "3B", left: "14.5%", top: "58.5%" },
+    { pos: "1B", left: "85.5%", top: "58.5%" },
+    { pos: "C",  left: "50%",   top: "86.5%" },
+    { pos: "DH", left: "84%",   top: "85.5%" },
   ];
 
   const cardsHtml = diamondCoords.map(coord => {
     const node = positions[coord.pos] || {};
     const st = node.starter;
     const bk = (node.backups && node.backups[0]) || null;
+    const heir = node.top_heir || null;
     const isSel = selectedPos === coord.pos;
-    const borderCol = node.color || "#38bdf8";
+    const pct = node.percentile ?? 50;
+    const halo = haloColorForPct(pct);
+    const warDiff = Number(node.war_diff ?? 0);
+    const diffStr = `${warDiff >= 0 ? "+" : ""}${warDiff.toFixed(1)}W`;
 
     return `
       <div onclick="selectDepthChartUnit('${coord.pos}')"
-           style="left:${coord.left}; top:${coord.top}; transform:translate(-50%, -50%); border-color:${isSel ? '#ffffff' : borderCol};"
-           class="absolute z-20 w-[148px] sm:w-[162px] rounded-xl bg-slate-950/92 backdrop-blur-md border-2 p-2 shadow-2xl cursor-pointer transition-all hover:scale-105 ${isSel ? 'ring-2 ring-sky-400/80 shadow-sky-500/25' : ''}">
-        <div class="flex items-center justify-between border-b border-slate-800 pb-1 mb-1">
-          <div class="flex items-center gap-1.5">
-            <span class="px-1.5 py-0.5 rounded text-[10px] font-black tracking-wider bg-slate-800 text-white">${coord.pos}</span>
-            <span class="text-[10px] font-mono text-slate-400">${node.unit_war >= 0 ? '+' : ''}${node.unit_war ?? 0} WAR</span>
+           style="left:${coord.left}; top:${coord.top}; transform:translate(-50%, -50%); border-color:${isSel ? '#38BDF8' : halo};"
+           class="bnn-diamond-node ${isSel ? 'is-selected' : ''}">
+        <div class="flex items-center justify-between border-b border-white/10 pb-1 mb-1">
+          <div class="flex items-center gap-1">
+            <span class="px-1.5 py-0.5 rounded text-[9.5px] font-black font-mono tracking-wider bg-slate-800 text-white">${coord.pos}</span>
+            <span class="text-[9.5px] font-mono font-bold ${warDiff >= 0 ? 'text-emerald-400' : 'text-rose-400'}" title="Net Unit WAR vs League Avg">${diffStr}</span>
           </div>
-          <span class="px-1.5 py-0.2 rounded text-[10px] font-black" style="background:${borderCol}25; color:${borderCol}; border:1px solid ${borderCol}70;">${node.grade || 'B'}</span>
+          <span class="px-1.5 py-0.2 rounded text-[9px] font-mono font-black" style="background:${halo}26; color:${halo}; border:1px solid ${halo}75;">${pct}p · ${node.grade || 'B'}</span>
         </div>
         ${st ? `
-          <div class="truncate font-extrabold text-xs text-white hover:text-sky-300" onclick="event.stopPropagation(); openPlayerModal(${st.player_id});" title="${st.name}">
-            ${st.name} <span class="text-[10px] font-normal text-slate-400">(${st.bats})</span>
+          <div class="flex items-center gap-1.5">
+            <img src="${playerPicUrl(st.player_id)}" onerror="this.style.display='none'" class="w-6 h-7 rounded object-cover border border-white/15 shrink-0 bg-slate-900" alt="">
+            <div class="min-w-0 flex-1">
+              <div class="truncate font-extrabold text-[11.5px] text-white hover:text-sky-300 leading-tight" onclick="event.stopPropagation(); openPlayerModal(${st.player_id});" title="${st.name} (${st.bats}) · Click for Player Dossier">
+                ${shortLastName(st.name)} <span class="text-[9.5px] font-mono font-normal text-slate-400">${st.bats}</span>
+              </div>
+              <div class="flex items-center justify-between text-[9.5px] font-mono mt-0.5">
+                <span class="font-bold ${st.wrc_plus >= 115 ? 'text-amber-300' : (st.wrc_plus >= 100 ? 'text-sky-300' : 'text-rose-300')}">${st.wrc_plus} wRC+</span>
+                <span class="${coord.pos === 'DH' ? 'text-slate-300' : (st.zr >= 0 ? 'text-emerald-300' : 'text-rose-300')}">${coord.pos === 'DH' ? fmtAvg(st.xwoba || 0.320) + ' xw' : (st.zr >= 0 ? '+' : '') + Number(st.zr || 0).toFixed(1) + ' ZR'}</span>
+              </div>
+            </div>
           </div>
-          <div class="flex items-center justify-between text-[10px] mt-0.5">
-            <span class="font-mono text-sky-300 font-bold">${st.wrc_plus} wRC+</span>
-            <span class="font-mono text-slate-300">${Number(st.avg).toFixed(3)} / ${st.hr} HR</span>
+          <div class="flex items-center justify-between text-[9px] mt-1 pt-0.5 border-t border-white/10 text-slate-400">
+            <span class="truncate max-w-[84px]" title="${bk ? `2nd: ${bk.name} (${bk.oa} OVR)` : 'No active backup'}">
+              2nd: <b class="text-slate-200">${bk ? shortLastName(bk.name) : '—'}</b>
+            </span>
+            <span class="flex items-center gap-1 shrink-0">
+              ${heir && heir.pot >= 55 ? `<span class="text-amber-400 font-bold" title="Pipeline Heir: ${heir.name} (${heir.pot} FV · ETA ${heir.eta_year})">★${heir.pot}</span>` : ""}
+              <span class="font-mono px-1 rounded bg-slate-900 text-sky-300 border border-white/10">${st.oa}/${st.pot}</span>
+            </span>
           </div>
-          <div class="flex items-center justify-between text-[10px] mt-1 pt-1 border-t border-slate-800/80 text-slate-400 truncate">
-            <span class="truncate" title="${bk ? bk.name : 'No backup'}">2nd: <b class="text-slate-300">${bk ? bk.name.split(' ').slice(-1)[0] : '—'}</b></span>
-            <span class="font-mono text-[9px] px-1 rounded bg-slate-900 text-amber-300">OVR ${st.oa}</span>
-          </div>
-        ` : `<div class="text-xs text-slate-500 py-2 text-center">Vacant</div>`}
+        ` : `<div class="text-[11px] text-rose-400 font-mono py-2 text-center">OPEN VACANCY</div>`}
       </div>
     `;
   }).join("");
 
   // Central Pitcher Mound Card (SP1 Ace)
+  const spHalo = haloColorForPct(spSum.percentile);
+  const spDiff = Number(spSum.war_diff ?? 0);
   const moundCardHtml = `
     <div onclick="selectDepthChartUnit('SP')"
-         style="left:50%; top:62%; transform:translate(-50%, -50%); border-color:${selectedPos === 'SP' ? '#ffffff' : spSum.color};"
-         class="absolute z-20 w-[148px] sm:w-[162px] rounded-xl bg-slate-950/92 backdrop-blur-md border-2 p-2 shadow-2xl cursor-pointer transition-all hover:scale-105 ${selectedPos === 'SP' ? 'ring-2 ring-sky-400/80' : ''}">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-1 mb-1">
-        <span class="px-1.5 py-0.5 rounded text-[10px] font-black bg-indigo-500/20 text-indigo-300 border border-indigo-400/40">SP ACE</span>
-        <span class="px-1.5 py-0.2 rounded text-[10px] font-black" style="background:${spSum.color}25; color:${spSum.color}; border:1px solid ${spSum.color}70;">${spSum.grade}</span>
+         style="left:50%; top:61%; transform:translate(-50%, -50%); border-color:${selectedPos === 'SP' ? '#38BDF8' : spHalo};"
+         class="bnn-diamond-node ${selectedPos === 'SP' ? 'is-selected' : ''}">
+      <div class="flex items-center justify-between border-b border-white/10 pb-1 mb-1">
+        <div class="flex items-center gap-1">
+          <span class="px-1.5 py-0.5 rounded text-[9.5px] font-black font-mono bg-amber-500/20 text-amber-300 border border-amber-400/40">SP1</span>
+          <span class="text-[9.5px] font-mono font-bold ${spDiff >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${spDiff >= 0 ? '+' : ''}${spDiff.toFixed(1)}W</span>
+        </div>
+        <span class="px-1.5 py-0.2 rounded text-[9px] font-mono font-black" style="background:${spHalo}26; color:${spHalo}; border:1px solid ${spHalo}75;">${spSum.percentile || 55}p · ${spSum.grade}</span>
       </div>
       ${ace ? `
-        <div class="truncate font-extrabold text-xs text-white hover:text-sky-300" onclick="event.stopPropagation(); openPlayerModal(${ace.player_id});">
-          ${ace.name} <span class="text-[10px] font-normal text-slate-400">(${ace.throws})</span>
+        <div class="flex items-center gap-1.5">
+          <img src="${playerPicUrl(ace.player_id)}" onerror="this.style.display='none'" class="w-6 h-7 rounded object-cover border border-white/15 shrink-0 bg-slate-900" alt="">
+          <div class="min-w-0 flex-1">
+            <div class="truncate font-extrabold text-[11.5px] text-white hover:text-sky-300 leading-tight" onclick="event.stopPropagation(); openPlayerModal(${ace.player_id});" title="${ace.name} (${ace.throws}HP)">
+              ${shortLastName(ace.name)} <span class="text-[9.5px] font-mono font-normal text-slate-400">${ace.throws}</span>
+            </div>
+            <div class="flex items-center justify-between text-[9.5px] font-mono mt-0.5">
+              <span class="text-amber-300 font-bold">${ace.stuff_plus || 105} Stu+</span>
+              <span class="text-emerald-300">${Number(ace.fip).toFixed(2)} FIP</span>
+            </div>
+          </div>
         </div>
-        <div class="flex items-center justify-between text-[10px] mt-0.5">
-          <span class="font-mono text-emerald-300 font-bold">${Number(ace.era).toFixed(2)} ERA</span>
-          <span class="font-mono text-slate-300">${Number(ace.fip).toFixed(2)} FIP</span>
+        <div class="flex items-center justify-between text-[9px] mt-1 pt-0.5 border-t border-white/10 text-slate-400">
+          <span>Rot: <b class="text-slate-200">${spSum.unit_war}W</b></span>
+          <span class="font-mono px-1 rounded bg-slate-900 text-amber-300 border border-white/10">${ace.oa}/${ace.pot}</span>
         </div>
-        <div class="flex items-center justify-between text-[10px] mt-1 pt-1 border-t border-slate-800/80 text-slate-400">
-          <span>Rot WAR: <b class="text-white">${spSum.unit_war}</b></span>
-          <span class="font-mono text-[9px] px-1 rounded bg-slate-900 text-amber-300">OVR ${ace.oa}</span>
+      ` : `<div class="text-[11px] text-slate-500 py-1.5 text-center">No Starter</div>`}
+    </div>
+  `;
+
+  // Bullpen / Closer Card (Bottom-Left Bullpen Box)
+  const rpHalo = haloColorForPct(rpSum.percentile);
+  const rpDiff = Number(rpSum.war_diff ?? 0);
+  const bullpenCardHtml = `
+    <div onclick="selectDepthChartUnit('RP')"
+         style="left:16%; top:85.5%; transform:translate(-50%, -50%); border-color:${selectedPos === 'RP' ? '#38BDF8' : rpHalo};"
+         class="bnn-diamond-node ${selectedPos === 'RP' ? 'is-selected' : ''}">
+      <div class="flex items-center justify-between border-b border-white/10 pb-1 mb-1">
+        <div class="flex items-center gap-1">
+          <span class="px-1.5 py-0.5 rounded text-[9.5px] font-black font-mono bg-sky-500/20 text-sky-300 border border-sky-400/40">CL/PEN</span>
+          <span class="text-[9.5px] font-mono font-bold ${rpDiff >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${rpDiff >= 0 ? '+' : ''}${rpDiff.toFixed(1)}W</span>
         </div>
-      ` : `<div class="text-xs text-slate-500 py-1 text-center">No Starter</div>`}
+        <span class="px-1.5 py-0.2 rounded text-[9px] font-mono font-black" style="background:${rpHalo}26; color:${rpHalo}; border:1px solid ${rpHalo}75;">${rpSum.percentile || 55}p · ${rpSum.grade}</span>
+      </div>
+      ${closer ? `
+        <div class="flex items-center gap-1.5">
+          <img src="${playerPicUrl(closer.player_id)}" onerror="this.style.display='none'" class="w-6 h-7 rounded object-cover border border-white/15 shrink-0 bg-slate-900" alt="">
+          <div class="min-w-0 flex-1">
+            <div class="truncate font-extrabold text-[11.5px] text-white hover:text-sky-300 leading-tight" onclick="event.stopPropagation(); openPlayerModal(${closer.player_id});" title="${closer.name} (${closer.throws}HP)">
+              ${shortLastName(closer.name)} <span class="text-[9.5px] font-mono font-normal text-slate-400">${closer.throws}</span>
+            </div>
+            <div class="flex items-center justify-between text-[9.5px] font-mono mt-0.5">
+              <span class="text-amber-300 font-bold">${closer.stuff_plus || 105} Stu+</span>
+              <span class="text-sky-300">${Number(closer.fip).toFixed(2)} FIP</span>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center justify-between text-[9px] mt-1 pt-0.5 border-t border-white/10 text-slate-400">
+          <span>Pen: <b class="text-slate-200">${rpSum.unit_war}W</b> · ${closer.sv || 0}SV</span>
+          <span class="font-mono px-1 rounded bg-slate-900 text-sky-300 border border-white/10">${closer.oa}/${closer.pot}</span>
+        </div>
+      ` : `<div class="text-[11px] text-slate-500 py-1.5 text-center">No Closer</div>`}
     </div>
   `;
 
   el.innerHTML = `
-    <div class="relative w-full h-[590px] rounded-2xl overflow-hidden border border-slate-800/90 bg-slate-950 select-none">
-      <!-- Stadium Turf & Infield SVG Backdrop -->
-      <svg viewBox="0 0 700 600" preserveAspectRatio="xMidYMid slice" class="absolute inset-0 w-full h-full">
+    <div class="bnn-diamond-stage">
+      <!-- Broadcast MLB Network / Savant Stadium Turf & Clay Cutout SVG -->
+      <svg viewBox="0 0 800 660" preserveAspectRatio="xMidYMid slice" class="absolute inset-0 w-full h-full">
         <defs>
-          <radialGradient id="dcTurf" cx="50%" cy="85%" r="80%">
-            <stop offset="0%" stop-color="#15803d" stop-opacity="0.45"/>
-            <stop offset="55%" stop-color="#064e3b" stop-opacity="0.38"/>
-            <stop offset="100%" stop-color="#020617" stop-opacity="0.95"/>
+          <radialGradient id="bnnTurfGlow" cx="50%" cy="84%" r="78%">
+            <stop offset="0%" stop-color="#15803d" stop-opacity="0.58"/>
+            <stop offset="48%" stop-color="#166534" stop-opacity="0.42"/>
+            <stop offset="82%" stop-color="#064e3b" stop-opacity="0.28"/>
+            <stop offset="100%" stop-color="#030712" stop-opacity="0.92"/>
           </radialGradient>
+          <linearGradient id="bnnClayGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#92400e" stop-opacity="0.55"/>
+            <stop offset="100%" stop-color="#78350f" stop-opacity="0.68"/>
+          </linearGradient>
         </defs>
-        <rect width="700" height="600" fill="url(#dcTurf)" />
-        <!-- Outfield Arc -->
-        <path d="M 60 220 Q 350 -40 640 220 L 350 510 Z" fill="rgba(20, 83, 45, 0.32)" stroke="rgba(56, 189, 248, 0.45)" stroke-width="3" />
-        <!-- Infield Dirt Diamond -->
-        <path d="M 350 510 L 185 345 Q 350 215 515 345 Z" fill="rgba(120, 53, 15, 0.36)" stroke="rgba(180, 83, 9, 0.45)" stroke-width="1.5" />
-        <!-- Basepaths -->
-        <polygon points="350,505 470,385 350,265 230,385" fill="rgba(21, 128, 61, 0.35)" stroke="rgba(248, 250, 252, 0.45)" stroke-width="2" />
-        <!-- Foul Lines -->
-        <line x1="350" y1="510" x2="60" y2="220" stroke="rgba(248,250,252,0.3)" stroke-width="1.5" stroke-dasharray="4 4" />
-        <line x1="350" y1="510" x2="640" y2="220" stroke="rgba(248,250,252,0.3)" stroke-width="1.5" stroke-dasharray="4 4" />
-        <!-- Pitcher's Mound -->
-        <circle cx="350" cy="385" r="16" fill="rgba(146, 64, 14, 0.65)" stroke="rgba(255,255,255,0.4)" stroke-width="1.5" />
+
+        <rect width="800" height="660" fill="url(#bnnTurfGlow)" />
+
+        <!-- Warning Track & Outfield Wall Contour -->
+        <path d="M 58 242 Q 195 74 400 54 Q 605 74 742 242 L 400 578 Z"
+              fill="rgba(120, 53, 15, 0.24)" stroke="rgba(251, 191, 36, 0.55)" stroke-width="2.5" />
+        <!-- Outfield Mowed Grass Field -->
+        <path d="M 74 252 Q 205 92 400 72 Q 595 92 726 252 L 400 572 Z"
+              fill="rgba(21, 128, 61, 0.34)" stroke="rgba(74, 222, 128, 0.22)" stroke-width="1.2" />
+
+        <!-- Concentric Mowed Turf Arcs -->
+        <path d="M 135 312 Q 400 115 665 312" fill="none" stroke="rgba(134, 239, 172, 0.11)" stroke-width="18" />
+        <path d="M 190 366 Q 400 198 610 366" fill="none" stroke="rgba(134, 239, 172, 0.10)" stroke-width="16" />
+
+        <!-- Foul Lines & Foul Poles -->
+        <line x1="400" y1="572" x2="62" y2="244" stroke="rgba(248, 250, 252, 0.48)" stroke-width="1.8" />
+        <line x1="400" y1="572" x2="738" y2="244" stroke="rgba(248, 250, 252, 0.48)" stroke-width="1.8" />
+        <circle cx="62" cy="244" r="3.5" fill="#fbbf24" />
+        <circle cx="738" cy="244" r="3.5" fill="#fbbf24" />
+
+        <!-- Live Stadium Fence Distance Markers -->
+        <g font-family="'JetBrains Mono', monospace" font-size="11" font-weight="800" fill="rgba(226, 232, 240, 0.72)" text-anchor="middle">
+          <text x="86" y="226">${dists[0]}'</text>
+          <text x="236" y="96">${dists[2]}'</text>
+          <text x="400" y="46" fill="#fbbf24">${dists[3]}' CF</text>
+          <text x="564" y="96">${dists[4]}'</text>
+          <text x="714" y="226">${dists[6]}'</text>
+        </g>
+
+        <!-- Sculpted Infield Clay Arc -->
+        <path d="M 244 418 Q 400 264 556 418 L 400 572 Z"
+              fill="url(#bnnClayGrad)" stroke="rgba(217, 119, 6, 0.48)" stroke-width="1.6" />
+
+        <!-- Inner Infield Grass Diamond -->
+        <polygon points="400,552 512,440 400,328 288,440"
+                 fill="rgba(22, 163, 74, 0.56)" stroke="rgba(248, 250, 252, 0.52)" stroke-width="1.8" />
+
+        <!-- Pitcher's Mound & Rubber -->
+        <circle cx="400" cy="444" r="17" fill="rgba(146, 64, 14, 0.85)" stroke="rgba(253, 230, 138, 0.45)" stroke-width="1.4" />
+        <rect x="394" y="442.5" width="12" height="3" rx="1" fill="#f8fafc" />
+
+        <!-- Base Bags & Home Plate Pentagon -->
+        <rect x="395" y="323" width="10" height="10" fill="#ffffff" transform="rotate(45 400 328)" />
+        <rect x="507" y="435" width="10" height="10" fill="#ffffff" transform="rotate(45 512 440)" />
+        <rect x="283" y="435" width="10" height="10" fill="#ffffff" transform="rotate(45 288 440)" />
+        <circle cx="400" cy="568" r="15" fill="rgba(146, 64, 14, 0.8)" />
+        <polygon points="395,564 405,564 405,570 400,575 395,570" fill="#ffffff" />
       </svg>
 
-      <!-- Top Overlay Legend -->
-      <div class="absolute top-3 left-3 right-3 flex flex-wrap items-center justify-between z-10 pointer-events-none">
-        <span class="px-2.5 py-1 rounded-lg bg-slate-950/85 border border-slate-800 text-[11px] font-bold text-slate-300">
-          <i class="bi bi-diagram-3-fill text-sky-400 mr-1"></i> Interactive Diamond Depth Chart (Click any position to inspect unit depth)
+      <!-- Top Broadcast Overlay Scorebug Strip -->
+      <div class="absolute top-2.5 left-3 right-3 flex flex-wrap items-center justify-between gap-2 z-10 pointer-events-none">
+        <span class="px-2.5 py-1 rounded-md bg-slate-950/88 border border-white/15 text-[10.5px] font-mono font-bold text-slate-200 shadow">
+          <i class="bi bi-broadcast-pin text-amber-400 mr-1"></i> ${parkName} · HR PF ${pfHr} · Click node to inspect depth &amp; 5-Yr heirs
         </span>
-        <div class="flex items-center gap-2 bg-slate-950/85 border border-slate-800 px-2.5 py-1 rounded-lg text-[10px] font-bold">
-          <span class="text-emerald-400">● A+/A Elite</span>
-          <span class="text-sky-400">● B+/B Solid</span>
-          <span class="text-amber-400">● C Depth</span>
-          <span class="text-rose-400">● D Upgrade</span>
+        <div class="flex items-center gap-2 bg-slate-950/88 border border-white/15 px-2.5 py-1 rounded-md text-[9.5px] font-mono font-bold shadow">
+          <span class="text-red-400">● ≥82p Elite</span>
+          <span class="text-orange-400">● 65–81p Plus</span>
+          <span class="text-slate-300">● 42–64p Avg</span>
+          <span class="text-sky-400">● &lt;42p Target</span>
         </div>
       </div>
 
-      <!-- Positioned Player Depth Cards -->
+      <!-- 9 Field Cards + SP1 Ace Mound Card + CL/Bullpen Anchor Card -->
       ${cardsHtml}
       ${moundCardHtml}
+      ${bullpenCardHtml}
     </div>
   `;
 }
 
 /**
- * Renders Positional Strengths vs. League Average Bar Chart (WAR Advantage / Percentile)
+ * Renders 11-Unit Positional WAR Advantage vs. League Average Diverging Bar Chart
  */
-function renderPositionalStrengthsChart(canvasId, units) {
+function renderPositionalStrengthsChart(canvasId, units, isLight = false) {
   destroyChart(canvasId);
   const canvas = document.getElementById(canvasId);
   if (!canvas || typeof Chart === "undefined" || !units || !units.length) return;
 
   const labels = units.map(u => u.position);
-  const diffs = units.map(u => u.war_diff);
-  const colors = units.map(u => u.color || (u.war_diff >= 0 ? "#10b981" : "#f43f5e"));
+  const diffs = units.map(u => Number(u.war_diff || 0));
+  const barColors = units.map(u => {
+    const p = Number(u.percentile ?? 50);
+    if (p >= 80 || u.war_diff >= 1.5) return "#ef4444"; // Savant Crimson Elite
+    if (p >= 62 || u.war_diff >= 0.4) return "#f97316"; // Warm Orange Above Avg
+    if (u.war_diff >= -0.4) return "#64748b";           // Neutral Slate
+    if (u.war_diff >= -1.3) return "#0284c7";           // Cool Sky Deficit
+    return "#1d4ed8";                                   // Deep Cobalt Upgrade Need
+  });
+
+  const tickCol = isLight ? "#1e293b" : "#e2e8f0";
+  const mutedCol = isLight ? "#475569" : "#94a3b8";
+  const gridCol = isLight ? "rgba(15, 23, 42, 0.09)" : "rgba(148, 163, 184, 0.14)";
+  const zeroCol = isLight ? "rgba(15, 23, 42, 0.45)" : "rgba(248, 250, 252, 0.42)";
 
   window._chartInstances[canvasId] = new Chart(canvas.getContext("2d"), {
     type: "bar",
@@ -494,18 +640,25 @@ function renderPositionalStrengthsChart(canvasId, units) {
       labels,
       datasets: [
         {
-          label: "WAR vs. League Avg at Position",
+          label: "Net WAR vs. League Avg",
           data: diffs,
-          backgroundColor: colors.map(c => c + "cc"),
-          borderColor: colors,
+          backgroundColor: barColors.map(c => c + "d9"),
+          borderColor: barColors,
           borderWidth: 1.5,
-          borderRadius: 5,
+          borderRadius: 4,
         },
       ],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      onClick: (_evt, elements) => {
+        if (elements && elements.length > 0 && typeof window.selectDepthChartUnit === "function") {
+          const idx = elements[0].index;
+          const pos = units[idx] && units[idx].position;
+          if (pos) window.selectDepthChartUnit(pos);
+        }
+      },
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -513,20 +666,27 @@ function renderPositionalStrengthsChart(canvasId, units) {
             label: ctx => {
               const u = units[ctx.dataIndex];
               const sign = u.war_diff >= 0 ? "+" : "";
-              return `${u.label || u.name} (${u.grade}): ${u.unit_war ?? u.team_war} WAR vs Lg Avg ${u.lg_avg_war} WAR (${sign}${u.war_diff} WAR, ${u.percentile}th pct)`;
+              return `${u.label || u.name} (${u.grade} · ${u.percentile}p): ${u.unit_war ?? u.team_war} WAR vs Lg ${u.lg_avg_war} WAR (${sign}${u.war_diff}W) — ${u.action_tag || u.status_tag || ""}`;
             },
           },
         },
       },
       scales: {
         x: {
-          grid: { color: "rgba(95, 96, 98, 0.2)" },
-          ticks: { color: "#dbdbdb", font: { weight: "700", size: 11 } },
+          grid: { color: gridCol },
+          ticks: { color: tickCol, font: { family: "'JetBrains Mono', monospace", weight: "800", size: 11 } },
         },
         y: {
-          title: { display: true, text: "Net WAR vs. League Average", color: "#999999", font: { size: 11 } },
-          grid: { color: "rgba(95, 96, 98, 0.25)" },
-          ticks: { color: "#999999" },
+          title: { display: true, text: "Net WAR vs. Lg Avg", color: mutedCol, font: { family: "'JetBrains Mono', monospace", size: 10, weight: "700" } },
+          grid: {
+            color: ctx => (ctx.tick && ctx.tick.value === 0 ? zeroCol : gridCol),
+            lineWidth: ctx => (ctx.tick && ctx.tick.value === 0 ? 2 : 1),
+          },
+          ticks: {
+            color: mutedCol,
+            font: { family: "'JetBrains Mono', monospace", size: 10 },
+            callback: v => `${v > 0 ? "+" : ""}${v}W`,
+          },
         },
       },
     },
@@ -665,47 +825,63 @@ function renderEVLAScatterChart(canvasId, points) {
 }
 
 /**
- * Renders Team Profile Radar Chart
+ * Renders 6-Tool Team Percentile Radar Chart (supports backend sixToolProfile + light/dark mode)
  */
-function renderTeamRadarChart(canvasId, team, allTeams) {
+function renderTeamRadarChart(canvasId, team, allTeams, sixToolProfile = null, isLight = false) {
   destroyChart(canvasId);
   const canvas = document.getElementById(canvasId);
   if (!canvas || typeof Chart === "undefined" || !team) return;
 
-  const pctRank = (val, key, invert = false) => {
-    const arr = (allTeams || []).map(t => Number(t[key]) || 0).sort((a, b) => a - b);
-    if (!arr.length) return 50;
-    const pos = (arr.filter(v => v <= val).length / arr.length) * 100;
-    return Math.round(invert ? 110 - pos : pos);
-  };
+  let labels, dataVals;
+  const axes = sixToolProfile && Array.isArray(sixToolProfile.axes) && sixToolProfile.axes.length === 6
+    ? sixToolProfile.axes
+    : null;
 
-  const dataVals = [
-    pctRank(team.wrc_plus, "wrc_plus"),
-    pctRank(team.hr, "hr"),
-    pctRank(team.sb, "sb"),
-    pctRank(team.era, "era", true),
-    pctRank(team.fip, "fip", true),
-    pctRank(team.zr, "zr"),
-  ];
+  if (axes) {
+    labels = axes.map(a => a.label);
+    dataVals = axes.map(a => Math.max(5, Math.min(99, Number(a.percentile) || 50)));
+  } else {
+    const pctRank = (val, key, invert = false) => {
+      const arr = (allTeams || []).map(t => Number(t[key]) || 0).sort((a, b) => a - b);
+      if (!arr.length) return 50;
+      const pos = (arr.filter(v => v <= val).length / arr.length) * 100;
+      return Math.max(5, Math.min(99, Math.round(invert ? 105 - pos : pos)));
+    };
+    labels = ["Contact (wRC+)", "Power (HR)", "Speed (SB)", "Run Prev (ERA)", "Pitching (FIP)", "Defense (ZR)"];
+    dataVals = [
+      pctRank(team.wrc_plus, "wrc_plus"),
+      pctRank(team.hr, "hr"),
+      pctRank(team.sb, "sb"),
+      pctRank(team.era, "era", true),
+      pctRank(team.fip, "fip", true),
+      pctRank(team.zr, "zr"),
+    ];
+  }
+
+  const labelCol = isLight ? "#0f172a" : "#e2e8f0";
+  const gridCol = isLight ? "rgba(15, 23, 42, 0.14)" : "rgba(148, 163, 184, 0.24)";
+  const avgCol = isLight ? "rgba(71, 85, 105, 0.65)" : "rgba(148, 163, 184, 0.6)";
 
   window._chartInstances[canvasId] = new Chart(canvas.getContext("2d"), {
     type: "radar",
     data: {
-      labels: ["Offense (wRC+)", "Power (HR)", "Speed (SB)", "Run Prevention (ERA)", "Pitching (FIP)", "Defense (ZR)"],
+      labels,
       datasets: [
         {
           label: `${team.abbr} Percentile`,
           data: dataVals,
-          backgroundColor: "rgba(219, 219, 219, 0.22)",
-          borderColor: "#dbdbdb",
-          pointBackgroundColor: "#dbdbdb",
-          borderWidth: 2,
+          backgroundColor: "rgba(239, 68, 68, 0.24)",
+          borderColor: "#ef4444",
+          pointBackgroundColor: "#f59e0b",
+          pointBorderColor: isLight ? "#ffffff" : "#0f172a",
+          pointRadius: 4,
+          borderWidth: 2.2,
         },
         {
-          label: "League Average",
+          label: "50th Pct Lg Avg",
           data: [50, 50, 50, 50, 50, 50],
-          backgroundColor: "rgba(95, 96, 98, 0.14)",
-          borderColor: "rgba(153, 153, 153, 0.55)",
+          backgroundColor: isLight ? "rgba(148, 163, 184, 0.12)" : "rgba(71, 85, 105, 0.15)",
+          borderColor: avgCol,
           borderDash: [4, 4],
           borderWidth: 1.5,
           pointRadius: 0,
@@ -719,14 +895,105 @@ function renderTeamRadarChart(canvasId, team, allTeams) {
         r: {
           min: 0,
           max: 100,
-          angleLines: { color: "rgba(95, 96, 98, 0.3)" },
-          grid: { color: "rgba(95, 96, 98, 0.3)" },
-          pointLabels: { color: "#dbdbdb", font: { size: 11, weight: "600" } },
+          angleLines: { color: gridCol },
+          grid: { color: gridCol },
+          pointLabels: { color: labelCol, font: { family: "'JetBrains Mono', monospace", size: 10, weight: "700" } },
           ticks: { display: false },
         },
       },
       plugins: {
-        legend: { labels: { color: "#dbdbdb", font: { size: 11 } } },
+        legend: { labels: { color: labelCol, boxWidth: 10, font: { family: "'JetBrains Mono', monospace", size: 10, weight: "700" } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              if (axes && ctx.datasetIndex === 0 && axes[ctx.dataIndex]) {
+                return `${axes[ctx.dataIndex].label}: ${ctx.raw}th Pct — ${axes[ctx.dataIndex].value_fmt}`;
+              }
+              return `${ctx.dataset.label}: ${ctx.raw}th Pct`;
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+/**
+ * Renders Run-Creation (wRC+) vs. Run-Prevention (Staff FIP, Inverted) Quadrant Scatter
+ */
+function renderRunCreationVsPreventionChart(canvasId, rcVsRpList, activeAbbr, isLight = false) {
+  destroyChart(canvasId);
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || typeof Chart === "undefined" || !Array.isArray(rcVsRpList) || !rcVsRpList.length) return;
+
+  const activePts = rcVsRpList.filter(t => t.is_active || t.abbr === activeAbbr).map(t => ({
+    x: Number(t.wrc_plus || 100),
+    y: Number(t.fip || 4.20),
+    abbr: t.abbr,
+    name: t.full_name,
+    war: t.total_war,
+  }));
+  const peerPts = rcVsRpList.filter(t => !t.is_active && t.abbr !== activeAbbr).map(t => ({
+    x: Number(t.wrc_plus || 100),
+    y: Number(t.fip || 4.20),
+    abbr: t.abbr,
+    name: t.full_name,
+    war: t.total_war,
+  }));
+
+  const tickCol = isLight ? "#334155" : "#cbd5e1";
+  const gridCol = isLight ? "rgba(15, 23, 42, 0.1)" : "rgba(148, 163, 184, 0.15)";
+
+  window._chartInstances[canvasId] = new Chart(canvas.getContext("2d"), {
+    type: "scatter",
+    data: {
+      datasets: [
+        {
+          label: activeAbbr || "Selected Club",
+          data: activePts,
+          backgroundColor: "#f59e0b",
+          borderColor: "#ef4444",
+          borderWidth: 2.5,
+          pointRadius: 7.5,
+          pointHoverRadius: 9,
+        },
+        {
+          label: "League Peers",
+          data: peerPts,
+          backgroundColor: isLight ? "rgba(2, 132, 199, 0.52)" : "rgba(56, 189, 248, 0.48)",
+          borderColor: isLight ? "#0284c7" : "#38bdf8",
+          borderWidth: 1,
+          pointRadius: 4.5,
+          pointHoverRadius: 6,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: tickCol, boxWidth: 10, font: { family: "'JetBrains Mono', monospace", size: 10, weight: "700" } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const p = ctx.raw;
+              return `${p.abbr} (${p.name}): ${p.x} wRC+ · ${Number(p.y).toFixed(2)} FIP · ${p.war} WAR`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          title: { display: true, text: "Offense wRC+ (Right = Elite Run Creation)", color: tickCol, font: { family: "'JetBrains Mono', monospace", size: 9.5, weight: "700" } },
+          grid: { color: gridCol },
+          ticks: { color: tickCol, font: { family: "'JetBrains Mono', monospace", size: 10 } },
+        },
+        y: {
+          reverse: true,
+          title: { display: true, text: "Staff FIP (Top = Elite Run Prevention)", color: tickCol, font: { family: "'JetBrains Mono', monospace", size: 9.5, weight: "700" } },
+          grid: { color: gridCol },
+          ticks: { color: tickCol, font: { family: "'JetBrains Mono', monospace", size: 10 }, callback: v => Number(v).toFixed(2) },
+        },
       },
     },
   });
@@ -1680,7 +1947,7 @@ function vancePctBadge(pct, customLabel) {
  * Stacked Bars: Guaranteed Payroll, Option Decisions, Arb/Pre-Arb Projections vs. Budget Ceiling
  * Dual-Axis Line: Projected Team WAR vs. 42.0 WAR (~90-Win Contender Benchmark)
  */
-function renderRoadmapHorizonChart(canvasId, payrollHorizon, yearlyProjs, budget) {
+function renderRoadmapHorizonChart(canvasId, payrollHorizon, yearlyProjs, budget, isLight = false) {
   destroyChart(canvasId);
   const ctx = document.getElementById(canvasId);
   if (!ctx || !payrollHorizon || !payrollHorizon.length) return;
@@ -1693,6 +1960,12 @@ function renderRoadmapHorizonChart(canvasId, payrollHorizon, yearlyProjs, budget
   const budgetM = payrollHorizon.map(() => Number(((budget || 150000000) / 1e6).toFixed(1)));
   const projWar = (yearlyProjs || []).map(yp => Number((yp.projected_team_war || 0).toFixed(1)));
   const contenderWar = payrollHorizon.map(() => 42.0);
+
+  const legCol = isLight ? "#1e293b" : "#cbd5e1";
+  const tickCol = isLight ? "#0f172a" : "#e2e8f0";
+  const mutedCol = isLight ? "#475569" : "#94a3b8";
+  const warCol = isLight ? "#be123c" : "#fca5a5";
+  const gridCol = isLight ? "rgba(15, 23, 42, 0.09)" : "rgba(148, 163, 184, 0.12)";
 
   window._chartInstances[canvasId] = new Chart(ctx, {
     type: "bar",
@@ -1716,7 +1989,7 @@ function renderRoadmapHorizonChart(canvasId, payrollHorizon, yearlyProjs, budget
           type: "line",
           label: "90W Contender Target (42 WAR)",
           data: contenderWar,
-          borderColor: "rgba(219, 219, 219, 0.45)",
+          borderColor: isLight ? "rgba(71, 85, 105, 0.65)" : "rgba(219, 219, 219, 0.45)",
           borderDash: [5, 4],
           borderWidth: 1.5,
           pointRadius: 0,
@@ -1728,7 +2001,7 @@ function renderRoadmapHorizonChart(canvasId, payrollHorizon, yearlyProjs, budget
           type: "line",
           label: "Franchise Budget Ceiling",
           data: budgetM,
-          borderColor: "rgba(56, 189, 248, 0.55)",
+          borderColor: isLight ? "rgba(2, 132, 199, 0.75)" : "rgba(56, 189, 248, 0.55)",
           borderDash: [3, 3],
           borderWidth: 1.5,
           pointRadius: 0,
@@ -1740,8 +2013,8 @@ function renderRoadmapHorizonChart(canvasId, payrollHorizon, yearlyProjs, budget
           type: "bar",
           label: "Guaranteed $",
           data: guarM,
-          backgroundColor: "rgba(100, 116, 139, 0.72)",
-          borderColor: "rgba(148, 163, 184, 0.85)",
+          backgroundColor: isLight ? "rgba(71, 85, 105, 0.75)" : "rgba(100, 116, 139, 0.72)",
+          borderColor: isLight ? "#475569" : "rgba(148, 163, 184, 0.85)",
           borderWidth: 1,
           stack: "payroll",
           yAxisID: "yPay",
@@ -1751,8 +2024,8 @@ function renderRoadmapHorizonChart(canvasId, payrollHorizon, yearlyProjs, budget
           type: "bar",
           label: "Option Years $",
           data: optM,
-          backgroundColor: "rgba(245, 158, 11, 0.68)",
-          borderColor: "rgba(251, 191, 36, 0.85)",
+          backgroundColor: "rgba(245, 158, 11, 0.72)",
+          borderColor: "#f59e0b",
           borderWidth: 1,
           stack: "payroll",
           yAxisID: "yPay",
@@ -1762,8 +2035,8 @@ function renderRoadmapHorizonChart(canvasId, payrollHorizon, yearlyProjs, budget
           type: "bar",
           label: "Arb / Pre-Arb Est $",
           data: arbM,
-          backgroundColor: "rgba(29, 78, 216, 0.62)",
-          borderColor: "rgba(56, 189, 248, 0.75)",
+          backgroundColor: "rgba(14, 165, 233, 0.65)",
+          borderColor: "#0284c7",
           borderWidth: 1,
           stack: "payroll",
           yAxisID: "yPay",
@@ -1773,8 +2046,8 @@ function renderRoadmapHorizonChart(canvasId, payrollHorizon, yearlyProjs, budget
           type: "bar",
           label: "Sandbox Moves $",
           data: sandboxM,
-          backgroundColor: "rgba(16, 185, 129, 0.75)",
-          borderColor: "#34d399",
+          backgroundColor: "rgba(16, 185, 129, 0.78)",
+          borderColor: "#10b981",
           borderWidth: 1,
           stack: "payroll",
           yAxisID: "yPay",
@@ -1789,35 +2062,124 @@ function renderRoadmapHorizonChart(canvasId, payrollHorizon, yearlyProjs, budget
       plugins: {
         legend: {
           position: "top",
-          labels: { color: "#cbd5e1", boxWidth: 10, padding: 10, font: { size: 10, family: "monospace", weight: "700" } },
+          labels: { color: legCol, boxWidth: 10, padding: 10, font: { size: 10, family: "'JetBrains Mono', monospace", weight: "700" } },
         },
       },
       scales: {
         x: {
           stacked: true,
-          grid: { color: "rgba(148, 163, 184, 0.1)" },
-          ticks: { color: "#e2e8f0", font: { size: 10, family: "monospace", weight: "700" } },
+          grid: { color: gridCol },
+          ticks: { color: tickCol, font: { size: 10, family: "'JetBrains Mono', monospace", weight: "700" } },
         },
         yPay: {
           stacked: true,
           position: "left",
           beginAtZero: true,
-          title: { display: true, text: "Payroll Allocation ($M)", color: "#94a3b8", font: { size: 10, family: "monospace" } },
-          grid: { color: "rgba(148, 163, 184, 0.12)" },
-          ticks: { color: "#94a3b8", font: { size: 10, family: "monospace" }, callback: v => `$${v}M` },
+          title: { display: true, text: "Payroll Allocation ($M)", color: mutedCol, font: { size: 10, family: "'JetBrains Mono', monospace" } },
+          grid: { color: gridCol },
+          ticks: { color: mutedCol, font: { size: 10, family: "'JetBrains Mono', monospace" }, callback: v => `$${v}M` },
         },
         yWar: {
           position: "right",
           suggestedMin: 20,
           suggestedMax: 58,
-          title: { display: true, text: "Projected WAR", color: "#fca5a5", font: { size: 10, family: "monospace" } },
+          title: { display: true, text: "Projected WAR", color: warCol, font: { size: 10, family: "'JetBrains Mono', monospace" } },
           grid: { drawOnChartArea: false },
-          ticks: { color: "#fca5a5", font: { size: 10, family: "monospace" }, callback: v => `${v}W` },
+          ticks: { color: warCol, font: { size: 10, family: "'JetBrains Mono', monospace" }, callback: v => `${v}W` },
         },
       },
     },
   });
 }
+
+/**
+ * Renders Baseball Savant-style Stadium Wall Contour SVG comparing Active Ballpark vs. League Average Fence
+ */
+function renderBallparkContourComparisonSVG(parkProfile, teamAbbr = "CLUB", isLight = false) {
+  const pk = parkProfile || {};
+  const dTeam = Array.isArray(pk.distances) && pk.distances.length >= 7 ? pk.distances : [330, 368, 386, 405, 386, 368, 330];
+  const dLg = Array.isArray(pk.league_avg_distances) && pk.league_avg_distances.length >= 7 ? pk.league_avg_distances : [331, 368, 387, 404, 387, 368, 331];
+  const walls = Array.isArray(pk.wall_heights) && pk.wall_heights.length >= 7 ? pk.wall_heights : [8, 8, 8, 8, 8, 8, 8];
+  const fac = pk.factors || { overall: 100, hr: 100, hr_lhb: 100, hr_rhb: 100, doubles: 100, triples: 100 };
+
+  // Polar-to-SVG projection centered at Home Plate (260, 310), angles from -45 deg (LF Line) to +45 deg (RF Line)
+  const hx = 260;
+  const hy = 308;
+  const scale = 0.62;
+  const anglesDeg = [-45, -30, -15, 0, 15, 30, 45];
+  const zoneLabels = ["LF", "LFA", "LCF", "CF", "RCF", "RFA", "RF"];
+
+  const toPt = (distFt, deg) => {
+    const rad = (deg * Math.PI) / 180;
+    return {
+      x: Number((hx + distFt * scale * Math.sin(rad)).toFixed(1)),
+      y: Number((hy - distFt * scale * Math.cos(rad)).toFixed(1)),
+    };
+  };
+
+  const teamPts = dTeam.map((d, i) => toPt(d, anglesDeg[i]));
+  const lgPts = dLg.map((d, i) => toPt(d, anglesDeg[i]));
+
+  const polyPath = pts => `M ${hx} ${hy} L ${pts.map(p => `${p.x} ${p.y}`).join(" L ")} Z`;
+  const fencePath = pts => `M ${pts.map(p => `${p.x} ${p.y}`).join(" L ")}`;
+
+  const bgFill = isLight ? "#0f172a" : "#070b11";
+  return `
+    <svg viewBox="0 0 520 340" class="w-full h-[275px] rounded-xl border border-white/10" style="background:${bgFill}">
+      <defs>
+        <radialGradient id="savantParkGrad" cx="50%" cy="90%" r="85%">
+          <stop offset="0%" stop-color="#15803d" stop-opacity="0.48"/>
+          <stop offset="65%" stop-color="#064e3b" stop-opacity="0.24"/>
+          <stop offset="100%" stop-color="#030712" stop-opacity="0.95"/>
+        </radialGradient>
+      </defs>
+      <rect width="520" height="340" fill="url(#savantParkGrad)" />
+
+      <!-- League Average Outfield Contour (Dashed Reference) -->
+      <path d="${polyPath(lgPts)}" fill="rgba(148, 163, 184, 0.08)" stroke="rgba(148, 163, 184, 0.65)" stroke-width="1.6" stroke-dasharray="5 4" />
+
+      <!-- Active Club Outfield Wall Contour -->
+      <path d="${polyPath(teamPts)}" fill="rgba(245, 158, 11, 0.14)" stroke="none" />
+      <path d="${fencePath(teamPts)}" fill="none" stroke="#f59e0b" stroke-width="3" />
+
+      <!-- Foul Lines & Infield Diamond -->
+      <line x1="${hx}" y1="${hy}" x2="${teamPts[0].x}" y2="${teamPts[0].y}" stroke="rgba(255,255,255,0.45)" stroke-width="1.4" />
+      <line x1="${hx}" y1="${hy}" x2="${teamPts[6].x}" y2="${teamPts[6].y}" stroke="rgba(255,255,255,0.45)" stroke-width="1.4" />
+      <polygon points="${hx},${hy} ${hx + 38},${hy - 38} ${hx},${hy - 76} ${hx - 38},${hy - 38}" fill="rgba(146, 64, 14, 0.5)" stroke="rgba(255,255,255,0.55)" stroke-width="1.3" />
+
+      <!-- 7 Fence Nodes + Distance & Wall Height Callouts -->
+      ${teamPts.map((pt, i) => {
+        const diff = dTeam[i] - dLg[i];
+        const col = diff <= -6 ? "#f87171" : (diff >= 6 ? "#38bdf8" : "#fde68a");
+        const dy = i === 3 ? -14 : (i < 3 ? -10 : -10);
+        return `
+          <g>
+            <circle cx="${pt.x}" cy="${pt.y}" r="4" fill="${col}" stroke="#090d14" stroke-width="1.2" />
+            <text x="${pt.x}" y="${pt.y + dy}" text-anchor="middle" fill="${col}" font-family="'JetBrains Mono', monospace" font-size="10" font-weight="800">
+              ${dTeam[i]}' (${walls[i]}'w)
+            </text>
+            <text x="${pt.x}" y="${pt.y + dy + 10}" text-anchor="middle" fill="#94a3b8" font-family="'JetBrains Mono', monospace" font-size="8.5">
+              ${zoneLabels[i]} ${diff >= 0 ? "+" : ""}${diff}'
+            </text>
+          </g>
+        `;
+      }).join("")}
+
+      <!-- Directional HR Park Factor Overlay Pills -->
+      <g font-family="'JetBrains Mono', monospace" font-size="10" font-weight="800">
+        <rect x="14" y="12" width="142" height="22" rx="4" fill="rgba(15,23,42,0.88)" stroke="rgba(255,255,255,0.18)" />
+        <text x="85" y="26.5" text-anchor="middle" fill="${fac.hr_rhb >= 104 ? '#fca5a5' : '#93c5fd'}">RHB Pull HR PF: ${fac.hr_rhb}</text>
+
+        <rect x="364" y="12" width="142" height="22" rx="4" fill="rgba(15,23,42,0.88)" stroke="rgba(255,255,255,0.18)" />
+        <text x="435" y="26.5" text-anchor="middle" fill="${fac.hr_lhb >= 104 ? '#fca5a5' : '#93c5fd'}">LHB Pull HR PF: ${fac.hr_lhb}</text>
+
+        <rect x="155" y="314" width="210" height="20" rx="4" fill="rgba(15,23,42,0.88)" stroke="rgba(245,158,11,0.4)" />
+        <text x="260" y="327.5" text-anchor="middle" fill="#fbbf24" font-size="9.5">━ ${teamAbbr} Wall   ╌ Lg Avg Fence</text>
+      </g>
+    </svg>
+  `;
+}
+
 
 
 
