@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="swPlat" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F8FAFC"/>
+      <stop offset="50%" stop-color="#CBD5E1"/>
+      <stop offset="100%" stop-color="#94A3B8"/>
+    </linearGradient>
+    <clipPath id="swClip">
+      <path d="M14 13 H50 V36 L32 52 L14 36 Z"/>
+    </clipPath>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#070D1F" stroke="#94A3B8" stroke-opacity="0.45" stroke-width="1.75"/>
+  <path d="M10 9 H54 V38 L32 56 L10 38 Z" fill="url(#swPlat)"/>
+  <path d="M12.8 11.8 H51.2 V36.8 L32 52.8 L12.8 36.8 Z" fill="#070D1F"/>
+  <g clip-path="url(#swClip)">
+    <rect x="13" y="12" width="19" height="42" fill="#1D4ED8"/>
+    <rect x="32" y="12" width="19" height="42" fill="#E11D48"/>
+    <path d="M32 21 L43 32 L32 43 L21 32 Z" stroke="#FFFFFF" stroke-opacity="0.35" stroke-width="2" fill="none"/>
+  </g>
+  <!-- Crisp Verified Checkmark + Broadcast Spark -->
+  <path d="M23.5 32.5 L29.5 38.5 L41.5 25.5" stroke="#22D3EE" stroke-width="5.2" stroke-opacity="0.45" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M23.5 32.5 L29.5 38.5 L41.5 25.5" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

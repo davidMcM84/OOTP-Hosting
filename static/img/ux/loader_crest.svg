@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
+  <defs>
+    <linearGradient id="ldSilver" x1="20" y1="18" x2="76" y2="78" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F8FAFC"/>
+      <stop offset="50%" stop-color="#CBD5E1"/>
+      <stop offset="100%" stop-color="#64748B"/>
+    </linearGradient>
+    <clipPath id="ldShield">
+      <path d="M30 27 H66 V51.5 L48 68 L30 51.5 Z"/>
+    </clipPath>
+  </defs>
+  <!-- Outer Telemetry Orbit Track -->
+  <circle cx="48" cy="48" r="42" stroke="#1E293B" stroke-width="2.5"/>
+  <!-- Rotating Royal & Crimson Broadcast Sweep Arcs -->
+  <g>
+    <path d="M48 6 A42 42 0 0 1 90 48" stroke="#1D4ED8" stroke-width="3.2" stroke-linecap="round"/>
+    <path d="M48 90 A42 42 0 0 1 6 48" stroke="#E11D48" stroke-width="3.2" stroke-linecap="round"/>
+    <animateTransform attributeName="transform" type="rotate" from="0 48 48" to="360 48 48" dur="2.2s" repeatCount="indefinite"/>
+  </g>
+  <g>
+    <circle cx="48" cy="48" r="36" stroke="#22D3EE" stroke-opacity="0.32" stroke-width="1.5" stroke-dasharray="6 8"/>
+    <animateTransform attributeName="transform" type="rotate" from="360 48 48" to="0 48 48" dur="4s" repeatCount="indefinite"/>
+  </g>
+  <!-- Set 2 Platinum Home-Plate Shield -->
+  <path d="M25 22 H71 V53.5 L48 74 L25 53.5 Z" fill="url(#ldSilver)"/>
+  <path d="M28 25 H68 V52.2 L48 70.2 L28 52.2 Z" fill="#070D1F"/>
+  <g clip-path="url(#ldShield)">
+    <rect x="29" y="26" width="19" height="44" fill="#1D4ED8"/>
+    <rect x="48" y="26" width="19" height="44" fill="#E11D48"/>
+    <path d="M33 48 A15 15 0 0 1 63 48 L57 48 L48 39 L39 48 Z" fill="#FFFFFF"/>
+    <path d="M48 38 L58.5 48.5 L48 59 L37.5 48.5 Z" stroke="#FFFFFF" stroke-width="2.5" fill="none"/>
+    <circle cx="48" cy="59" r="3.2" fill="#FFFFFF"/>
+  </g>
+  <!-- Pulsing Cyan-White + Nexus -->
+  <g>
+    <path d="M48 43 V54 M42.5 48.5 H53.5" stroke="#22D3EE" stroke-width="5" stroke-linecap="square" stroke-opacity="0.65"/>
+    <path d="M48 43 V54 M42.5 48.5 H53.5" stroke="#FFFFFF" stroke-width="3" stroke-linecap="square"/>
+    <animate attributeName="opacity" values="1;0.45;1" dur="1.4s" repeatCount="indefinite"/>
+  </g>
+</svg>

@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 150" fill="none">
+  <defs>
+    <linearGradient id="esPlat" x1="80" y1="18" x2="180" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F8FAFC"/>
+      <stop offset="50%" stop-color="#CBD5E1"/>
+      <stop offset="100%" stop-color="#64748B"/>
+    </linearGradient>
+    <clipPath id="esShield">
+      <path d="M104 33 H156 V69 L130 92 L104 69 Z"/>
+    </clipPath>
+  </defs>
+  <!-- Telemetry Radar Rings -->
+  <circle cx="130" cy="74" r="64" stroke="#1E293B" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <circle cx="130" cy="74" r="48" stroke="#334155" stroke-opacity="0.7" stroke-width="1.2"/>
+  <line x1="54" y1="74" x2="206" y2="74" stroke="#1E293B" stroke-width="1"/>
+  <line x1="130" y1="10" x2="130" y2="138" stroke="#1E293B" stroke-width="1"/>
+  <!-- Left & Right Savant Percentile Preview Sliders -->
+  <rect x="26" y="48" width="44" height="6" rx="3" fill="#1E293B"/>
+  <rect x="26" y="48" width="36" height="6" rx="3" fill="#E11D48"/>
+  <rect x="26" y="62" width="44" height="6" rx="3" fill="#1E293B"/>
+  <rect x="26" y="62" width="29" height="6" rx="3" fill="#38BDF8"/>
+  <rect x="26" y="76" width="44" height="6" rx="3" fill="#1E293B"/>
+  <rect x="26" y="76" width="40" height="6" rx="3" fill="#E11D48"/>
+
+  <rect x="190" y="48" width="44" height="6" rx="3" fill="#1E293B"/>
+  <rect x="190" y="48" width="33" height="6" rx="3" fill="#1D4ED8"/>
+  <rect x="190" y="62" width="44" height="6" rx="3" fill="#1E293B"/>
+  <rect x="190" y="62" width="38" height="6" rx="3" fill="#E11D48"/>
+  <rect x="190" y="76" width="44" height="6" rx="3" fill="#1E293B"/>
+  <rect x="190" y="76" width="26" height="6" rx="3" fill="#22D3EE"/>
+
+  <!-- Central Set 2 Broadcast Shield -->
+  <path d="M99 28 H161 V71.5 L130 99 L99 71.5 Z" fill="url(#esPlat)"/>
+  <path d="M102.5 31.5 H157.5 V70 L130 94.5 L102.5 70 Z" fill="#070D1F"/>
+  <g clip-path="url(#esShield)">
+    <rect x="103" y="32" width="27" height="62" fill="#1D4ED8"/>
+    <rect x="130" y="32" width="27" height="62" fill="#E11D48"/>
+    <path d="M110 64 A20 20 0 0 1 150 64 L142 64 L130 52 L118 64 Z" fill="#FFFFFF"/>
+    <path d="M130 50 L144.5 64.5 L130 79 L115.5 64.5 Z" stroke="#FFFFFF" stroke-width="3" fill="none"/>
+  </g>
+  <path d="M130 57.5 V71.5 M123 64.5 H137" stroke="#22D3EE" stroke-width="5.5" stroke-opacity="0.55" stroke-linecap="square"/>
+  <path d="M130 57.5 V71.5 M123 64.5 H137" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="square"/>
+</svg>

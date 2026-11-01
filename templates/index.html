@@ -4,7 +4,26 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OOTP+ — Sabermetrics, Statcast & League Hosting</title>
-  <link rel="icon" type="image/svg+xml" href="/static/img/ootp_plus_icon.svg" />
+
+  <!-- Set 2 Broadcast Network Favicon, PWA & Social Metadata Suite -->
+  <meta name="theme-color" content="#070D1F" />
+  <meta name="application-name" content="OOTP+" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="OOTP+" />
+  <meta name="msapplication-TileColor" content="#070D1F" />
+  <meta name="msapplication-config" content="/static/favicons/browserconfig.xml" />
+  <meta property="og:title" content="OOTP+ — Sabermetrics, Statcast & League Hosting" />
+  <meta property="og:description" content="Broadcast-Grade Sabermetrics, 3D Statcast, Front-Office Intelligence & Local League Hosting for Out of the Park Baseball." />
+  <meta property="og:image" content="/static/favicons/og-social-card.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" type="image/svg+xml" href="/static/favicons/favicon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicons/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/favicons/favicon-16x16.png" />
+  <link rel="shortcut icon" href="/static/favicons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/favicons/apple-touch-icon.png" />
+  <link rel="mask-icon" href="/static/favicons/safari-pinned-tab.svg" color="#E11D48" />
+  <link rel="manifest" href="/static/favicons/site.webmanifest" />
 
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -80,16 +99,19 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 
   <!-- Custom Broadcast CSS -->
-  <link rel="stylesheet" href="/static/css/app.css?v=20261101tab04v1" />
+  <link rel="stylesheet" href="/static/css/app.css?v=20261101set2v1" />
 </head>
 <body class="antialiased selection:bg-slate-200 selection:text-slate-950">
 
   <!-- Global Loading Overlay -->
   <div id="global-loader" class="hidden fixed inset-0 z-[9999] bg-slate-950/85 backdrop-blur-md flex items-center justify-center">
-    <div class="glass-card p-6 text-center max-w-sm border border-slate-600 shadow-2xl">
-      <div class="spinner-border text-light mb-3" role="status"></div>
-      <div id="global-loader-text" class="text-sm font-bold text-white tracking-wide">Loading OOTP 27 SQLite Analytics...</div>
-      <div class="text-[11px] text-slate-400 mt-1">Querying local SQLite database on port 8080</div>
+    <div class="glass-card overflow-hidden text-center max-w-sm border border-slate-600 shadow-2xl">
+      <div class="bn-accent-ribbon"></div>
+      <div class="p-6">
+        <img src="/static/img/ux/loader_crest.svg" alt="Loading OOTP+" class="w-16 h-16 mx-auto mb-3 select-none" />
+        <div id="global-loader-text" class="text-sm font-bold text-white tracking-wide">Loading OOTP 27 SQLite Analytics...</div>
+        <div class="text-[11px] text-slate-400 mt-1">Querying local SQLite WAL engine on port 8080</div>
+      </div>
     </div>
   </div>
 
@@ -98,10 +120,10 @@
     <div class="w-full max-w-none mx-auto px-4 lg:px-6 uw:px-8 py-2 flex flex-wrap items-center justify-between gap-2.5">
       <!-- Brand Identity -->
       <div class="flex items-center gap-3">
-        <img src="/static/img/ootp_plus_icon.svg" alt="OOTP+ Logo" class="w-9 h-9 rounded-xl shadow-lg border border-cyan-400/40 shrink-0" />
+        <img src="/static/img/ootp_plus_icon.svg" alt="OOTP+ Logo" class="w-9 h-9 rounded-xl shadow-lg border border-slate-300/45 shrink-0" />
         <div>
           <div class="flex items-center gap-2">
-            <h1 class="text-base sm:text-lg font-black tracking-tight text-white mb-0">OOTP<span style="color:#22D3EE;">+</span></h1>
+            <h1 class="text-base sm:text-lg font-black tracking-tight text-white mb-0">OOTP<span style="color:#E11D48;">+</span></h1>
             <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-slate-800 text-white border border-slate-600 font-mono">SABERMETRICS • STATCAST • LEAGUE HOSTING</span>
           </div>
           <p class="text-[10.5px] text-slate-400 mb-0 hidden sm:block">Multi-League & Year Browser • Spray Charts • Franchise Hub • Evolution Workshop • BNN & Almanac Portal</p>
@@ -226,8 +248,9 @@
     <main id="main-view-container" class="flex-1 min-w-0 w-full"></main>
 
     <!-- Persistent Ultrawide Player Scouting & Statcast Side Dock -->
-    <aside id="ultrawide-side-dock" class="hidden w-full xl:w-[460px] uw:w-[540px] suw:w-[640px] shrink-0 xl:sticky xl:top-[104px] xl:max-h-[calc(100vh-118px)] overflow-y-auto glass-card border border-sky-500/40 shadow-2xl">
-      <div class="px-4 py-2.5 bg-slate-950 border-b border-slate-800 flex justify-between items-center sticky top-0 z-20">
+    <aside id="ultrawide-side-dock" class="hidden w-full xl:w-[460px] uw:w-[540px] suw:w-[640px] shrink-0 xl:sticky xl:top-[104px] xl:max-h-[calc(100vh-118px)] overflow-y-auto glass-card border border-slate-400/40 shadow-2xl">
+      <div class="bn-accent-ribbon sticky top-0 z-30"></div>
+      <div class="px-4 py-2.5 bg-slate-950 border-b border-slate-800 flex justify-between items-center sticky top-[3px] z-20">
         <div class="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-sky-400">
           <i class="bi bi-layout-sidebar-inset-reverse"></i> Ultrawide Live Player Scout Dock
         </div>
@@ -240,16 +263,24 @@
           </button>
         </div>
       </div>
-      <div id="ultrawide-side-dock-body" class="p-4"></div>
+      <div id="ultrawide-side-dock-body" class="p-4">
+        <div class="py-8 px-4 text-center space-y-3">
+          <img src="/static/img/ux/empty_scout_dock.svg" alt="Scout Dock Ready" class="w-44 mx-auto select-none" />
+          <div class="text-xs font-extrabold uppercase tracking-wider text-white">Live Player Scout Dock Ready</div>
+          <p class="text-xs text-slate-400 mb-0">Click any player row across OOTP+ or search in <span class="font-mono text-slate-200">Quick-Scout Player...</span> to pin their Baseball Savant percentiles, 20–80 ratings, and Statcast spray chart here.</p>
+        </div>
+      </div>
     </aside>
   </div>
 
   <!-- Player Deep-Dive Dossier Modal (Expanded for Ultrawide 3-Column Layout) -->
   <div id="player-dossier-modal" class="hidden fixed inset-0 z-[9990] bg-slate-950/85 backdrop-blur-md overflow-y-auto p-3 md:p-6 uw:p-8">
-    <div class="w-full max-w-[96vw] uw:max-w-[2400px] mx-auto glass-card border border-sky-500/40 shadow-2xl overflow-hidden">
+    <div class="w-full max-w-[96vw] uw:max-w-[2400px] mx-auto glass-card border border-slate-400/40 shadow-2xl overflow-hidden">
+      <div class="bn-accent-ribbon"></div>
       <div class="px-5 py-3 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
         <div class="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-sky-400">
-          <i class="bi bi-person-badge-fill"></i> OOTP+ Player Analytical Dossier — Baseball Savant + FanGraphs + Scouting Card
+          <img src="/static/favicons/favicon.svg" alt="" class="w-5 h-5 rounded-md shrink-0" />
+          <span>OOTP+ Player Analytical Dossier — Baseball Savant + FanGraphs + Scouting Card</span>
         </div>
         <div class="flex items-center gap-2">
           <button onclick="pinCurrentModalPlayerToDock()" class="px-3 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-400/50 text-xs font-bold transition flex items-center gap-1.5" title="Pin this player to the right-hand Ultrawide Side Dock so you can keep browsing tables">
@@ -267,6 +298,7 @@
   <!-- Online League Import & Save Configuration Modal -->
   <div id="online-league-modal" class="hidden fixed inset-0 z-[9990] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
     <div class="max-w-lg w-full glass-card border border-emerald-500/40 shadow-2xl overflow-hidden">
+      <div class="bn-accent-ribbon"></div>
       <div class="px-5 py-3.5 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
         <h3 class="text-sm font-extrabold uppercase tracking-wider text-emerald-400 mb-0">
           <i class="bi bi-cloud-upload-fill mr-1.5"></i> OOTP+ Online League & CSV Import Center
@@ -297,12 +329,11 @@
 
   <!-- Setup & Functionality Verification Wizard Modal -->
   <div id="setup-wizard-modal" class="hidden fixed inset-0 z-[9992] bg-slate-950/90 backdrop-blur-md overflow-y-auto p-3 md:p-6 uw:p-8">
-    <div class="w-full max-w-5xl mx-auto glass-card border border-amber-400/40 shadow-2xl overflow-hidden">
+    <div class="w-full max-w-5xl mx-auto glass-card border border-slate-400/45 shadow-2xl overflow-hidden">
+      <div class="bn-accent-ribbon"></div>
       <div class="px-5 py-3.5 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
         <div class="flex items-center gap-2.5">
-          <div class="w-8 h-8 rounded-lg bg-amber-400 text-slate-950 flex items-center justify-center font-black">
-            <i class="bi bi-magic"></i>
-          </div>
+          <img src="/static/img/ux/setup_wizard_crest.svg" alt="Setup Wizard" class="w-9 h-9 rounded-xl shadow-md shrink-0" />
           <div>
             <h3 class="text-sm font-black uppercase tracking-wider text-white mb-0">
               OOTP+ — Setup & Functionality Verification Wizard
@@ -320,7 +351,7 @@
 
   <!-- Bootstrap JS Bundle + App Controllers -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="/static/js/charts.js?v=20261101tab04v1"></script>
-  <script src="/static/js/app.js?v=20261101tab04v1"></script>
+  <script src="/static/js/charts.js?v=20261101set2v1"></script>
+  <script src="/static/js/app.js?v=20261101set2v1"></script>
 </body>
 </html>

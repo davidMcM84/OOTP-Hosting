@@ -18,6 +18,33 @@
   --accent-purple: #a855f7;
   --team-primary: #1f1f20;
   --team-accent: #dbdbdb;
+
+  /* Set 2 Broadcast Network Brand Tokens */
+  --bn-navy: #070d1f;
+  --bn-royal: #1d4ed8;
+  --bn-crimson: #e11d48;
+  --bn-platinum: #cbd5e1;
+  --bn-nexus: #22d3ee;
+}
+
+.bn-accent-ribbon {
+  height: 3px;
+  width: 100%;
+  background: linear-gradient(90deg, var(--bn-royal) 0%, var(--bn-royal) 49.5%, var(--bn-platinum) 50%, var(--bn-crimson) 50.5%, var(--bn-crimson) 100%);
+}
+
+.bn-trust-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 9999px;
+  background: rgba(7, 13, 31, 0.9);
+  border: 1px solid rgba(203, 213, 225, 0.35);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--bn-platinum);
 }
 
 body {
@@ -1054,10 +1081,681 @@ select option {
   }
 }
 
+/* ============================================================================
+ * TAB 06: LEAGUE LEADERS HUB — PODIUMS, SAVANT SLIDERS, BROADSHEET & 4-COL GRID
+ * ============================================================================ */
+
+/* ============================================================================
+ * TAB 05: TEAM FRANCHISE HUB — BNN.COM WAR ROOM & 4-ARCHETYPE SYSTEM
+ * ============================================================================ */
+
+/* Adaptive 16:9 3-Col vs 21:9 Ultrawide 4-Col Unstacked Cockpit Grid */
+.bnn-teamhub-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 0.9rem;
+  align-items: start;
+}
+.bnn-th-col-left { grid-column: span 3 / span 3; }
+.bnn-th-col-center { grid-column: span 6 / span 6; }
+.bnn-th-col-right { grid-column: span 3 / span 3; }
+.bnn-th-col-uw { display: none; }
+.bnn-th-hide-on-uw { display: block; }
+
+.bnn-vp-ultrawide .bnn-teamhub-grid {
+  grid-template-columns: 18fr 43fr 20fr 19fr !important;
+  gap: 0.85rem !important;
+}
+.bnn-vp-ultrawide .bnn-th-col-left,
+.bnn-vp-ultrawide .bnn-th-col-center,
+.bnn-vp-ultrawide .bnn-th-col-right {
+  grid-column: auto !important;
+}
+.bnn-vp-ultrawide .bnn-th-col-uw {
+  display: flex !important;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.bnn-vp-ultrawide .bnn-th-hide-on-uw {
+  display: none !important;
+}
+
+@media (min-width: 2150px) {
+  .bnn-vp-auto .bnn-teamhub-grid {
+    grid-template-columns: 18fr 43fr 20fr 19fr !important;
+    gap: 0.85rem !important;
+  }
+  .bnn-vp-auto .bnn-th-col-left,
+  .bnn-vp-auto .bnn-th-col-center,
+  .bnn-vp-auto .bnn-th-col-right {
+    grid-column: auto !important;
+  }
+  .bnn-vp-auto .bnn-th-col-uw {
+    display: flex !important;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+  .bnn-vp-auto .bnn-th-hide-on-uw {
+    display: none !important;
+  }
+}
+
+@media (max-width: 1120px) {
+  .bnn-teamhub-grid,
+  .bnn-vp-ultrawide .bnn-teamhub-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .bnn-th-col-left,
+  .bnn-th-col-center,
+  .bnn-th-col-right {
+    grid-column: span 1 / span 1 !important;
+  }
+}
+
+/* Franchise Identity Bar with Dynamic --team-primary Accent */
+.bnn-th-identity-bar {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.875rem;
+  background:
+    radial-gradient(circle at 0% 50%, color-mix(in srgb, var(--team-primary, #1e3a8a) 38%, transparent) 0%, transparent 52%),
+    linear-gradient(135deg, #131822 0%, #0F141D 100%);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+}
+
+.bnn-portal-light .bnn-th-identity-bar {
+  background:
+    radial-gradient(circle at 0% 50%, color-mix(in srgb, var(--team-primary, #1e3a8a) 16%, transparent) 0%, transparent 50%),
+    linear-gradient(135deg, #FFFFFF 0%, #F8FAFC 100%);
+  border: 1px solid #CBD5E1;
+  box-shadow: 0 3px 12px rgba(15, 23, 42, 0.06);
+}
+
+/* Broadcast Stadium-Turf Graphical Field Depth Diamond */
+.bnn-diamond-stage {
+  position: relative;
+  width: 100%;
+  height: 640px;
+  border-radius: 0.875rem;
+  overflow: hidden;
+  user-select: none;
+  background: radial-gradient(circle at 50% 82%, #0c2e1c 0%, #071912 58%, #070b11 100%);
+  border: 1px solid rgba(56, 189, 248, 0.24);
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.55);
+}
+
+.bnn-portal-light .bnn-diamond-stage {
+  background: radial-gradient(circle at 50% 82%, #14532d 0%, #0f3d23 62%, #0f172a 100%);
+  border: 1px solid #94A3B8;
+}
+
+.bnn-diamond-node {
+  position: absolute;
+  z-index: 20;
+  width: 146px;
+  border-radius: 0.65rem;
+  padding: 6px 7px;
+  background: rgba(11, 15, 23, 0.93);
+  backdrop-filter: blur(8px);
+  border: 1.5px solid rgba(148, 163, 184, 0.45);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+  transition: transform 0.14s ease, box-shadow 0.14s ease, border-color 0.14s ease;
+  color: #F8FAFC;
+}
+
+.bnn-diamond-node:hover {
+  transform: translate(-50%, -50%) scale(1.045) !important;
+  z-index: 30;
+}
+
+.bnn-diamond-node.is-selected {
+  box-shadow: 0 0 0 2px #38BDF8, 0 10px 26px rgba(14, 165, 233, 0.38);
+  z-index: 28;
+}
+
+/* RosterResource / FanGraphs 15x5 Contract Control Matrix Cells */
+.bnn-rr-cell {
+  border-radius: 0.5rem;
+  padding: 5px 7px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+.bnn-rr-cell:hover {
+  border-color: rgba(56, 189, 248, 0.65);
+}
+.bnn-rr-signed { background: rgba(51, 65, 85, 0.45); border-color: rgba(148, 163, 184, 0.35); }
+.bnn-rr-extended { background: rgba(16, 185, 129, 0.18); border-color: rgba(52, 211, 153, 0.55); }
+.bnn-rr-option { background: rgba(245, 158, 11, 0.16); border-color: rgba(251, 191, 36, 0.52); }
+.bnn-rr-arb { background: rgba(14, 165, 233, 0.16); border-color: rgba(56, 189, 248, 0.48); }
+.bnn-rr-prearb { background: rgba(16, 185, 129, 0.13); border-color: rgba(16, 185, 129, 0.42); }
+.bnn-rr-pipeline { background: rgba(139, 92, 246, 0.17); border-color: rgba(167, 139, 250, 0.52); }
+.bnn-rr-vacant { background: rgba(244, 63, 94, 0.14); border-color: rgba(251, 113, 133, 0.5); border-style: dashed; }
+
+.bnn-portal-light .bnn-rr-signed { background: #F1F5F9; border-color: #CBD5E1; }
+.bnn-portal-light .bnn-rr-extended { background: #D1FAE5; border-color: #34D399; }
+.bnn-portal-light .bnn-rr-option { background: #FEF3C7; border-color: #F59E0B; }
+.bnn-portal-light .bnn-rr-arb { background: #E0F2FE; border-color: #38BDF8; }
+.bnn-portal-light .bnn-rr-prearb { background: #ECFDF5; border-color: #6EE7B7; }
+.bnn-portal-light .bnn-rr-pipeline { background: #EDE9FE; border-color: #A78BFA; }
+.bnn-portal-light .bnn-rr-vacant { background: #FFE4E6; border-color: #FB7185; border-style: dashed; }
 
 
+/* Adaptive 16:9 UHD 3-Column (1580px) vs. 21:9 Ultrawide 4-Column Cockpit */
+.bnn-leaders-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+.bnn-leaders-col-left { grid-column: span 3 / span 3; }
+.bnn-leaders-col-center { grid-column: span 6 / span 6; }
+.bnn-leaders-col-right { grid-column: span 3 / span 3; }
+.bnn-leaders-col-uw { display: none; }
 
+.bnn-vp-ultrawide .bnn-leaders-grid {
+  grid-template-columns: 18fr 44fr 20fr 18fr !important;
+  gap: 0.875rem !important;
+}
+.bnn-vp-ultrawide .bnn-leaders-col-left,
+.bnn-vp-ultrawide .bnn-leaders-col-center,
+.bnn-vp-ultrawide .bnn-leaders-col-right {
+  grid-column: auto !important;
+}
+.bnn-vp-ultrawide .bnn-leaders-col-uw {
+  display: flex !important;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+.bnn-vp-ultrawide .bnn-leaders-std-only {
+  display: none !important;
+}
 
+@media (min-width: 2150px) {
+  .bnn-vp-auto .bnn-leaders-grid {
+    grid-template-columns: 18fr 44fr 20fr 18fr !important;
+    gap: 0.875rem !important;
+  }
+  .bnn-vp-auto .bnn-leaders-col-left,
+  .bnn-vp-auto .bnn-leaders-col-center,
+  .bnn-vp-auto .bnn-leaders-col-right {
+    grid-column: auto !important;
+  }
+  .bnn-vp-auto .bnn-leaders-col-uw {
+    display: flex !important;
+    flex-direction: column;
+    gap: 0.875rem;
+  }
+  .bnn-vp-auto .bnn-leaders-std-only {
+    display: none !important;
+  }
+}
+
+/* ============================================================================
+ * TAB 07: RECORDS BOOK — LIVING RECORD BOOK, BROADCAST VISUAL SUITE & 21:9 4-COL
+ * ============================================================================ */
+.records-visual-canvas {
+  background:
+    radial-gradient(circle at 22% 0%, rgba(56, 189, 248, 0.13) 0%, transparent 56%),
+    radial-gradient(circle at 82% 0%, rgba(245, 158, 11, 0.10) 0%, transparent 52%),
+    linear-gradient(180deg, #0D131F 0%, #090D15 100%);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.bnn-portal-light .records-visual-canvas {
+  background:
+    radial-gradient(circle at 22% 0%, rgba(2, 132, 199, 0.08) 0%, transparent 56%),
+    radial-gradient(circle at 82% 0%, rgba(217, 119, 6, 0.07) 0%, transparent 52%),
+    linear-gradient(180deg, #FFFFFF 0%, #F1F5F9 100%);
+  border: 1px solid #CBD5E1;
+}
+
+.bnn-portal-light .records-svg-text {
+  fill: #0F172A !important;
+}
+
+.bnn-portal-light .records-svg-muted {
+  fill: #475569 !important;
+}
+
+.bnn-portal-light .records-svg-grid {
+  stroke: #CBD5E1 !important;
+}
+
+.records-hof-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #FDE047 0%, #F59E0B 100%);
+  color: #090D14;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  line-height: 1.25;
+  box-shadow: 0 1px 3px rgba(245, 158, 11, 0.35);
+}
+
+.records-active-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: rgba(16, 185, 129, 0.16);
+  color: #34D399;
+  border: 1px solid rgba(16, 185, 129, 0.42);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  line-height: 1.25;
+}
+
+.bnn-portal-light .records-active-pill {
+  background: #D1FAE5;
+  color: #047857;
+  border-color: #6EE7B7;
+}
+
+.records-pulse-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background-color: #10B981;
+  box-shadow: 0 0 6px #10B981;
+}
+
+.records-cat-row {
+  border-left: 3px solid transparent;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.records-cat-row:hover {
+  background-color: var(--bnn-hover);
+}
+
+.records-cat-selected {
+  border-left-color: #38BDF8 !important;
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.15) 0%, transparent 92%);
+}
+
+.bnn-portal-light .records-cat-selected {
+  border-left-color: #0284C7 !important;
+  background: linear-gradient(90deg, rgba(2, 132, 199, 0.11) 0%, transparent 92%);
+}
+
+/* Cooperstown Bronze/Gold Plaque Card & 9-Inning Line Score Table */
+.records-plaque-card {
+  background: linear-gradient(155deg, rgba(217, 119, 6, 0.20) 0%, rgba(19, 24, 34, 0.97) 56%);
+  border: 1px solid rgba(245, 158, 11, 0.48);
+  box-shadow: 0 10px 24px -6px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(253, 224, 71, 0.18);
+}
+
+.bnn-portal-light .records-plaque-card {
+  background: linear-gradient(155deg, #FEF3C7 0%, #FFFFFF 58%);
+  border: 1px solid #F59E0B;
+  box-shadow: 0 6px 16px -4px rgba(180, 83, 9, 0.12);
+}
+
+.records-linescore-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.records-linescore-table th,
+.records-linescore-table td {
+  padding: 3px 5px;
+  text-align: center;
+  border: 1px solid var(--bnn-border);
+}
+
+.records-linescore-table th {
+  background-color: var(--bnn-subcard);
+  color: var(--bnn-muted);
+  font-weight: 800;
+  font-size: 9.5px;
+}
+
+.records-linescore-table td.team-cell,
+.records-linescore-table th.team-cell {
+  text-align: left;
+  padding-left: 7px;
+  padding-right: 7px;
+  font-weight: 900;
+}
+
+.records-linescore-table td.rhe-r {
+  font-weight: 900;
+  background: rgba(245, 158, 11, 0.13);
+  color: #FBBF24;
+}
+
+.bnn-portal-light .records-linescore-table td.rhe-r {
+  background: #FEF3C7;
+  color: #B45309;
+}
+
+/* Elias / Baseball-Reference Agate Almanac Table */
+.records-agate-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.records-agate-table th {
+  text-align: left;
+  padding: 6px 8px;
+  font-family: "JetBrains Mono", monospace;
+}
+
+@media (max-width: 1180px) {
+  .bnn-leaders-grid,
+  .bnn-vp-ultrawide .bnn-leaders-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .bnn-leaders-col-left,
+  .bnn-leaders-col-center,
+  .bnn-leaders-col-right {
+    grid-column: span 1 / span 1 !important;
+  }
+}
+
+/* Center Stage Multi-Mode Visual Suite Canvas */
+.leaders-visual-canvas {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.09) 0%, transparent 65%),
+    linear-gradient(180deg, rgba(19, 24, 34, 0.96) 0%, rgba(11, 14, 20, 0.99) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 10px;
+}
+.bnn-portal-light .leaders-visual-canvas {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(2, 132, 199, 0.06) 0%, transparent 65%),
+    linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
+  border: 1px solid #CBD5E1;
+}
+
+/* Broadcast Spotlight Podium Cards Grid */
+.leaders-podium-grid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 0.875rem;
+}
+@media (min-width: 820px) {
+  .leaders-podium-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.bnn-vp-ultrawide .leaders-podium-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (min-width: 2350px) {
+  .bnn-vp-auto .leaders-podium-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.leaders-podium-hero {
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.82) 0%, rgba(15, 23, 42, 0.96) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.32);
+  border-radius: 10px;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.leaders-podium-hero:hover {
+  border-color: rgba(245, 158, 11, 0.72);
+  transform: translateY(-1px);
+}
+.bnn-portal-light .leaders-podium-hero {
+  background: linear-gradient(135deg, #FFFBEB 0%, #FFFFFF 65%, #F8FAFC 100%);
+  border: 1px solid #FCD34D;
+}
+
+.leaders-chaser-row {
+  position: relative;
+  overflow: hidden;
+  border-radius: 6px;
+  transition: background-color 0.12s ease;
+}
+.leaders-chaser-row:hover {
+  background-color: rgba(148, 163, 184, 0.12);
+}
+.bnn-portal-light .leaders-chaser-row:hover {
+  background-color: rgba(15, 23, 42, 0.05);
+}
+.leaders-chaser-fill {
+  position: absolute;
+  inset: 1px auto 1px 0;
+  border-radius: 4px;
+  pointer-events: none;
+  opacity: 0.13;
+  transition: width 0.25s ease;
+}
+.bnn-portal-light .leaders-chaser-fill {
+  opacity: 0.11;
+}
+
+/* Archetype 02: Baseball Savant Red-to-Blue Percentile Sliders */
+.leaders-savant-track {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
+  overflow: visible;
+}
+.bnn-portal-light .leaders-savant-track {
+  background: #E2E8F0;
+}
+.leaders-savant-track::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: 50%;
+  width: 1px;
+  background: rgba(148, 163, 184, 0.45);
+  pointer-events: none;
+}
+.leaders-savant-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 999px;
+}
+.leaders-savant-pin {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 21px;
+  height: 21px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9.5px;
+  font-weight: 800;
+  color: #FFFFFF;
+  border: 1.5px solid rgba(11, 14, 20, 0.85);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.38);
+  z-index: 2;
+}
+.bnn-portal-light .leaders-savant-pin {
+  border-color: #FFFFFF;
+}
+
+/* Archetype 03: Baseball-Reference / Sporting News Black-Ink Agate Broadsheet */
+.leaders-broadsheet-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: 0.75rem;
+}
+.leaders-broadsheet-box {
+  background: rgba(15, 20, 29, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.bnn-portal-light .leaders-broadsheet-box {
+  background: #FFFFFF;
+  border: 1px solid #CBD5E1;
+}
+.leaders-black-ink {
+  font-weight: 900;
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+}
+
+/* Dark / Light Theme-Safe Agate Master & Workbench Table */
+.leaders-agate-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: "JetBrains Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+}
+.leaders-agate-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #0F141D;
+  color: #94A3B8;
+}
+
+.records-agate-table th {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background-color: var(--bnn-subcard);
+  color: var(--bnn-muted);
+  border-bottom: 2px solid var(--bnn-border);
+}
+
+.records-agate-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--bnn-border);
+}
+
+/* Tab 07 Adaptive 16:9 UHD (3-Col) vs. 21:9 Ultrawide (4-Col Dedicated Split Inspector) */
+.bnn-records-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 0.875rem;
+  align-items: start;
+}
+
+.bnn-records-col-left   { grid-column: span 3 / span 3; }
+.bnn-records-col-center { grid-column: span 6 / span 6; }
+.bnn-records-col-right  { grid-column: span 3 / span 3; }
+.bnn-records-col-uw     { display: none; }
+.records-std-inspector  { display: block; }
+
+.bnn-vp-ultrawide .bnn-records-grid {
+  grid-template-columns: 16.5fr 39.5fr 15.5fr 28.5fr !important;
+  gap: 0.875rem !important;
+}
+
+.bnn-vp-ultrawide .bnn-records-col-left,
+.bnn-vp-ultrawide .bnn-records-col-center,
+.bnn-vp-ultrawide .bnn-records-col-right {
+  grid-column: auto !important;
+}
+
+.bnn-vp-ultrawide .bnn-records-col-uw {
+  display: flex !important;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.bnn-vp-ultrawide .records-std-inspector {
+  display: none !important;
+}
+
+@media (min-width: 2150px) {
+  .bnn-vp-auto .bnn-records-grid {
+    grid-template-columns: 16.5fr 39.5fr 15.5fr 28.5fr !important;
+    gap: 0.875rem !important;
+  }
+  .bnn-vp-auto .bnn-records-col-left,
+  .bnn-vp-auto .bnn-records-col-center,
+  .bnn-vp-auto .bnn-records-col-right {
+    grid-column: auto !important;
+  }
+  .bnn-vp-auto .bnn-records-col-uw {
+    display: flex !important;
+    flex-direction: column;
+    gap: 0.875rem;
+  }
+  .bnn-vp-auto .records-std-inspector {
+    display: none !important;
+  }
+}
+
+@media (max-width: 1180px) {
+  .bnn-records-grid,
+  .bnn-vp-ultrawide .bnn-records-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .bnn-records-col-left,
+  .bnn-records-col-center,
+  .bnn-records-col-right {
+    grid-column: span 1 / span 1 !important;
+  }
+  .bnn-records-col-uw,
+  .bnn-vp-ultrawide .bnn-records-col-uw {
+    display: none !important;
+  }
+  .records-std-inspector,
+  .bnn-vp-ultrawide .records-std-inspector {
+    display: block !important;
+  }
+}
+
+.leaders-agate-table thead th {
+  padding: 8px 9px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.leaders-agate-table thead th:hover {
+  color: #F8FAFC;
+}
+.bnn-portal-light .leaders-agate-table thead th {
+  background: #F1F5F9;
+  color: #334155;
+  border-bottom: 1px solid #CBD5E1;
+}
+.bnn-portal-light .leaders-agate-table thead th:hover {
+  color: #0F172A;
+}
+.leaders-agate-table tbody td {
+  padding: 6.5px 9px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.11);
+  color: var(--bnn-ink, #E6EDF3);
+  white-space: nowrap;
+}
+.bnn-portal-light .leaders-agate-table tbody td {
+  border-bottom: 1px solid #E2E8F0;
+  color: #0F172A;
+}
+.leaders-agate-table tbody tr:hover td {
+  background: rgba(56, 189, 248, 0.08);
+}
+.bnn-portal-light .leaders-agate-table tbody tr:hover td {
+  background: #E0F2FE;
+}
 
 /* ============================================================================
  * TAB 04: LEAGUE PULSE & STANDINGS — 4-COL COCKPIT, AGATE TABLES & SVG CANVAS
