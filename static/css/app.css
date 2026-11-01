@@ -1292,6 +1292,171 @@ select option {
   }
 }
 
+/* ============================================================================
+ * TAB 07: RECORDS BOOK — LIVING RECORD BOOK, BROADCAST VISUAL SUITE & 21:9 4-COL
+ * ============================================================================ */
+.records-visual-canvas {
+  background:
+    radial-gradient(circle at 22% 0%, rgba(56, 189, 248, 0.13) 0%, transparent 56%),
+    radial-gradient(circle at 82% 0%, rgba(245, 158, 11, 0.10) 0%, transparent 52%),
+    linear-gradient(180deg, #0D131F 0%, #090D15 100%);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.bnn-portal-light .records-visual-canvas {
+  background:
+    radial-gradient(circle at 22% 0%, rgba(2, 132, 199, 0.08) 0%, transparent 56%),
+    radial-gradient(circle at 82% 0%, rgba(217, 119, 6, 0.07) 0%, transparent 52%),
+    linear-gradient(180deg, #FFFFFF 0%, #F1F5F9 100%);
+  border: 1px solid #CBD5E1;
+}
+
+.bnn-portal-light .records-svg-text {
+  fill: #0F172A !important;
+}
+
+.bnn-portal-light .records-svg-muted {
+  fill: #475569 !important;
+}
+
+.bnn-portal-light .records-svg-grid {
+  stroke: #CBD5E1 !important;
+}
+
+.records-hof-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #FDE047 0%, #F59E0B 100%);
+  color: #090D14;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  line-height: 1.25;
+  box-shadow: 0 1px 3px rgba(245, 158, 11, 0.35);
+}
+
+.records-active-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: rgba(16, 185, 129, 0.16);
+  color: #34D399;
+  border: 1px solid rgba(16, 185, 129, 0.42);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  line-height: 1.25;
+}
+
+.bnn-portal-light .records-active-pill {
+  background: #D1FAE5;
+  color: #047857;
+  border-color: #6EE7B7;
+}
+
+.records-pulse-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background-color: #10B981;
+  box-shadow: 0 0 6px #10B981;
+}
+
+.records-cat-row {
+  border-left: 3px solid transparent;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.records-cat-row:hover {
+  background-color: var(--bnn-hover);
+}
+
+.records-cat-selected {
+  border-left-color: #38BDF8 !important;
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.15) 0%, transparent 92%);
+}
+
+.bnn-portal-light .records-cat-selected {
+  border-left-color: #0284C7 !important;
+  background: linear-gradient(90deg, rgba(2, 132, 199, 0.11) 0%, transparent 92%);
+}
+
+/* Cooperstown Bronze/Gold Plaque Card & 9-Inning Line Score Table */
+.records-plaque-card {
+  background: linear-gradient(155deg, rgba(217, 119, 6, 0.20) 0%, rgba(19, 24, 34, 0.97) 56%);
+  border: 1px solid rgba(245, 158, 11, 0.48);
+  box-shadow: 0 10px 24px -6px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(253, 224, 71, 0.18);
+}
+
+.bnn-portal-light .records-plaque-card {
+  background: linear-gradient(155deg, #FEF3C7 0%, #FFFFFF 58%);
+  border: 1px solid #F59E0B;
+  box-shadow: 0 6px 16px -4px rgba(180, 83, 9, 0.12);
+}
+
+.records-linescore-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.records-linescore-table th,
+.records-linescore-table td {
+  padding: 3px 5px;
+  text-align: center;
+  border: 1px solid var(--bnn-border);
+}
+
+.records-linescore-table th {
+  background-color: var(--bnn-subcard);
+  color: var(--bnn-muted);
+  font-weight: 800;
+  font-size: 9.5px;
+}
+
+.records-linescore-table td.team-cell,
+.records-linescore-table th.team-cell {
+  text-align: left;
+  padding-left: 7px;
+  padding-right: 7px;
+  font-weight: 900;
+}
+
+.records-linescore-table td.rhe-r {
+  font-weight: 900;
+  background: rgba(245, 158, 11, 0.13);
+  color: #FBBF24;
+}
+
+.bnn-portal-light .records-linescore-table td.rhe-r {
+  background: #FEF3C7;
+  color: #B45309;
+}
+
+/* Elias / Baseball-Reference Agate Almanac Table */
+.records-agate-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.records-agate-table th {
+  text-align: left;
+  padding: 6px 8px;
+  font-family: "JetBrains Mono", monospace;
+}
+
 @media (max-width: 1180px) {
   .bnn-leaders-grid,
   .bnn-vp-ultrawide .bnn-leaders-grid {
@@ -1465,10 +1630,99 @@ select option {
   z-index: 5;
   background: #0F141D;
   color: #94A3B8;
+}
+
+.records-agate-table th {
   font-size: 10px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  background-color: var(--bnn-subcard);
+  color: var(--bnn-muted);
+  border-bottom: 2px solid var(--bnn-border);
+}
+
+.records-agate-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--bnn-border);
+}
+
+/* Tab 07 Adaptive 16:9 UHD (3-Col) vs. 21:9 Ultrawide (4-Col Dedicated Split Inspector) */
+.bnn-records-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 0.875rem;
+  align-items: start;
+}
+
+.bnn-records-col-left   { grid-column: span 3 / span 3; }
+.bnn-records-col-center { grid-column: span 6 / span 6; }
+.bnn-records-col-right  { grid-column: span 3 / span 3; }
+.bnn-records-col-uw     { display: none; }
+.records-std-inspector  { display: block; }
+
+.bnn-vp-ultrawide .bnn-records-grid {
+  grid-template-columns: 16.5fr 39.5fr 15.5fr 28.5fr !important;
+  gap: 0.875rem !important;
+}
+
+.bnn-vp-ultrawide .bnn-records-col-left,
+.bnn-vp-ultrawide .bnn-records-col-center,
+.bnn-vp-ultrawide .bnn-records-col-right {
+  grid-column: auto !important;
+}
+
+.bnn-vp-ultrawide .bnn-records-col-uw {
+  display: flex !important;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.bnn-vp-ultrawide .records-std-inspector {
+  display: none !important;
+}
+
+@media (min-width: 2150px) {
+  .bnn-vp-auto .bnn-records-grid {
+    grid-template-columns: 16.5fr 39.5fr 15.5fr 28.5fr !important;
+    gap: 0.875rem !important;
+  }
+  .bnn-vp-auto .bnn-records-col-left,
+  .bnn-vp-auto .bnn-records-col-center,
+  .bnn-vp-auto .bnn-records-col-right {
+    grid-column: auto !important;
+  }
+  .bnn-vp-auto .bnn-records-col-uw {
+    display: flex !important;
+    flex-direction: column;
+    gap: 0.875rem;
+  }
+  .bnn-vp-auto .records-std-inspector {
+    display: none !important;
+  }
+}
+
+@media (max-width: 1180px) {
+  .bnn-records-grid,
+  .bnn-vp-ultrawide .bnn-records-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .bnn-records-col-left,
+  .bnn-records-col-center,
+  .bnn-records-col-right {
+    grid-column: span 1 / span 1 !important;
+  }
+  .bnn-records-col-uw,
+  .bnn-vp-ultrawide .bnn-records-col-uw {
+    display: none !important;
+  }
+  .records-std-inspector,
+  .bnn-vp-ultrawide .records-std-inspector {
+    display: block !important;
+  }
+}
+
+.leaders-agate-table thead th {
   padding: 8px 9px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.24);
   white-space: nowrap;
