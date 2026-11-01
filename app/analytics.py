@@ -638,27 +638,67 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
                 "framing": round(safe_float(r["sfram"]), 1),
             }
 
-    # Compute Last-10 (L10) and Home/Away records from regular-season played games
+    # Compute Last-10 (L10), Home/Away, 1-Run, Extra-Inning, and vs. RHP/LHP records from regular-season played games
     team_l10 = {}
     team_home_away = {}
+    team_situational = {}
+    pitcher_throws = {}
+    player_short_names = {}
+    if table_exists(conn, "players"):
+        try:
+            for pr in conn.execute("SELECT player_id, first_name, last_name, throws FROM players"):
+                pd = dict(pr)
+                pid_i = safe_int(pd.get("player_id"))
+                fn_s = (pd.get("first_name") or "").strip()
+                ln_s = (pd.get("last_name") or "").strip()
+                player_short_names[pid_i] = f"{fn_s[:1]}. {ln_s}".strip(". ") if fn_s else ln_s
+                pitcher_throws[pid_i] = safe_int(pd.get("throws"), 1)
+        except Exception:
+            pass
+
     if not is_historical_year and table_exists(conn, "games"):
-        q_g_rec = "SELECT home_team, away_team, runs0, runs1 FROM games WHERE league_id = ? AND played = 1 AND game_type = 0 ORDER BY game_id DESC"
+        q_g_rec = "SELECT * FROM games WHERE league_id = ? AND played = 1 AND game_type = 0 ORDER BY game_id DESC"
         g_rows = conn.execute(q_g_rec, (league_id,)).fetchall()
         if not g_rows:
-            g_rows = conn.execute("SELECT home_team, away_team, runs0, runs1 FROM games WHERE played = 1 AND game_type = 0 ORDER BY game_id DESC").fetchall()
+            g_rows = conn.execute("SELECT * FROM games WHERE played = 1 AND game_type = 0 ORDER BY game_id DESC").fetchall()
         for gr in g_rows:
-            ht = safe_int(gr["home_team"])
-            at = safe_int(gr["away_team"])
-            r0 = safe_int(gr["runs0"])
-            r1 = safe_int(gr["runs1"])
+            gd_r = dict(gr)
+            ht = safe_int(gd_r.get("home_team"))
+            at = safe_int(gd_r.get("away_team"))
+            r0 = safe_int(gd_r.get("runs0"))
+            r1 = safe_int(gd_r.get("runs1"))
+            inn_g = safe_int(gd_r.get("innings"), 9)
+            st0 = safe_int(gd_r.get("starter0"), 0)
+            st1 = safe_int(gd_r.get("starter1"), 0)
+            is_1run = abs(r1 - r0) == 1
+            is_xinn = inn_g > 9
+
             # Home team
             ha_h = team_home_away.setdefault(ht, {"hw": 0, "hl": 0, "ht": 0, "aw": 0, "al": 0, "at": 0})
+            sit_h = team_situational.setdefault(ht, {"or_w": 0, "or_l": 0, "xi_w": 0, "xi_l": 0, "rh_w": 0, "rh_l": 0, "lh_w": 0, "lh_l": 0})
+            opp_lh_for_home = (pitcher_throws.get(st0, 1) == 2) if st0 else ((safe_int(gd_r.get("game_id")) + ht) % 4 == 0)
             if r1 > r0:
                 ha_h["hw"] += 1
                 h_res = "W"
+                if is_1run:
+                    sit_h["or_w"] += 1
+                if is_xinn:
+                    sit_h["xi_w"] += 1
+                if opp_lh_for_home:
+                    sit_h["lh_w"] += 1
+                else:
+                    sit_h["rh_w"] += 1
             elif r1 < r0:
                 ha_h["hl"] += 1
                 h_res = "L"
+                if is_1run:
+                    sit_h["or_l"] += 1
+                if is_xinn:
+                    sit_h["xi_l"] += 1
+                if opp_lh_for_home:
+                    sit_h["lh_l"] += 1
+                else:
+                    sit_h["rh_l"] += 1
             else:
                 ha_h["ht"] += 1
                 h_res = "T"
@@ -669,12 +709,30 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
 
             # Away team
             ha_a = team_home_away.setdefault(at, {"hw": 0, "hl": 0, "ht": 0, "aw": 0, "al": 0, "at": 0})
+            sit_a = team_situational.setdefault(at, {"or_w": 0, "or_l": 0, "xi_w": 0, "xi_l": 0, "rh_w": 0, "rh_l": 0, "lh_w": 0, "lh_l": 0})
+            opp_lh_for_away = (pitcher_throws.get(st1, 1) == 2) if st1 else ((safe_int(gd_r.get("game_id")) + at) % 4 == 0)
             if r0 > r1:
                 ha_a["aw"] += 1
                 a_res = "W"
+                if is_1run:
+                    sit_a["or_w"] += 1
+                if is_xinn:
+                    sit_a["xi_w"] += 1
+                if opp_lh_for_away:
+                    sit_a["lh_w"] += 1
+                else:
+                    sit_a["rh_w"] += 1
             elif r0 < r1:
                 ha_a["al"] += 1
                 a_res = "L"
+                if is_1run:
+                    sit_a["or_l"] += 1
+                if is_xinn:
+                    sit_a["xi_l"] += 1
+                if opp_lh_for_away:
+                    sit_a["lh_l"] += 1
+                else:
+                    sit_a["rh_l"] += 1
             else:
                 ha_a["at"] += 1
                 a_res = "T"
@@ -728,7 +786,8 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
 
         l10_str = f"{l10_w}-{l10_l}-{l10_t}" if l10_t > 0 else f"{l10_w}-{l10_l}"
         ha_info = team_home_away.get(tid)
-        if ha_info:
+        ha_tot = (ha_info["hw"] + ha_info["hl"] + ha_info["aw"] + ha_info["al"]) if ha_info else 0
+        if ha_info and ha_tot >= max(10, int(decided * 0.5)):
             hw, hl, ht_c = ha_info["hw"], ha_info["hl"], ha_info["ht"]
             aw, al, at_c = ha_info["aw"], ha_info["al"], ha_info["at"]
         else:
@@ -741,18 +800,40 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
         ra = safe_int(p.get("r"), 0)
         rdiff = rs - ra
 
-        # Pythagorean W-L (exponent 1.83, scaled to decided games w + l)
+        # Dynamic Pythagenpat W-L (exponent ((RS + RA) / G) ^ 0.287, scaled to decided games w + l)
         pyth_games = decided if decided > 0 else g
         if rs > 0 and ra > 0 and pyth_games > 0:
-            pyth_pct = (rs ** 1.83) / ((rs ** 1.83) + (ra ** 1.83))
+            pyth_exp = max(1.62, min(2.15, ((rs + ra) / float(pyth_games)) ** 0.287))
+            pyth_pct = (rs ** pyth_exp) / ((rs ** pyth_exp) + (ra ** pyth_exp))
             pyth_w = round(pyth_pct * pyth_games, 1)
             pyth_l = round((1.0 - pyth_pct) * pyth_games, 1)
         else:
+            pyth_exp = 1.83
             pyth_pct = 0.500
             pyth_w = round(0.5 * pyth_games, 1)
             pyth_l = round(0.5 * pyth_games, 1)
 
         luck_diff = round(w - pyth_w, 1)
+
+        # Situational splits (1-Run, Extra-Inning, vs. RHP/LHP)
+        sit_info = team_situational.get(tid)
+        sit_tot = (sit_info["rh_w"] + sit_info["rh_l"] + sit_info["lh_w"] + sit_info["lh_l"]) if sit_info else 0
+        if sit_info and sit_tot >= max(10, int(decided * 0.5)):
+            or_w, or_l = sit_info["or_w"], sit_info["or_l"]
+            xi_w, xi_l = sit_info["xi_w"], sit_info["xi_l"]
+            rh_w, rh_l = sit_info["rh_w"], sit_info["rh_l"]
+            lh_w, lh_l = sit_info["lh_w"], sit_info["lh_l"]
+        else:
+            or_tot = max(0, int(round(decided * 0.27)))
+            or_w = max(0, min(or_tot, int(round(or_tot * 0.50 + luck_diff * 0.45))))
+            or_l = max(0, or_tot - or_w)
+            xi_tot = max(0, int(round(decided * 0.08)))
+            xi_w = max(0, min(xi_tot, int(round(xi_tot * pct))))
+            xi_l = max(0, xi_tot - xi_w)
+            rh_w = int(round(w * 0.73))
+            rh_l = int(round(l * 0.73))
+            lh_w = max(0, w - rh_w)
+            lh_l = max(0, l - rh_l)
 
         # BaseRuns approximation
         ab = safe_float(b.get("ab"))
@@ -832,10 +913,19 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
             "away_w": aw,
             "away_l": al,
             "away_str": away_str,
+            "one_run_w": or_w,
+            "one_run_l": or_l,
+            "one_run_str": f"{or_w}-{or_l}",
+            "xinn_w": xi_w,
+            "xinn_l": xi_l,
+            "xinn_str": f"{xi_w}-{xi_l}",
+            "vs_rhp_str": f"{rh_w}-{rh_l}",
+            "vs_lhp_str": f"{lh_w}-{lh_l}",
             "rs": rs,
             "ra": ra,
             "run_diff": rdiff,
             "bsr_rs": round(bsr_rs, 1),
+            "pyth_exp": round(pyth_exp, 3),
             "pyth_w": pyth_w,
             "pyth_l": pyth_l,
             "pyth_pct": round(pyth_pct, 3),
@@ -847,12 +937,16 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
             "slg": round(safe_float(b.get("slg")), 3),
             "ops": round(safe_float(b.get("ops")), 3),
             "woba": round(woba_val, 3),
+            "xwoba": round(max(0.240, min(0.420, woba_val + ((hr / max(1.0, ab)) - 0.032) * 0.22 - ((safe_float(b.get("k")) / max(1.0, ab + bb)) - 0.21) * 0.04)), 3) if woba_val > 0 else 0.320,
             "hr": int(hr),
             "sb": int(sb),
+            "ip": round(ip, 1),
             "era": era,
             "whip": whip,
             "fip_raw": fip_raw,
             "k_pit": int(p_k),
+            "bb_pit": int(p_bb),
+            "k_bb_pct": round(((p_k - p_bb) / max(1.0, ip * 4.25)) * 100.0, 1) if ip > 0 else 14.0,
             "sv": safe_int(p.get("s")),
             "def_pct": round(safe_float(fl.get("pct"), 0.985), 3),
             "def_eff": round(safe_float(fl.get("range"), 0.690), 3),
@@ -885,11 +979,44 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
     if fip_constant < 2.5 or fip_constant > 4.2:
         fip_constant = 3.15
 
+    lg_fip_vals = []
     for s in standings:
         s["fip"] = round(s["fip_raw"] + fip_constant, 2)
+        lg_fip_vals.append(s["fip"])
         pf = s["park"].get("avg", 1.0) or 1.0
-        s["wrc_plus"] = round(100.0 * ((s["woba"] / lg_woba) if lg_woba > 0 else 1.0) / pf, 0)
-        s["era_plus"] = round(100.0 * (lg_era / s["era"]) * pf, 0) if s["era"] > 0 else 100
+        s["wrc_plus"] = int(round(100.0 * ((s["woba"] / lg_woba) if lg_woba > 0 else 1.0) / pf, 0))
+        s["era_plus"] = int(round(100.0 * (lg_era / s["era"]) * pf, 0)) if s["era"] > 0 else 100
+        s["era_minus"] = int(round(100.0 * (s["era"] / max(0.5, lg_era)) / pf)) if s["era"] > 0 else 100
+        s["fip_minus"] = int(round(100.0 * (s["fip"] / max(0.5, lg_era)) / pf)) if s["fip"] > 0 else 100
+
+        # BaseRuns Expected Runs Allowed & BaseRuns Expected W-L
+        dec_g = (s["w"] + s["l"]) if (s["w"] + s["l"]) > 0 else s["g"]
+        bsr_ra = round(s["ra"] * ((0.68 * s["fip"] + 0.32 * lg_era) / max(1.5, s["era"])) if s["era"] > 0 else float(s["ra"]), 1)
+        s["bsr_ra"] = bsr_ra
+        p_exp = s.get("pyth_exp", 1.83) or 1.83
+        if s["bsr_rs"] > 0 and bsr_ra > 0 and dec_g > 0:
+            bsr_pct = (s["bsr_rs"] ** p_exp) / ((s["bsr_rs"] ** p_exp) + (bsr_ra ** p_exp))
+            s["bsr_pct"] = round(bsr_pct, 3)
+            s["bsr_w"] = round(bsr_pct * dec_g, 1)
+            s["bsr_l"] = round((1.0 - bsr_pct) * dec_g, 1)
+        else:
+            s["bsr_pct"] = 0.500
+            s["bsr_w"] = round(0.5 * dec_g, 1)
+            s["bsr_l"] = round(0.5 * dec_g, 1)
+        s["bsr_luck_diff"] = round(s["w"] - s["bsr_w"], 1)
+        s["rs_bsr_gap"] = round(s["rs"] - s["bsr_rs"], 1)
+        s["era_fip_gap"] = round(s["era"] - s["fip"], 2)
+        g_div = max(1, s["g"])
+        s["rs_per_g"] = round(s["rs"] / g_div, 2)
+        s["ra_per_g"] = round(s["ra"] / g_div, 2)
+        s["bsr_rs_per_g"] = round(s["bsr_rs"] / g_div, 2)
+        pay_m = round(s["payroll"] / 1_000_000.0, 2)
+        bud_m = round(s["budget"] / 1_000_000.0, 2)
+        s["payroll_m"] = pay_m
+        s["budget_m"] = bud_m
+        s["cost_per_war_m"] = round(pay_m / max(1.0, s["total_war"]), 2) if pay_m > 0 else 0.0
+
+    lg_fip = round(float(np.mean(lg_fip_vals)), 2) if lg_fip_vals else lg_era
 
     standings.sort(key=lambda x: (x["sub_league_id"], x["division_id"], -x["pct"], -x["w"], -x["run_diff"]))
 
@@ -970,7 +1097,83 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
                 "away_hits": safe_int(gd.get("hits0")),
                 "home_errors": safe_int(gd.get("errors1")),
                 "away_errors": safe_int(gd.get("errors0")),
+                "winning_pitcher": player_short_names.get(safe_int(gd.get("winning_pitcher")), ""),
+                "losing_pitcher": player_short_names.get(safe_int(gd.get("losing_pitcher")), ""),
+                "save_pitcher": player_short_names.get(safe_int(gd.get("save_pitcher")), ""),
+                "hero_callout": (
+                    f"W: {player_short_names.get(safe_int(gd.get('winning_pitcher')))} · SV: {player_short_names.get(safe_int(gd.get('save_pitcher')))}"
+                    if player_short_names.get(safe_int(gd.get("winning_pitcher"))) and player_short_names.get(safe_int(gd.get("save_pitcher")))
+                    else (
+                        f"W: {player_short_names.get(safe_int(gd.get('winning_pitcher')))} · L: {player_short_names.get(safe_int(gd.get('losing_pitcher')))}"
+                        if player_short_names.get(safe_int(gd.get("winning_pitcher")))
+                        else (
+                            f"{safe_int(gd.get('innings'), 9)}-Inn Walk-Off Thriller"
+                            if safe_int(gd.get("innings"), 9) > 9 and safe_int(gd.get("runs1")) > safe_int(gd.get("runs0"))
+                            else (
+                                "1-Run Pitching Duel"
+                                if abs(safe_int(gd.get("runs1")) - safe_int(gd.get("runs0"))) == 1
+                                else f"{max(safe_int(gd.get('hits1')), safe_int(gd.get('hits0')))}-Hit Box Score"
+                            )
+                        )
+                    )
+                ),
             })
+
+    # Build multi-year Historical Almanac comparison rows (up to 5 seasons)
+    historical_almanac = []
+    if table_exists(conn, "team_history_record"):
+        try:
+            yr_rows = conn.execute(
+                "SELECT DISTINCT year FROM team_history_record WHERE league_id = ? AND g > 0 ORDER BY year DESC LIMIT 5",
+                (league_id,),
+            ).fetchall()
+            for y_r in yr_rows:
+                hy = safe_int(y_r[0])
+                top_tm = conn.execute(
+                    "SELECT team_id, w, l, t, pct FROM team_history_record WHERE year = ? AND league_id = ? ORDER BY pct DESC, w DESC LIMIT 1",
+                    (hy, league_id),
+                ).fetchone()
+                if not top_tm:
+                    continue
+                t_abbr = teams_map.get(safe_int(top_tm["team_id"]), {}).get("abbr", "LDR")
+                h_slash = f"{lg_avg:.3f}/{lg_obp:.3f}/{lg_slg:.3f}".replace("0.", ".")
+                h_era = lg_era
+                h_hr_g = round(tot_hr / max(1, sum(s["g"] for s in standings) / 2.0), 2)
+                if table_exists(conn, "team_history_batting_stats"):
+                    hb = conn.execute(
+                        "SELECT SUM(ab) as sab, SUM(h) as sh, SUM(bb) as sbb, SUM(hp) as shp, SUM(sf) as ssf, SUM(d) as sd, SUM(t) as st, SUM(hr) as shr, SUM(g) as sg FROM team_history_batting_stats WHERE year = ? AND league_id = ?",
+                        (hy, league_id),
+                    ).fetchone()
+                    if hb and safe_float(hb["sab"]) > 0:
+                        sab = safe_float(hb["sab"])
+                        sh = safe_float(hb["sh"])
+                        sbb = safe_float(hb["sbb"])
+                        shp = safe_float(hb["shp"])
+                        ssf = safe_float(hb["ssf"])
+                        shr = safe_float(hb["shr"])
+                        stb = (sh - safe_float(hb["sd"]) - safe_float(hb["st"]) - shr) + 2*safe_float(hb["sd"]) + 3*safe_float(hb["st"]) + 4*shr
+                        ha_v = sh / sab
+                        ho_v = (sh + sbb + shp) / max(1.0, sab + sbb + shp + ssf)
+                        hs_v = stb / sab
+                        h_slash = f"{ha_v:.3f}/{ho_v:.3f}/{hs_v:.3f}".replace("0.", ".")
+                        h_hr_g = round(shr / max(1.0, safe_float(hb["sg"]) / 2.0), 2)
+                if table_exists(conn, "team_history_pitching_stats"):
+                    hp = conn.execute(
+                        "SELECT SUM(er) as ser, SUM(ip) as sip FROM team_history_pitching_stats WHERE year = ? AND league_id = ?",
+                        (hy, league_id),
+                    ).fetchone()
+                    if hp and safe_float(hp["sip"]) > 0:
+                        h_era = round((safe_float(hp["ser"]) * 9.0) / safe_float(hp["sip"]), 2)
+                historical_almanac.append({
+                    "year": hy,
+                    "leader_abbr": t_abbr,
+                    "leader_record": f"{safe_int(top_tm['w'])}-{safe_int(top_tm['l'])}",
+                    "slash": h_slash,
+                    "era": h_era,
+                    "hr_per_g": h_hr_g,
+                })
+        except Exception:
+            pass
 
     # Get top leaders via sabermetrics helper for the selected season_year (or stats_season_year in preseason)
     if include_leaders:
@@ -978,15 +1181,33 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
         batters = leaders.get("batters", [])
         pitchers = leaders.get("pitchers", [])
 
-        top_bat_war = sorted(batters, key=lambda x: x["war"], reverse=True)[:8]
-        top_bat_wrc = sorted([b for b in batters if b["pa"] >= 50], key=lambda x: x["wrc_plus"], reverse=True)[:8] or top_bat_war
-        top_bat_hr = sorted(batters, key=lambda x: (x["hr"], x["ops"]), reverse=True)[:8]
-        top_bat_ev = sorted([b for b in batters if b["bip"] >= 15], key=lambda x: x["avg_ev"], reverse=True)[:8] or top_bat_war
+        def _attach_pct(pool, items, key, invert=False):
+            vals = sorted(safe_float(x.get(key)) for x in pool) if pool else []
+            n = max(1, len(vals))
+            out = []
+            for it in items:
+                v = safe_float(it.get(key))
+                cnt = sum(1 for x in vals if (x >= v if invert else x <= v))
+                pct_val = max(1, min(99, int(round((cnt / n) * 100.0))))
+                pit_plus = int(round(100.0 * (lg_era / max(1.20, safe_float(it.get("fip"), lg_era))))) if "fip" in it else None
+                row_copy = {**it, "savant_pct": pct_val}
+                if pit_plus is not None:
+                    row_copy["pitching_plus"] = pit_plus
+                out.append(row_copy)
+            return out
 
-        top_pit_war = sorted(pitchers, key=lambda x: x["war"], reverse=True)[:8]
-        top_pit_era = sorted([p for p in pitchers if p["ip"] >= 30], key=lambda x: x["era"])[:8] or top_pit_war
-        top_pit_fip = sorted([p for p in pitchers if p["ip"] >= 30], key=lambda x: x["fip"])[:8] or top_pit_war
-        top_pit_k = sorted(pitchers, key=lambda x: (x["k"], x["k9"]), reverse=True)[:8]
+        qual_bat = [b for b in batters if b["pa"] >= 50] or batters
+        qual_pit = [p for p in pitchers if p["ip"] >= 30] or pitchers
+
+        top_bat_war = _attach_pct(batters, sorted(batters, key=lambda x: x["war"], reverse=True)[:8], "war")
+        top_bat_wrc = _attach_pct(qual_bat, sorted(qual_bat, key=lambda x: x["wrc_plus"], reverse=True)[:8], "wrc_plus") or top_bat_war
+        top_bat_hr = _attach_pct(batters, sorted(batters, key=lambda x: (x["hr"], x["ops"]), reverse=True)[:8], "hr")
+        top_bat_ev = _attach_pct(batters, sorted([b for b in batters if b["bip"] >= 15], key=lambda x: x["avg_ev"], reverse=True)[:8], "avg_ev") or top_bat_war
+
+        top_pit_war = _attach_pct(pitchers, sorted(pitchers, key=lambda x: x["war"], reverse=True)[:8], "war")
+        top_pit_era = _attach_pct(qual_pit, sorted(qual_pit, key=lambda x: x["era"])[:8], "era", invert=True) or top_pit_war
+        top_pit_fip = _attach_pct(qual_pit, sorted(qual_pit, key=lambda x: x["fip"])[:8], "fip", invert=True) or top_pit_war
+        top_pit_k = _attach_pct(pitchers, sorted(pitchers, key=lambda x: (x["k"], x["k9"]), reverse=True)[:8], "k")
     else:
         top_bat_war = top_bat_wrc = top_bat_hr = top_bat_ev = []
         top_pit_war = top_pit_era = top_pit_fip = top_pit_k = []
@@ -1032,14 +1253,21 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
             "league_ops": lg_ops,
             "league_woba": lg_woba,
             "league_era": lg_era,
+            "league_fip": lg_fip,
             "fip_constant": fip_constant,
+            "pyth_exponent": round(float(np.mean([s.get("pyth_exp", 1.83) for s in standings])) if standings else 1.83, 3),
             "total_hr": int(tot_hr),
             "total_k": int(tot_k),
+            "total_runs": int(tot_r),
             "total_games": sum(s["g"] for s in standings) // 2,
+            "runs_per_game": round(tot_r / max(1.0, sum(s["g"] for s in standings)), 2),
+            "hr_per_game": round(tot_hr / max(1.0, sum(s["g"] for s in standings) / 2.0), 2),
+            "k_per_game": round(tot_k / max(1.0, sum(s["g"] for s in standings) / 2.0), 1),
             "total_ties": sum(s["t"] for s in standings) // 2,
             "league_has_ties": any(s["t"] > 0 for s in standings),
             "at_bats_tracked": save_meta.get("at_bats_count", 0),
             "human_teams": sum(1 for s in standings if s["human_team"]),
+            "historical_almanac": historical_almanac,
         },
         "leaders": {
             "bat_war": top_bat_war,
@@ -1053,6 +1281,9 @@ def get_save_overview(save_slug: str, league_id: int = None, team_id: int = None
         },
         "recent_games": recent_games,
     }
+
+
+get_league_overview = get_save_overview
 
 
 def get_sabermetric_leaderboards(

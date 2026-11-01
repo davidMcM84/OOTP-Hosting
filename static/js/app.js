@@ -35,6 +35,14 @@ const AppState = {
   worldCmpOrgA: null,
   worldCmpOrgB: null,
   worldMleSimIdx: 0,
+  overviewViewMode: "portal", // portal | almanac | savant | comparator
+  overviewVisualMode: "quadrant", // quadrant | barbell | warsplit
+  overviewStandingsView: "division", // division | wildcard | super
+  overviewLeaderCat: "bat_war", // bat_war | bat_wrc | pit_war | pit_fip
+  overviewUwSlFilter: 0,
+  overviewCmpDiv: "ALL",
+  overviewCmpTeamA: null,
+  overviewCmpTeamB: null,
   teamHubSubTab: "depth", // depth | strengths | roadmap | roster | command
   selectedDepthPos: "SS",
   saberSubTab: "batting", // batting | pitching | split_saber | proj_teams | proj_batters | proj_pitchers | split_proj
@@ -648,272 +656,1213 @@ function renderNoCsvPrompt() {
 }
 
 /* ============================================================================
- * 1. COMMAND CENTER / OVERVIEW TAB
+ * 1. TAB 04: LEAGUE PULSE & TRUE-TALENT STANDINGS HUB (4-ARCHETYPE BNN.COM SUITE)
  * ============================================================================ */
+window.setOverviewViewMode = function(mode) {
+  AppState.overviewViewMode = mode || "portal";
+  const main = document.getElementById("main-view-container");
+  if (main && AppState.activeTab === "overview") renderOverviewTab(main);
+};
+
+window.setOverviewVisualMode = function(mode) {
+  AppState.overviewVisualMode = mode || "quadrant";
+  const main = document.getElementById("main-view-container");
+  if (main && AppState.activeTab === "overview") renderOverviewTab(main);
+};
+
+window.setOverviewStandingsView = function(mode) {
+  AppState.overviewStandingsView = mode || "division";
+  const main = document.getElementById("main-view-container");
+  if (main && AppState.activeTab === "overview") renderOverviewTab(main);
+};
+
+window.setOverviewLeaderCat = function(cat) {
+  AppState.overviewLeaderCat = cat || "bat_war";
+  const main = document.getElementById("main-view-container");
+  if (main && AppState.activeTab === "overview") renderOverviewTab(main);
+};
+
+window.setOverviewUwSlFilter = function(idx) {
+  AppState.overviewUwSlFilter = Number(idx) || 0;
+  const main = document.getElementById("main-view-container");
+  if (main && AppState.activeTab === "overview") renderOverviewTab(main);
+};
+
+window.setOverviewCmpDiv = function(divKey) {
+  AppState.overviewCmpDiv = divKey || "ALL";
+  const main = document.getElementById("main-view-container");
+  if (main && AppState.activeTab === "overview") renderOverviewTab(main);
+};
+
+window.setOverviewCmpTeam = function(slot, teamId) {
+  if (slot === "A") AppState.overviewCmpTeamA = Number(teamId);
+  else AppState.overviewCmpTeamB = Number(teamId);
+  const main = document.getElementById("main-view-container");
+  if (main && AppState.activeTab === "overview") renderOverviewTab(main);
+};
+
+window.setOverviewViewportMode = function(mode) {
+  AppState.frontPageViewportMode = mode || "auto";
+  const main = document.getElementById("main-view-container");
+  if (main && AppState.activeTab === "overview") renderOverviewTab(main);
+};
+
+window.setOverviewTheme = function(theme) {
+  AppState.frontPageTheme = theme === "light" ? "light" : "dark";
+  const main = document.getElementById("main-view-container");
+  if (main && AppState.activeTab === "overview") renderOverviewTab(main);
+};
+
+window.pinOverviewPlayerToDock = function(ev, playerId) {
+  if (ev && ev.stopPropagation) ev.stopPropagation();
+  if (!playerId) return;
+  if (typeof togglePlayerSideDock === "function") togglePlayerSideDock(true);
+  if (typeof renderPlayerIntoSideDock === "function") renderPlayerIntoSideDock(playerId);
+};
+
 function renderOverviewTab(container) {
-  const ov = AppState.overview;
+  const ov = AppState.overview || {};
   const env = ov.environment || {};
   const standings = ov.standings || [];
   const leaders = ov.leaders || {};
   const recentGames = ov.recent_games || [];
   const leagues = ov.leagues || [];
   const availYears = ov.available_years || [];
-  const dumps = (ov.supplemental && ov.supplemental.dumps) || [];
+  const dumps = ov.dumps || (ov.supplemental && ov.supplemental.dumps) || [];
+  const almanacs = ov.almanacs || (ov.supplemental && ov.supplemental.almanacs) || [];
   const hasTies = Boolean(env.league_has_ties) || standings.some(t => Number(t.t || 0) > 0);
 
-  // Group standings by sub_league & division
-  const groups = {};
+  const viewMode = AppState.overviewViewMode || "portal";
+  const visualMode = AppState.overviewVisualMode || "quadrant";
+  const standingsView = AppState.overviewStandingsView || "division";
+  const leaderCat = AppState.overviewLeaderCat || "bat_war";
+  const themeCls = AppState.frontPageTheme === "light" ? "bnn-portal-light" : "bnn-portal-dark";
+  const vpMode = AppState.frontPageViewportMode || "auto";
+  const vpClass = vpMode === "ultrawide" ? "bnn-vp-ultrawide" : (vpMode === "standard" ? "bnn-vp-standard" : "bnn-vp-auto");
+  const isLight = AppState.frontPageTheme === "light";
+
+  const savantPctBadge = pctVal => {
+    const p = Number(pctVal || 75);
+    const cls = p >= 95 ? "bnn-pct-95" : (p >= 80 ? "bnn-pct-80" : (p >= 45 ? "bnn-pct-50" : (p >= 20 ? "bnn-pct-20" : "bnn-pct-05")));
+    return `<span class="px-1.5 py-0.5 rounded-full text-[10.5px] font-mono font-black ${cls}">${p}</span>`;
+  };
+
+  const renderSeqDots = seqStr => {
+    const s = String(seqStr || "");
+    if (!s) return "";
+    return `<span class="inline-flex items-center gap-0.5">${s.split("").map(c =>
+      `<span title="${c}" class="w-1.5 h-2.5 rounded-sm ${c === 'W' ? 'bg-emerald-500' : (c === 'T' ? 'bg-amber-400' : 'bg-rose-500/85')}"></span>`
+    ).join("")}</span>`;
+  };
+
+  const fmtSigned = (v, dec = 1) => {
+    const n = Number(v || 0);
+    return (n > 0 ? "+" : "") + n.toFixed(dec);
+  };
+
+  // Group standings by Sub-League & Division
+  const divGroups = {};
+  const subLeagueMap = {};
   standings.forEach(t => {
-    const key = `${t.sub_league_name || 'League'} ${t.division_name && t.division_name !== 'Division 0' ? '— ' + t.division_name : ''}`.trim();
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(t);
+    const slName = t.sub_league_name || "League";
+    const dvName = (t.division_name && t.division_name !== "Division 0") ? t.division_name : "";
+    const divKey = dvName ? `${slName} — ${dvName}` : slName;
+    if (!divGroups[divKey]) divGroups[divKey] = { key: divKey, sl: slName, div: dvName || slName, teams: [] };
+    divGroups[divKey].teams.push(t);
+    if (!subLeagueMap[slName]) subLeagueMap[slName] = [];
+    subLeagueMap[slName].push(t);
   });
+  const divGroupList = Object.values(divGroups);
+  const subLeagueNames = Object.keys(subLeagueMap);
 
-  const standingsHtml = Object.entries(groups).map(([grpName, list]) => `
-    <div class="glass-card overflow-hidden mb-5">
-      <div class="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex flex-wrap justify-between items-center gap-2">
-        <div class="flex items-center gap-2">
-          <i class="bi bi-trophy-fill text-amber-400"></i>
-          <h3 class="font-extrabold text-sm tracking-wide uppercase text-white">${grpName} Standings & Pythagorean Matrix (${env.season_year})</h3>
-          ${hasTies ? `<span class="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">Includes Ties (W-L-T)</span>` : ""}
-          ${ov.is_historical_year ? `<span class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">Historical Season Snapshot (${env.season_year})</span>` : ""}
-        </div>
-        <span class="text-xs text-slate-400">Click any team for Full Franchise Hub • Click column headers to sort</span>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="saber-table">
-          <thead>
-            <tr>
-              <th class="text-left">Team</th>
-              <th class="text-right">W</th>
-              <th class="text-right">L</th>
-              <th class="text-right" title="Tied Games">T</th>
-              <th class="text-right">PCT</th>
-              <th class="text-right">GB</th>
-              <th class="text-right" title="Division Magic / Elimination Number">Magic#</th>
-              <th class="text-right" title="Record in Last 10 Games">L10</th>
-              <th class="text-right">Strk</th>
-              <th class="text-right" title="Pythagorean Expected W-L-T (RS^1.83 / (RS^1.83 + RA^1.83))">Pyth W-L-T</th>
-              <th class="text-right" title="Actual Wins minus Pythagorean Wins">Luck</th>
-              <th class="text-right">RS</th>
-              <th class="text-right">RA</th>
-              <th class="text-right">Diff</th>
-              <th class="text-right" title="BaseRuns Expected Runs Scored">BsR RS</th>
-              <th class="text-right">wOBA</th>
-              <th class="text-right">wRC+</th>
-              <th class="text-right">ERA</th>
-              <th class="text-right">FIP</th>
-              <th class="text-right">Def ZR</th>
-              <th class="text-right">Team WAR</th>
-              <th class="text-right">Playoff %</th>
-              <th class="text-right">Payroll</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${list.map((t, idx) => {
-              const diffCls = t.run_diff > 0 ? "text-emerald-400 font-bold" : (t.run_diff < 0 ? "text-rose-400 font-bold" : "text-slate-400");
-              const luckCls = t.luck_diff > 0 ? "text-emerald-400" : (t.luck_diff < 0 ? "text-rose-400" : "text-slate-400");
-              const tiesCount = Number(t.t || 0);
-              const pythStr = tiesCount > 0 ? `${t.pyth_w}-${t.pyth_l}-${tiesCount}` : `${t.pyth_w}-${t.pyth_l}`;
-              const mStr = t.magic_str || "-";
-              const mCls = mStr === "CLINCHED" ? "text-amber-300 font-extrabold" : (mStr === "ELIM" ? "text-slate-500" : "text-sky-300");
-              const l10Str = t.l10_str || "5-5";
-              const l10Cls = (t.l10_w || 0) >= 7 ? "text-emerald-400 font-bold" : ((t.l10_w || 0) <= 3 ? "text-rose-400" : "text-slate-200");
-              return `
-                <tr onclick="switchTeamAndGo(${t.team_id})" class="cursor-pointer">
-                  <td class="font-bold">
-                    <div class="flex items-center gap-2.5">
-                      <span class="text-xs font-mono text-slate-500 w-4">${idx + 1}</span>
-                      <img src="${teamLogoUrl(t.logo_file_name)}" class="w-6 h-6 object-contain rounded" alt="${t.abbr}">
-                      <div>
-                        <span class="text-white hover:text-sky-400 transition">${t.full_name}</span>
-                        <span class="ml-1.5 text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">${t.abbr}</span>
-                        ${t.human_team ? `<span class="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">GM</span>` : ""}
-                      </div>
-                    </div>
-                  </td>
-                  <td class="text-right font-bold text-white">${t.w}</td>
-                  <td class="text-right text-slate-300">${t.l}</td>
-                  <td class="text-right font-mono ${tiesCount > 0 ? 'text-amber-300 font-bold' : 'text-slate-500'}">${tiesCount}</td>
-                  <td class="text-right font-mono font-bold text-sky-300">${fmtAvg(t.pct)}</td>
-                  <td class="text-right font-mono text-slate-400">${t.gb === 0 ? "-" : t.gb.toFixed(1)}</td>
-                  <td class="text-right font-mono text-xs ${mCls}">${mStr}</td>
-                  <td class="text-right font-mono text-xs ${l10Cls}">${l10Str}</td>
-                  <td class="text-right font-mono text-xs ${t.streak > 0 ? 'text-emerald-400' : 'text-rose-400'}">${t.streak_str}</td>
-                  <td class="text-right font-mono text-slate-200">${pythStr}</td>
-                  <td class="text-right font-mono ${luckCls}">${t.luck_diff > 0 ? '+' : ''}${t.luck_diff}</td>
-                  <td class="text-right font-mono">${t.rs}</td>
-                  <td class="text-right font-mono">${t.ra}</td>
-                  <td class="text-right font-mono ${diffCls}">${t.run_diff > 0 ? '+' : ''}${t.run_diff}</td>
-                  <td class="text-right font-mono text-slate-300">${t.bsr_rs}</td>
-                  <td class="text-right font-mono">${fmtAvg(t.woba)}</td>
-                  <td class="text-right font-mono font-bold ${t.wrc_plus >= 105 ? 'text-emerald-400' : (t.wrc_plus <= 95 ? 'text-rose-400' : 'text-slate-200')}">${t.wrc_plus}</td>
-                  <td class="text-right font-mono font-semibold text-amber-300">${t.era.toFixed(2)}</td>
-                  <td class="text-right font-mono text-slate-200">${t.fip.toFixed(2)}</td>
-                  <td class="text-right font-mono ${t.zr >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${t.zr > 0 ? '+' : ''}${t.zr.toFixed(1)}</td>
-                  <td class="text-right font-mono font-extrabold text-sky-400">${t.total_war.toFixed(1)}</td>
-                  <td class="text-right">
-                    <div class="flex items-center justify-end gap-1.5">
-                      <div class="w-12 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                        <div class="h-full bg-sky-400" style="width:${t.playoff_prob}%"></div>
-                      </div>
-                      <span class="font-mono text-xs">${t.playoff_prob.toFixed(0)}%</span>
-                    </div>
-                  </td>
-                  <td class="text-right font-mono text-slate-300">${fmtMoney(t.payroll)}</td>
-                </tr>
-              `;
-            }).join("")}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  `).join("");
+  // Level-1 Hero KPI Leaders
+  const juggernaut = [...standings].sort((a, b) => (Number(b.power_score || 0) - Number(a.power_score || 0)) || (b.pct - a.pct))[0] || {};
+  const regAlert = [...standings].sort((a, b) => Math.abs(Number(b.luck_diff || 0)) - Math.abs(Number(a.luck_diff || 0)))[0] || {};
+  const hotClub = [...standings].sort((a, b) => (Number(b.l10_w || 0) - Number(a.l10_w || 0)) || (Number(b.l10_run_diff || 0) - Number(a.l10_run_diff || 0)))[0] || {};
+  const jugBWarShare = Math.min(88, Math.max(12, Math.round((Math.max(0.1, Number(juggernaut.bat_war || 0)) / Math.max(0.2, Number(juggernaut.total_war || 1))) * 100)));
+  const isOverlucky = Number(regAlert.luck_diff || 0) >= 0;
 
-  const renderLeaderCard = (title, icon, items, valKey, valFormatter, subKey, subLabel) => `
-    <div class="glass-card p-4">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
-        <div class="flex items-center gap-2">
-          <i class="bi ${icon} text-sky-400"></i>
-          <h4 class="font-bold text-xs uppercase tracking-wider text-slate-200">${title}</h4>
+  // Interactive Center-Stage Top Visual Suite (Modes A / B / C)
+  const renderTrueTalentVisualSuiteHtml = () => {
+    let bodyHtml = "";
+    if (visualMode === "quadrant") {
+      const wrcs = standings.map(t => Number(t.wrc_plus || 100));
+      const fipsM = standings.map(t => Number(t.fip_minus || 100));
+      const maxDevX = Math.max(18, ...wrcs.map(v => Math.abs(v - 100))) * 1.15;
+      const maxDevY = Math.max(16, ...fipsM.map(v => Math.abs(v - 100))) * 1.15;
+      const lblFill = isLight ? "#0F172A" : "#E2E8F0";
+
+      const dotsSvg = standings.map(t => {
+        const wrc = Number(t.wrc_plus || 100);
+        const fipM = Number(t.fip_minus || 100);
+        const px = 385 + ((wrc - 100) / maxDevX) * 305;
+        const py = 132 + ((fipM - 100) / maxDevY) * 98; // lower FIP- = higher on chart
+        const qCol = (wrc >= 100 && fipM <= 100) ? "#10B981" : (wrc >= 100 && fipM > 100) ? "#F59E0B" : (wrc < 100 && fipM <= 100) ? "#38BDF8" : "#F43F5E";
+        return `
+          <g onclick="switchTeamAndGo(${t.team_id})" class="cursor-pointer">
+            <circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="7" fill="${qCol}" fill-opacity="0.90" stroke="#0F172A" stroke-width="1.5">
+              <title>${t.full_name} (${t.record_str}) · ${wrc} wRC+ (${Number(t.bsr_rs_per_g || 0).toFixed(2)} BsR/G) · ${fipM} FIP- (${Number(t.fip || 0).toFixed(2)} FIP) · ${Number(t.total_war || 0).toFixed(1)} WAR</title>
+            </circle>
+            <text x="${px.toFixed(1)}" y="${(py - 10).toFixed(1)}" text-anchor="middle" fill="${lblFill}" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="10">${t.abbr}</text>
+          </g>
+        `;
+      }).join("");
+
+      bodyHtml = `
+        <div class="rounded-xl bnn-visual-canvas p-2">
+          <svg viewBox="0 0 750 264" class="w-full h-auto block select-none">
+            <rect x="65" y="20" width="320" height="112" fill="#38BDF8" fill-opacity="0.08" />
+            <rect x="385" y="20" width="325" height="112" fill="#10B981" fill-opacity="0.10" />
+            <rect x="65" y="132" width="320" height="110" fill="#F43F5E" fill-opacity="0.08" />
+            <rect x="385" y="132" width="325" height="110" fill="#F59E0B" fill-opacity="0.08" />
+            <line x1="385" y1="20" x2="385" y2="242" stroke="#64748B" stroke-width="1.2" stroke-dasharray="4,4" />
+            <line x1="65" y1="132" x2="710" y2="132" stroke="#64748B" stroke-width="1.2" stroke-dasharray="4,4" />
+            <text x="76" y="37" fill="#38BDF8" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="10">PITCHING FORTRESSES (FIP- &lt; 100 / wRC+ &lt; 100)</text>
+            <text x="700" y="37" text-anchor="end" fill="#10B981" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="10">ELITE CONTENDERS (wRC+ &ge; 100 &amp; FIP- &le; 100)</text>
+            <text x="76" y="232" fill="#F43F5E" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="10">LOTTERY REBUILDERS (wRC+ &lt; 100 &amp; FIP- &gt; 100)</text>
+            <text x="700" y="232" text-anchor="end" fill="#F59E0B" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="10">SLUGFEST OFFENSES (wRC+ &ge; 100 / FIP- &gt; 100)</text>
+            <text x="388" y="257" text-anchor="middle" fill="#94A3B8" font-family="'JetBrains Mono', monospace" font-weight="700" font-size="10">RUN CREATION: TEAM wRC+ &amp; BASERUNS RS/G (100 = LG AVG) &rarr; CLICK ANY CLUB DOT FOR FRANCHISE HUB</text>
+            <text x="20" y="132" text-anchor="middle" transform="rotate(-90 20 132)" fill="#94A3B8" font-family="'JetBrains Mono', monospace" font-weight="700" font-size="10">&larr; RUN PREVENTION (FIP-)</text>
+            ${dotsSvg}
+          </svg>
         </div>
-        <span class="text-[10px] font-mono text-slate-400 uppercase">${env.season_year || ''}</span>
-      </div>
-      <div class="space-y-2">
-        ${(items || []).slice(0, 5).map((p, i) => `
-          <div onclick="openPlayerModal(${p.player_id})" class="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-800/70 cursor-pointer transition">
-            <div class="flex items-center gap-2.5 min-w-0">
-              <span class="text-xs font-mono font-bold ${i === 0 ? 'text-amber-400' : 'text-slate-500'} w-4">${i + 1}</span>
-              <img src="${playerPicUrl(p.player_id)}" class="w-7 h-9 object-cover rounded border border-slate-700" alt="">
-              <div class="truncate">
-                <div class="text-xs font-bold text-white truncate">${p.name}</div>
-                <div class="text-[10px] text-slate-400">${p.team_abbr} • ${p.position || p.role}</div>
+      `;
+    } else if (visualMode === "barbell") {
+      const sortedLuck = [...standings].sort((a, b) => Number(b.luck_diff || 0) - Number(a.luck_diff || 0));
+      const pcts = standings.flatMap(t => [Number(t.pct || 0.5), Number(t.bsr_pct || t.pyth_pct || 0.5)]);
+      const minP = Math.min(0.320, ...pcts) - 0.02;
+      const spanP = Math.max(0.200, Math.max(0.680, ...pcts) + 0.02 - minP);
+
+      bodyHtml = `
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+          ${sortedLuck.map(t => {
+            const actX = Math.max(4, Math.min(96, ((Number(t.pct || 0.5) - minP) / spanP) * 100));
+            const expPct = Number(t.bsr_pct || t.pyth_pct || 0.5);
+            const expX = Math.max(4, Math.min(96, ((expPct - minP) / spanP) * 100));
+            const left = Math.min(actX, expX);
+            const width = Math.max(1.5, Math.abs(actX - expX));
+            const over = Number(t.luck_diff || 0) >= 0;
+            return `
+              <div onclick="switchTeamAndGo(${t.team_id})" class="bnn-subcard rounded-lg px-2.5 py-1.5 flex items-center gap-2 text-xs font-mono cursor-pointer bnn-row-hover">
+                <img src="${teamLogoUrl(t.logo_file_name)}" class="w-4 h-4 object-contain shrink-0" alt="">
+                <span class="w-9 font-black">${t.abbr}</span>
+                <div class="flex-1 relative h-4 flex items-center">
+                  <div class="w-full h-1 rounded bg-slate-500/25"></div>
+                  <div class="absolute h-1.5 rounded ${over ? 'bg-amber-400' : 'bg-emerald-400'}" style="left:${left}%;width:${width}%"></div>
+                  <span title="BaseRuns/Pyth Expected: ${fmtAvg(expPct)}" class="absolute w-2.5 h-2.5 rounded-full bg-sky-400 border border-slate-950 -ml-1" style="left:${expX}%"></span>
+                  <span title="Actual Win%: ${fmtAvg(t.pct)}" class="absolute w-3 h-3 rounded-full ${over ? 'bg-amber-400' : 'bg-rose-400'} border-2 border-slate-950 -ml-1.5" style="left:${actX}%"></span>
+                </div>
+                <span class="w-24 text-right font-bold ${Math.abs(t.luck_diff) >= 3.5 ? (over ? 'text-amber-400' : 'text-emerald-400') : 'bnn-muted'}">
+                  ${fmtSigned(t.luck_diff, 1)}W (${t.record_str})
+                </span>
               </div>
-            </div>
-            <div class="text-right">
-              <div class="text-sm font-extrabold font-mono text-sky-400">${valFormatter(p[valKey])}</div>
-              <div class="text-[10px] font-mono text-slate-400">${subLabel}: ${p[subKey]}</div>
-            </div>
+            `;
+          }).join("")}
+        </div>
+        <div class="flex flex-wrap justify-between text-[11px] font-mono bnn-muted pt-2">
+          <span>&#9679; Sky = BaseRuns/Pyth Expected Win% &middot; &#9679; Amber/Rose = Actual Win%</span>
+          <span>+Luck &Delta; = Cluster-Luck Overperformance &middot; &minus;Luck &Delta; = Positive Regression Candidate</span>
+        </div>
+      `;
+    } else {
+      const maxTotWar = Math.max(25, ...standings.map(t => Math.max(1, Number(t.bat_war || 0)) + Math.max(1, Number(t.pit_war || 0))));
+      bodyHtml = `
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          ${divGroupList.map(grp => {
+            const dTeams = [...grp.teams].sort((a, b) => Number(b.total_war || 0) - Number(a.total_war || 0));
+            return `
+              <div class="bnn-subcard rounded-xl p-2.5 space-y-2">
+                <div class="flex justify-between items-center text-[11px] font-mono border-b bnn-border pb-1">
+                  <span class="font-extrabold uppercase text-amber-400 truncate">${grp.key}</span>
+                  <span class="bnn-muted">Bat WAR / Pit WAR / Def ZR</span>
+                </div>
+                ${dTeams.map(t => {
+                  const bw = Math.max(3, Math.round((Math.max(0, Number(t.bat_war || 0)) / maxTotWar) * 100));
+                  const pw = Math.max(3, Math.round((Math.max(0, Number(t.pit_war || 0)) / maxTotWar) * 100));
+                  return `
+                    <div onclick="switchTeamAndGo(${t.team_id})" class="space-y-1 text-xs font-mono cursor-pointer bnn-row-hover rounded px-1 py-0.5">
+                      <div class="flex justify-between">
+                        <span class="font-bold">${t.abbr} <span class="bnn-muted font-normal">(${t.record_str})</span></span>
+                        <span><strong>${Number(t.total_war || 0).toFixed(1)} WAR</strong> &middot; <span class="text-rose-400">${Number(t.bat_war || 0).toFixed(1)}B</span> / <span class="text-sky-400">${Number(t.pit_war || 0).toFixed(1)}P</span> &middot; <span class="${Number(t.zr || 0) >= 0 ? 'text-emerald-400' : 'text-amber-400'}">${fmtSigned(t.zr, 1)} ZR</span></span>
+                      </div>
+                      <div class="w-full h-2 rounded-full bg-slate-900/70 overflow-hidden flex gap-0.5">
+                        <div class="bg-rose-500 h-full" style="width:${bw}%"></div>
+                        <div class="bg-sky-400 h-full" style="width:${pw}%"></div>
+                      </div>
+                    </div>
+                  `;
+                }).join("")}
+              </div>
+            `;
+          }).join("")}
+        </div>
+      `;
+    }
+
+    return `
+      <div class="bnn-card rounded-xl overflow-hidden">
+        <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span class="text-[10.5px] font-mono uppercase text-emerald-400 font-extrabold">CENTER STAGE TOP &middot; TRUE-TALENT &amp; RUN-DIFFERENTIAL SUITE</span>
+            <h3 class="text-xs sm:text-sm font-extrabold mb-0">
+              ${visualMode === "quadrant"
+                ? "Run Creation (wRC+ / BsR RS/G) vs. Run Prevention (FIP-) 4-Quadrant Contender Map"
+                : visualMode === "barbell"
+                ? "Actual Win% vs. Pythagorean / BaseRuns Expected Win% Barbell & Luck Audit"
+                : "Division-by-Division Team WAR Split Bars (Batting WAR + Pitching WAR + Def ZR)"}
+            </h3>
           </div>
-        `).join("")}
+          <div class="inline-flex rounded-lg bnn-card p-0.5 text-[11px] font-mono">
+            <button onclick="setOverviewVisualMode('quadrant')" class="px-2.5 py-1 rounded bnn-pill-btn font-bold ${visualMode === 'quadrant' ? 'active-blue' : ''}">A. 4-Quadrant Map</button>
+            <button onclick="setOverviewVisualMode('barbell')" class="px-2.5 py-1 rounded bnn-pill-btn font-bold ${visualMode === 'barbell' ? 'active-blue' : ''}">B. Pyth/BsR Barbell</button>
+            <button onclick="setOverviewVisualMode('warsplit')" class="px-2.5 py-1 rounded bnn-pill-btn font-bold ${visualMode === 'warsplit' ? 'active-blue' : ''}">C. Div WAR Splits</button>
+          </div>
+        </div>
+        <div class="p-3">${bodyHtml}</div>
       </div>
-    </div>
-  `;
+    `;
+  };
+  // Broadcast Standings & Sabermetric Agate Tables (Division / Sub-League WC / Full Super-Table)
+  const renderBroadcastStandingsHtml = () => {
+    let tableGroups = [];
+    if (standingsView === "division") {
+      tableGroups = divGroupList.map(g => ({ title: `${g.key} Standings (${env.season_year || ''})`, rows: g.teams }));
+    } else if (standingsView === "wildcard") {
+      tableGroups = subLeagueNames.map(sl => ({
+        title: `${sl} — Sub-League & Wild Card Matrix (${env.season_year || ''})`,
+        rows: [...(subLeagueMap[sl] || [])].sort((a, b) => (b.pct - a.pct) || (b.w - a.w))
+      }));
+    } else {
+      tableGroups = [{
+        title: `${ov.active_league ? ov.active_league.name : 'League'} — Full Super-Table (${standings.length} Clubs)`,
+        rows: [...standings].sort((a, b) => (b.pct - a.pct) || (b.w - a.w) || (b.run_diff - a.run_diff))
+      }];
+    }
+
+    return `
+      <div class="bnn-card rounded-xl overflow-hidden">
+        <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span class="text-[10.5px] font-mono uppercase text-amber-400 font-extrabold">CENTER STAGE &middot; BROADCAST STANDINGS &amp; SABERMETRIC AGATE</span>
+            <h3 class="text-xs sm:text-sm font-extrabold mb-0">
+              Division &amp; True-Talent Standings Matrix ${hasTies ? '<span class="ml-1 px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 text-[10px] font-mono">W-L-T</span>' : ''}
+            </h3>
+          </div>
+          <div class="inline-flex rounded-lg bnn-card p-0.5 text-[11px] font-mono">
+            <button onclick="setOverviewStandingsView('division')" class="px-2 py-1 rounded bnn-pill-btn font-bold ${standingsView === 'division' ? 'active-red' : ''}">Division View</button>
+            <button onclick="setOverviewStandingsView('wildcard')" class="px-2 py-1 rounded bnn-pill-btn font-bold ${standingsView === 'wildcard' ? 'active-red' : ''}">Sub-League / WC</button>
+            <button onclick="setOverviewStandingsView('super')" class="px-2 py-1 rounded bnn-pill-btn font-bold ${standingsView === 'super' ? 'active-red' : ''}">Full Super-Table</button>
+          </div>
+        </div>
+
+        <div class="divide-y bnn-border">
+          ${tableGroups.map(grp => {
+            const topTm = grp.rows[0] || { w: 0, l: 0 };
+            return `
+              <div>
+                <div class="px-3.5 py-1.5 bg-sky-500/10 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
+                  <span class="font-extrabold uppercase text-sky-400"><i class="bi bi-trophy-fill text-amber-400 mr-1"></i>${grp.title}</span>
+                  <span class="bnn-muted">Click any team for Franchise Hub &bull; Click column headers to sort</span>
+                </div>
+                <div class="overflow-x-auto">
+                  <table class="saber-table">
+                    <thead>
+                      <tr>
+                        <th class="text-left">Club</th>
+                        <th class="text-right">W</th>
+                        <th class="text-right">L</th>
+                        <th class="text-right" title="Tied Games">T</th>
+                        <th class="text-right">PCT</th>
+                        <th class="text-right">GB</th>
+                        <th class="text-right" title="Magic / Elimination Number">Magic#</th>
+                        <th class="text-right" title="Last 10 Record & Chronological Sequence">L10</th>
+                        <th class="text-right">Strk</th>
+                        <th class="text-right">Home / Road</th>
+                        <th class="text-right">RS</th>
+                        <th class="text-right">RA</th>
+                        <th class="text-right">Diff</th>
+                        <th class="text-right" title="Dynamic Pythagenpat Expected W-L">Pyth W-L</th>
+                        <th class="text-right" title="Actual Wins minus Pythagorean Wins">Luck &Delta;</th>
+                        <th class="text-right" title="BaseRuns Expected Runs Scored">BsR RS</th>
+                        <th class="text-right">wOBA</th>
+                        <th class="text-right">wRC+</th>
+                        <th class="text-right">ERA</th>
+                        <th class="text-right">FIP</th>
+                        <th class="text-right">Def ZR</th>
+                        <th class="text-right">Fram</th>
+                        <th class="text-right">BatW</th>
+                        <th class="text-right">PitW</th>
+                        <th class="text-right">WAR</th>
+                        <th class="text-right">Playoff %</th>
+                        <th class="text-right">Payroll</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${grp.rows.map((t, idx) => {
+                        const tiesCount = Number(t.t || 0);
+                        const pythStr = tiesCount > 0 ? `${t.pyth_w}-${t.pyth_l}-${tiesCount}` : `${t.pyth_w}-${t.pyth_l}`;
+                        const gbVal = standingsView === "division" ? Number(t.gb || 0) : (((topTm.w - t.w) + (t.l - topTm.l)) / 2.0);
+                        const mStr = t.magic_str || "-";
+                        const mCls = mStr === "CLINCHED" ? "text-amber-400 font-extrabold" : (mStr === "ELIM" ? "bnn-muted" : "text-sky-400 font-bold");
+                        const luckVal = Number(t.luck_diff || 0);
+                        const luckBadgeCls = Math.abs(luckVal) >= 3.5 ? (luckVal > 0 ? "bg-amber-500/20 text-amber-400 font-bold px-1.5 py-0.5 rounded" : "bg-emerald-500/20 text-emerald-400 font-bold px-1.5 py-0.5 rounded") : (luckVal > 0 ? "text-amber-400" : (luckVal < 0 ? "text-emerald-400" : "bnn-muted"));
+                        return `
+                          <tr onclick="switchTeamAndGo(${t.team_id})" class="cursor-pointer">
+                            <td class="font-bold">
+                              <div class="flex items-center gap-2">
+                                <span class="text-[11px] font-mono bnn-muted w-4">${idx + 1}</span>
+                                <img src="${teamLogoUrl(t.logo_file_name)}" class="w-5 h-5 object-contain rounded shrink-0" alt="${t.abbr}">
+                                <div class="truncate">
+                                  <span class="hover:text-sky-400 transition">${t.full_name}</span>
+                                  <span class="ml-1 text-[10px] font-mono px-1 py-0.5 rounded bnn-subcard">${t.abbr}</span>
+                                  ${t.human_team ? `<span class="ml-1 text-[10px] px-1 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-mono">GM</span>` : ""}
+                                </div>
+                              </div>
+                            </td>
+                            <td class="text-right font-mono font-black">${t.w}</td>
+                            <td class="text-right font-mono bnn-muted">${t.l}</td>
+                            <td class="text-right font-mono ${tiesCount > 0 ? 'text-amber-400 font-bold' : 'bnn-muted'}">${tiesCount}</td>
+                            <td class="text-right font-mono font-bold text-sky-400">${fmtAvg(t.pct)}</td>
+                            <td class="text-right font-mono bnn-muted">${gbVal <= 0 ? "—" : gbVal.toFixed(1)}</td>
+                            <td class="text-right font-mono text-xs ${mCls}">${mStr}</td>
+                            <td class="text-right font-mono text-xs">
+                              <div class="inline-flex items-center gap-1.5">
+                                <span class="${(t.l10_w || 0) >= 7 ? 'text-emerald-400 font-bold' : ((t.l10_w || 0) <= 3 ? 'text-rose-400' : '')}">${t.l10_str || '5-5'}</span>
+                                ${renderSeqDots(t.l10_seq)}
+                              </div>
+                            </td>
+                            <td class="text-right font-mono text-xs font-bold ${t.streak > 0 ? 'text-emerald-400' : (t.streak < 0 ? 'text-rose-400' : 'bnn-muted')}">${t.streak_str}</td>
+                            <td class="text-right font-mono text-xs bnn-muted">${t.home_str || '-'} / ${t.away_str || '-'}</td>
+                            <td class="text-right font-mono">${t.rs}</td>
+                            <td class="text-right font-mono">${t.ra}</td>
+                            <td class="text-right font-mono font-bold ${t.run_diff > 0 ? 'text-emerald-400' : (t.run_diff < 0 ? 'text-rose-400' : 'bnn-muted')}">${t.run_diff > 0 ? '+' : ''}${t.run_diff}</td>
+                            <td class="text-right font-mono">${pythStr}</td>
+                            <td class="text-right font-mono"><span class="${luckBadgeCls}">${fmtSigned(luckVal, 1)}</span></td>
+                            <td class="text-right font-mono">${Number(t.bsr_rs || t.rs || 0).toFixed(0)}</td>
+                            <td class="text-right font-mono">${fmtAvg(t.woba)}</td>
+                            <td class="text-right font-mono font-bold ${t.wrc_plus >= 106 ? 'text-emerald-400' : (t.wrc_plus <= 94 ? 'text-rose-400' : '')}">${t.wrc_plus}</td>
+                            <td class="text-right font-mono font-semibold text-amber-400">${Number(t.era || 0).toFixed(2)}</td>
+                            <td class="text-right font-mono font-bold ${t.fip <= (env.league_era || 4.10) * 0.92 ? 'text-emerald-400' : ''}">${Number(t.fip || 0).toFixed(2)}</td>
+                            <td class="text-right font-mono ${t.zr >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${fmtSigned(t.zr, 1)}</td>
+                            <td class="text-right font-mono ${Number(t.framing || 0) >= 0 ? 'text-sky-400' : 'text-rose-400'}">${fmtSigned(t.framing || 0, 1)}</td>
+                            <td class="text-right font-mono">${Number(t.bat_war || 0).toFixed(1)}</td>
+                            <td class="text-right font-mono">${Number(t.pit_war || 0).toFixed(1)}</td>
+                            <td class="text-right font-mono font-black text-sky-400">${Number(t.total_war || 0).toFixed(1)}</td>
+                            <td class="text-right font-mono">
+                              <div class="inline-flex items-center justify-end gap-1.5">
+                                <div class="w-11 h-1.5 bg-slate-700/50 rounded-full overflow-hidden">
+                                  <div class="h-full bg-emerald-400" style="width:${Math.min(100, Math.max(0, Number(t.playoff_prob || 0)))}%"></div>
+                                </div>
+                                <span class="text-xs">${Number(t.playoff_prob || 0).toFixed(0)}%</span>
+                              </div>
+                            </td>
+                            <td class="text-right font-mono bnn-muted">${fmtMoney(t.payroll)}</td>
+                          </tr>
+                        `;
+                      }).join("")}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `;
+  };
+
+  // Left Margin Pacesetters Config
+  const leaderConfigs = {
+    bat_war: { label: "Bat WAR", items: leaders.bat_war || [], valFn: p => Number(p.war || 0).toFixed(1), subFn: p => `${p.wrc_plus || 100} wRC+ · ${fmtAvg(p.xwoba || p.woba)} xwOBA` },
+    bat_wrc: { label: "wRC+ / xwOBA", items: leaders.bat_wrc || [], valFn: p => `${p.wrc_plus || 100}`, subFn: p => `${fmtAvg(p.xwoba || p.woba)} xwOBA · ${p.hr || 0} HR` },
+    pit_war: { label: "Pit WAR", items: leaders.pit_war || [], valFn: p => Number(p.war || 0).toFixed(1), subFn: p => `${Number(p.fip || 0).toFixed(2)} FIP · ${p.pitching_plus || 105} Pit+` },
+    pit_fip: { label: "FIP / Pit+", items: leaders.pit_fip || [], valFn: p => Number(p.fip || 0).toFixed(2), subFn: p => `${p.pitching_plus || 105} Pit+ · ${Number(p.k9 || 0).toFixed(1)} K/9` }
+  };
+  const activeLdrCfg = leaderConfigs[leaderCat] || leaderConfigs.bat_war;
+
+  // Right Margin Unit Leaders & Division Parity
+  const bestOff = [...standings].sort((a, b) => Number(b.wrc_plus || 0) - Number(a.wrc_plus || 0))[0] || {};
+  const bestRot = [...standings].sort((a, b) => Number(a.fip || 99) - Number(b.fip || 99))[0] || {};
+  const bestPen = [...standings].sort((a, b) => (Number(b.sv || 0) + Number(b.k_bb_pct || 0)) - (Number(a.sv || 0) + Number(a.k_bb_pct || 0)))[0] || {};
+  const bestDef = [...standings].sort((a, b) => (Number(b.zr || 0) + Number(b.framing || 0)) - (Number(a.zr || 0) + Number(a.framing || 0)))[0] || {};
+  const bestAtt = [...standings].sort((a, b) => (Number(b.attendance || 0) - Number(a.attendance || 0)) || (Number(b.fan_interest || 0) - Number(a.fan_interest || 0)))[0] || {};
+
+  // Ultrawide 4th Column Sub-League Explorer
+  const uwSlIdx = Math.min(Math.max(0, Number(AppState.overviewUwSlFilter || 0)), Math.max(0, subLeagueNames.length - 1));
+  const uwActiveSlName = subLeagueNames[uwSlIdx] || "League";
+  const uwSlTeams = [...(subLeagueMap[uwActiveSlName] || standings)].sort((a, b) => (b.pct - a.pct) || (b.w - a.w));
+
+  // Archetype 4 Comparator Clubs
+  const sortedByPower = [...standings].sort((a, b) => Number(b.power_score || 0) - Number(a.power_score || 0));
+  const cmpA = standings.find(t => t.team_id === Number(AppState.overviewCmpTeamA)) || sortedByPower[0] || standings[0] || {};
+  const cmpB = standings.find(t => t.team_id === Number(AppState.overviewCmpTeamB)) || sortedByPower[1] || standings[1] || cmpA;
+  const cmpDivFilter = AppState.overviewCmpDiv || "ALL";
+  const cmpFilteredRows = cmpDivFilter === "ALL" ? standings : ((divGroups[cmpDivFilter] && divGroups[cmpDivFilter].teams) || standings);
+  const renderCmpBarRow = (label, vA, vB, fmtFn, higherBetter = true) => {
+    const nA = Number(vA || 0);
+    const nB = Number(vB || 0);
+    const aWins = higherBetter ? nA >= nB : nA <= nB;
+    const denom = Math.max(0.01, Math.abs(nA) + Math.abs(nB));
+    const shareA = Math.min(82, Math.max(18, Math.round((Math.abs(nA) / denom) * 100)));
+    return `
+      <div class="space-y-1 text-xs font-mono">
+        <div class="flex justify-between">
+          <span class="${aWins ? 'text-emerald-400 font-black' : 'bnn-muted'}">${fmtFn(nA)}</span>
+          <span class="font-sans font-bold uppercase bnn-muted text-[11px]">${label}</span>
+          <span class="${!aWins ? 'text-emerald-400 font-black' : 'bnn-muted'}">${fmtFn(nB)}</span>
+        </div>
+        <div class="w-full h-2 rounded-full bg-slate-800/70 overflow-hidden flex gap-0.5">
+          <div class="${aWins ? 'bg-emerald-500' : 'bg-slate-500'}" style="width:${shareA}%"></div>
+          <div class="${!aWins ? 'bg-sky-400' : 'bg-slate-500'}" style="width:${100 - shareA}%"></div>
+        </div>
+      </div>
+    `;
+  };
 
   container.innerHTML = `
-    <div class="animate-view space-y-4">
-      <!-- Interactive Multi-League & Multi-Year Browser Bar -->
-      ${(leagues.length > 1 || availYears.length > 1 || dumps.length > 1) ? `
-      <div class="glass-card p-3 flex flex-col uw:flex-row uw:items-center uw:justify-between gap-2.5">
-        ${leagues.length > 1 ? `
-          <div class="flex flex-wrap items-center gap-1.5">
-            <span class="text-[10px] font-extrabold uppercase tracking-wider text-amber-400 mr-1"><i class="bi bi-diagram-2-fill mr-1"></i>Leagues in Save (${leagues.length}):</span>
-            ${leagues.map(l => `
-              <button onclick="onLeagueChanged(${l.league_id})" class="px-2.5 py-1 rounded-lg text-xs font-bold border transition ${l.league_id === AppState.activeLeagueId ? 'bg-sky-500 text-slate-950 border-sky-300 shadow' : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-600'}">
-                <span class="text-[10px] font-mono opacity-75">[${l.level_label || 'L' + l.league_level}]</span> ${l.abbr} <span class="text-[10px] font-normal opacity-80">(${l.teams_count || 0}T)</span>
-              </button>
-            `).join("")}
-          </div>
-        ` : ""}
-        ${availYears.length > 1 ? `
-          <div class="flex flex-wrap items-center gap-1.5">
-            <span class="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 mr-1"><i class="bi bi-calendar3 mr-1"></i>Season Years (${availYears.length}):</span>
-            ${availYears.slice(0, 18).map(y => `
-              <button onclick="onYearChanged(${y})" class="px-2 py-0.5 rounded-lg text-xs font-mono font-bold border transition ${Number(y) === Number(env.season_year) ? 'bg-sky-500 text-slate-950 border-sky-300 shadow' : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-600'}">
-                ${y}
-              </button>
-            `).join("")}
-            ${availYears.length > 18 ? `<span class="text-[10px] text-slate-400 font-mono">+${availYears.length - 18} earlier years in top Year dropdown</span>` : ""}
-          </div>
-        ` : ""}
-      </div>
-      ` : ""}
+    <div id="overview-bnn-root" class="animate-view ${themeCls} ${vpClass} -mx-2 sm:-mx-4 -mt-2 pb-10">
+      <div class="bnn-shell min-h-screen">
 
-      <!-- Top League Environment KPI Strip -->
-      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <div class="glass-card p-3.5 border-l-4 border-l-sky-400">
-          <div class="text-[11px] text-slate-400 font-semibold uppercase">Active League & Year</div>
-          <div class="text-lg font-extrabold text-white mt-0.5 truncate">${ov.active_league ? ov.active_league.abbr : 'MLB'} ${env.season_year}</div>
-          <div class="text-[11px] text-sky-400 font-mono">${standings.length} Teams • ${env.total_games} Games${env.total_ties ? ` (${env.total_ties} Ties)` : ''}</div>
-        </div>
-        <div class="glass-card p-3.5 border-l-4 border-l-emerald-400">
-          <div class="text-[11px] text-slate-400 font-semibold uppercase">League Slash / wOBA</div>
-          <div class="text-lg font-extrabold text-white font-mono mt-0.5">${fmtAvg(env.league_avg)} / ${fmtAvg(env.league_obp)} / ${fmtAvg(env.league_slg)}</div>
-          <div class="text-[11px] text-emerald-400 font-mono">lgwOBA: ${fmtAvg(env.league_woba)} • OPS: ${fmtAvg(env.league_ops)}</div>
-        </div>
-        <div class="glass-card p-3.5 border-l-4 border-l-amber-400">
-          <div class="text-[11px] text-slate-400 font-semibold uppercase">Pitching Environment</div>
-          <div class="text-lg font-extrabold text-white font-mono mt-0.5">${Number(env.league_era || 0).toFixed(2)} ERA</div>
-          <div class="text-[11px] text-amber-400 font-mono">FIP Constant: ${Number(env.fip_constant || 3.15).toFixed(2)}</div>
-        </div>
-        <div class="glass-card p-3.5 border-l-4 border-l-pink-500">
-          <div class="text-[11px] text-slate-400 font-semibold uppercase">Statcast PAs Tracked</div>
-          <div class="text-lg font-extrabold text-white font-mono mt-0.5">${Number(env.at_bats_tracked || 0).toLocaleString()}</div>
-          <div class="text-[11px] text-pink-400 font-mono">${Number(env.total_hr || 0).toLocaleString()} HR • ${Number(env.total_k || 0).toLocaleString()} K</div>
-        </div>
-        <div class="glass-card p-3.5 border-l-4 border-l-purple-400 cursor-pointer" onclick="switchTab('evolution')">
-          <div class="text-[11px] text-slate-400 font-semibold uppercase">Dumps & Almanacs</div>
-          <div class="text-lg font-extrabold text-white font-mono mt-0.5">${dumps.length} Dumps • ${((ov.supplemental && ov.supplemental.almanacs) || []).length} Alm</div>
-          <div class="text-[11px] text-purple-400 font-semibold">Open Evolution & Vault &rarr;</div>
-        </div>
-        <div class="glass-card p-3.5 border-l-4 border-l-cyan-400 cursor-pointer" onclick="switchTab('bnn')">
-          <div class="text-[11px] text-slate-400 font-semibold uppercase">OOTP 27 BNN Reports</div>
-          <div class="text-lg font-extrabold text-white font-mono mt-0.5">${Number(ov.save_meta.html_count || 0).toLocaleString()} HTMLs</div>
-          <div class="text-[11px] text-cyan-400 font-semibold">Open BNN & Almanacs &rarr;</div>
-        </div>
-      </div>
+        <!-- =============================================================== -->
+        <!-- 1. TOP STRIP: RECENT SCOREBOARD & MULTI-LEAGUE/YEAR/DUMP RIBBON -->
+        <!-- =============================================================== -->
+        <section class="bnn-card border-t-0 border-x-0 px-3 py-2">
+          <div class="bnn-stretch-container space-y-2">
+            ${recentGames.length ? `
+              <div class="flex items-center gap-3 overflow-x-auto pb-1">
+                <div class="shrink-0 pr-3 border-r bnn-border">
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span class="text-xs font-extrabold uppercase tracking-wider">STATCAST TICKER</span>
+                  </div>
+                  <button onclick="switchTab('gamelogs')" class="text-[10.5px] font-mono text-sky-400 hover:underline font-bold">All Season Games &rarr;</button>
+                </div>
+                <div class="flex items-center gap-2">
+                  ${recentGames.slice(0, 12).map(g => {
+                    const aWin = g.away_runs > g.home_runs;
+                    return `
+                      <div onclick="openGameReplayModal(${g.game_id})" class="w-52 shrink-0 p-2 rounded-lg bnn-subcard bnn-row-hover cursor-pointer">
+                        <div class="flex justify-between items-center text-[10px] font-mono mb-1">
+                          <span class="bnn-muted">${g.date}</span>
+                          <span class="px-1.5 py-0.2 rounded font-bold ${g.innings > 9 ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' : 'bg-sky-500/15 text-sky-400'}">FINAL${g.innings > 9 ? '/' + g.innings : ''}</span>
+                        </div>
+                        <div class="flex justify-between items-center text-xs font-bold">
+                          <span class="flex items-center gap-1.5"><img src="${teamLogoUrl(g.away_logo)}" class="w-4 h-4 object-contain" alt=""><span class="${aWin ? '' : 'bnn-muted'}">${g.away_abbr}</span></span>
+                          <span class="font-mono ${aWin ? 'text-emerald-400 font-black' : 'bnn-muted'}">${g.away_runs}</span>
+                        </div>
+                        <div class="flex justify-between items-center text-xs font-bold mt-0.5">
+                          <span class="flex items-center gap-1.5"><img src="${teamLogoUrl(g.home_logo)}" class="w-4 h-4 object-contain" alt=""><span class="${!aWin ? '' : 'bnn-muted'}">${g.home_abbr}</span></span>
+                          <span class="font-mono ${!aWin ? 'text-emerald-400 font-black' : 'bnn-muted'}">${g.home_runs}</span>
+                        </div>
+                        <div class="mt-1 pt-1 border-t bnn-border text-[10px] font-mono text-amber-400 truncate" title="${g.hero_callout || '1-Click Pitch-by-Pitch Replay'}">
+                          &#9733; ${g.hero_callout || 'Pitch-by-Pitch Replay'}
+                        </div>
+                      </div>
+                    `;
+                  }).join("")}
+                </div>
+              </div>
+            ` : ""}
 
-      <!-- Recent Scoreboard Ticker (Expanded up to 10 games on Ultrawide) -->
-      ${recentGames.length ? `
-      <div class="glass-card p-3.5">
-        <div class="flex items-center justify-between mb-2.5">
-          <div class="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            Recent Box Scores & Statcast Game Logs
+            ${(leagues.length > 1 || availYears.length > 1 || dumps.length > 0) ? `
+              <div class="flex flex-wrap items-center justify-between gap-2 pt-1.5 ${recentGames.length ? 'border-t bnn-border' : ''} text-xs">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  ${leagues.length > 1 ? `
+                    <span class="text-[10.5px] font-mono font-extrabold uppercase text-amber-400 mr-0.5">LEAGUES (${leagues.length}):</span>
+                    ${leagues.map(l => `
+                      <button onclick="onLeagueChanged(${l.league_id})" class="px-2 py-0.5 rounded bnn-pill-btn font-mono text-[11px] font-bold ${l.league_id === AppState.activeLeagueId ? 'active-blue' : ''}">
+                        [${l.level_label || 'L' + l.league_level}] ${l.abbr} (${l.teams_count || 0}T)
+                      </button>
+                    `).join("")}
+                  ` : ""}
+                  ${availYears.length > 1 ? `
+                    <span class="text-[10.5px] font-mono font-extrabold uppercase text-emerald-400 ml-1 mr-0.5">YEARS:</span>
+                    ${availYears.slice(0, 14).map(y => `
+                      <button onclick="onYearChanged(${y})" class="px-2 py-0.5 rounded bnn-pill-btn font-mono text-[11px] font-bold ${Number(y) === Number(env.season_year) ? 'active-blue' : ''}">
+                        ${y}
+                      </button>
+                    `).join("")}
+                  ` : ""}
+                </div>
+                <div class="flex flex-wrap items-center gap-2 text-[11px] font-mono">
+                  ${dumps.length > 1 ? `
+                    <span class="bnn-muted">SNAPSHOT:</span>
+                    <select onchange="onDumpSourceChanged(this.value)" class="bnn-subcard rounded px-2 py-0.5 font-bold focus:outline-none cursor-pointer">
+                      ${dumps.map(d => `<option value="${d.source_id || d.folder_name || ''}" ${(d.label === ov.active_source_label || d.is_active) ? 'selected' : ''}>${d.label || d.folder_name}</option>`).join("")}
+                    </select>
+                  ` : `<span class="bnn-muted">SOURCE: <strong>${ov.active_source_label || 'import_export/csv'}</strong></span>`}
+                  <span class="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold">
+                    ${Number(env.at_bats_tracked || 0).toLocaleString()} Statcast PAs
+                  </span>
+                </div>
+              </div>
+            ` : ""}
           </div>
-          <button onclick="switchTab('gamelogs')" class="text-xs text-sky-400 hover:underline font-semibold">View All Season Games &rarr;</button>
-        </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 uw:grid-cols-8 suw:grid-cols-10 gap-2.5">
-          ${recentGames.slice(0, 10).map(g => `
-            <div onclick="openGameReplayModal(${g.game_id})" class="bg-slate-900/85 hover:bg-slate-800/90 border border-slate-800 hover:border-sky-500/50 rounded-xl p-2.5 cursor-pointer transition">
-              <div class="flex justify-between items-center text-[10px] text-slate-400 font-mono mb-1.5">
-                <span>${g.date}</span>
-                <span class="px-1.5 py-0.2 bg-slate-800 text-sky-300 rounded">FINAL${g.innings > 9 ? '/' + g.innings : ''}</span>
-              </div>
-              <div class="flex justify-between items-center text-xs font-bold mb-1">
-                <div class="flex items-center gap-1.5">
-                  <img src="${teamLogoUrl(g.away_logo)}" class="w-4 h-4 object-contain">
-                  <span class="${g.away_runs > g.home_runs ? 'text-white' : 'text-slate-400'}">${g.away_abbr}</span>
-                </div>
-                <span class="font-mono ${g.away_runs > g.home_runs ? 'text-emerald-400 font-extrabold' : 'text-slate-400'}">${g.away_runs}</span>
-              </div>
-              <div class="flex justify-between items-center text-xs font-bold">
-                <div class="flex items-center gap-1.5">
-                  <img src="${teamLogoUrl(g.home_logo)}" class="w-4 h-4 object-contain">
-                  <span class="${g.home_runs > g.away_runs ? 'text-white' : 'text-slate-400'}">${g.home_abbr}</span>
-                </div>
-                <span class="font-mono ${g.home_runs > g.away_runs ? 'text-emerald-400 font-extrabold' : 'text-slate-400'}">${g.home_runs}</span>
+        </section>
+
+        <!-- =============================================================== -->
+        <!-- 2. LOCKED-IN BNN.COM | OOTP+ SCOREBUG HEADER & 4-ARCHETYPE BAR  -->
+        <!-- =============================================================== -->
+        <header class="bg-gradient-to-r from-[#0F172A] via-[#1E293B] to-[#0B132B] text-white px-4 py-2 shadow-md border-b border-white/15">
+          <div class="bnn-stretch-container flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-4">
+              <svg width="185" height="40" viewBox="0 0 240 54" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="BNN.COM OOTP+ Broadcast Logo" class="shrink-0">
+                <g transform="skewX(-10) translate(12, 8)">
+                  <rect x="0" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
+                  <text x="17" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">B</text>
+                  <rect x="38" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
+                  <text x="55" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">N</text>
+                  <rect x="76" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
+                  <text x="93" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">N</text>
+                  <rect x="114" y="0" width="68" height="23" rx="3" fill="#090D14" stroke="#FFFFFF" stroke-width="1.2"/>
+                  <text x="148" y="16.5" text-anchor="middle" fill="#FFFFFF" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="16">.COM</text>
+                  <rect x="114" y="25" width="68" height="11" rx="2" fill="#F59E0B"/>
+                  <text x="148" y="33.2" text-anchor="middle" fill="#090D14" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="8.5" letter-spacing="1.2">OOTP+</text>
+                </g>
+              </svg>
+
+              <div class="hidden xl:flex items-center gap-3 text-xs font-extrabold tracking-wide uppercase">
+                <button onclick="switchTab('frontpage')" class="text-white/75 hover:text-white transition">01. Front Page</button>
+                <button onclick="switchTab('stretch')" class="text-white/75 hover:text-white transition">02. The Stretch</button>
+                <button onclick="switchTab('world')" class="text-white/75 hover:text-white transition">03. World &amp; Assoc</button>
+                <span class="text-amber-300 border-b-2 border-amber-300 pb-0.5">04. League Pulse &amp; Standings</span>
+                <button onclick="switchTab('teamhub')" class="text-white/75 hover:text-white transition">05. Team Hub</button>
               </div>
             </div>
-          `).join("")}
-        </div>
-      </div>
-      ` : ""}
 
-      <!-- Ultrawide Side-by-Side Command Grid: Standings Matrices + League Leaders -->
-      <div class="grid grid-cols-1 uw:grid-cols-12 gap-5 items-start">
-        <div class="uw:col-span-8 suw:col-span-9 min-w-0">
-          ${standingsHtml}
-        </div>
-        <div class="uw:col-span-4 suw:col-span-3 uw:sticky uw:top-[104px] grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 uw:grid-cols-2 gap-3.5">
-          ${renderLeaderCard("Batting WAR Leaders", "bi-star-fill", leaders.bat_war, "war", v => Number(v).toFixed(2), "wrc_plus", "wRC+")}
-          ${renderLeaderCard("Batting wRC+ Leaders", "bi-lightning-charge-fill", leaders.bat_wrc, "wrc_plus", v => v, "xwoba", "xwOBA")}
-          ${renderLeaderCard("Pitching WAR Leaders", "bi-shield-fill-check", leaders.pit_war, "war", v => Number(v).toFixed(2), "fip", "FIP")}
-          ${renderLeaderCard("Pitching FIP Leaders", "bi-fire", leaders.pit_fip, "fip", v => Number(v).toFixed(2), "k9", "K/9")}
+            <div class="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+              <div class="inline-flex items-center rounded-lg bg-black/45 p-0.5 border border-white/20">
+                <button onclick="setOverviewViewMode('portal')" class="px-2 py-0.5 rounded font-bold transition ${viewMode === 'portal' ? 'bg-amber-400 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">1. Command Portal &#9733;</button>
+                <button onclick="setOverviewViewMode('almanac')" class="px-2 py-0.5 rounded font-bold transition ${viewMode === 'almanac' ? 'bg-amber-400 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">2. B-Ref Almanac</button>
+                <button onclick="setOverviewViewMode('savant')" class="px-2 py-0.5 rounded font-bold transition ${viewMode === 'savant' ? 'bg-amber-400 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">3. Savant Process Lab</button>
+                <button onclick="setOverviewViewMode('comparator')" class="px-2 py-0.5 rounded font-bold transition ${viewMode === 'comparator' ? 'bg-amber-400 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">4. H2H Comparator</button>
+              </div>
+
+              <div class="inline-flex items-center rounded-lg bg-black/45 p-0.5 border border-white/20">
+                <button onclick="setOverviewViewportMode('auto')" class="px-2 py-0.5 rounded font-bold transition ${vpMode === 'auto' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'}">Auto</button>
+                <button onclick="setOverviewViewportMode('standard')" class="px-2 py-0.5 rounded font-bold transition ${vpMode === 'standard' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'}">16:9 (3-Col)</button>
+                <button onclick="setOverviewViewportMode('ultrawide')" class="px-2 py-0.5 rounded font-bold transition ${vpMode === 'ultrawide' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'}">21:9 (4-Col)</button>
+              </div>
+
+              <div class="inline-flex items-center rounded-lg bg-black/45 p-0.5 border border-white/20">
+                <button onclick="setOverviewTheme('dark')" class="px-2 py-0.5 rounded font-bold transition ${!isLight ? 'bg-white text-slate-900' : 'text-slate-300 hover:text-white'}">&#127769; Dark</button>
+                <button onclick="setOverviewTheme('light')" class="px-2 py-0.5 rounded font-bold transition ${isLight ? 'bg-amber-400 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">&#9728;&#65039; Light</button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <!-- =============================================================== -->
+        <!-- 3. MAIN BODY: 4 HERO KPI CARDS + ACTIVE ARCHETYPE               -->
+        <!-- =============================================================== -->
+        <div class="p-3.5 sm:p-4 bnn-stretch-container w-full space-y-4">
+
+          <!-- LEVEL-1 HERO KPI CALLOUT STRIP -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+            <!-- 01 · #1 POWER & BASERUNS JUGGERNAUT (CRIMSON) -->
+            <div onclick="${juggernaut.team_id ? `switchTeamAndGo(${juggernaut.team_id})` : ''}" class="stretch-hero-kpi stretch-kpi-crimson cursor-pointer">
+              <div class="h-1.5 w-full bg-gradient-to-r from-red-600 via-rose-500 to-amber-400"></div>
+              <div class="p-3.5 space-y-2.5">
+                <div class="flex items-center justify-between">
+                  <span class="inline-flex items-center gap-1.5 text-[11px] font-mono font-extrabold uppercase text-red-400">
+                    <span class="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
+                    01 &middot; #1 POWER &amp; BASERUNS JUGGERNAUT
+                  </span>
+                  <span class="px-2 py-0.5 rounded-full text-[10.5px] font-mono font-black bg-red-600 text-white">${fmtSigned(juggernaut.run_diff || 0, 0)} RD</span>
+                </div>
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-2.5 min-w-0">
+                    <div class="w-9 h-9 rounded-lg bg-slate-900 border-2 border-red-500/70 flex items-center justify-center p-1 shrink-0">
+                      <img src="${teamLogoUrl(juggernaut.logo_file_name)}" class="w-full h-full object-contain" alt="">
+                    </div>
+                    <div class="min-w-0">
+                      <div class="text-sm font-black truncate">${juggernaut.full_name || 'League Leader'}</div>
+                      <div class="text-[11px] font-mono bnn-muted truncate">Act <strong>${juggernaut.record_str || '-'}</strong> &middot; Pyth <strong>${juggernaut.pyth_w || 0}-${juggernaut.pyth_l || 0}</strong></div>
+                    </div>
+                  </div>
+                  <div class="text-right shrink-0">
+                    <div class="font-display text-2xl font-black text-amber-400 leading-none">${Number(juggernaut.power_score || 0).toFixed(1)}</div>
+                    <div class="text-[10px] font-mono font-bold text-red-400 mt-0.5">POWER SCORE</div>
+                  </div>
+                </div>
+                <div class="space-y-1">
+                  <div class="w-full h-2 rounded-full bg-slate-900/80 overflow-hidden flex border border-white/10">
+                    <div class="bg-red-500 h-full" style="width:${jugBWarShare}%"></div>
+                    <div class="bg-sky-400 h-full" style="width:${100 - jugBWarShare}%"></div>
+                  </div>
+                  <div class="flex justify-between text-[11px] font-mono">
+                    <span>BaseRuns: <strong>${juggernaut.bsr_w || 0}-${juggernaut.bsr_l || 0}</strong></span>
+                    <span>WAR: <strong class="text-amber-400">${Number(juggernaut.total_war || 0).toFixed(1)}</strong> (${juggernaut.bat_war || 0}B/${juggernaut.pit_war || 0}P)</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 02 · BIGGEST PYTHAGOREAN / BASERUNS REGRESSION ALERT (AMBER) -->
+            <div onclick="${regAlert.team_id ? `switchTeamAndGo(${regAlert.team_id})` : ''}" class="stretch-hero-kpi stretch-kpi-amber cursor-pointer">
+              <div class="h-1.5 w-full bg-gradient-to-r from-amber-500 via-yellow-400 to-orange-500"></div>
+              <div class="p-3.5 space-y-2.5">
+                <div class="flex items-center justify-between">
+                  <span class="text-[11px] font-mono font-extrabold uppercase text-amber-400">&#9888; 02 &middot; PYTH / BASERUNS REGRESSION</span>
+                  <span class="px-2 py-0.5 rounded-full text-[10.5px] font-mono font-black bg-amber-500 text-slate-950">${isOverlucky ? 'CLUSTER LUCK' : 'SNAKEBITTEN'}</span>
+                </div>
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-2.5 min-w-0">
+                    <div class="w-9 h-9 rounded-lg bg-slate-900 border-2 border-amber-500/70 flex items-center justify-center p-1 shrink-0">
+                      <img src="${teamLogoUrl(regAlert.logo_file_name)}" class="w-full h-full object-contain" alt="">
+                    </div>
+                    <div class="min-w-0">
+                      <div class="text-sm font-black truncate">${regAlert.full_name || 'Regression Club'}</div>
+                      <div class="text-[11px] font-mono bnn-muted truncate">Act <strong>${regAlert.record_str || '-'}</strong> vs Pyth <strong>${regAlert.pyth_w || 0}-${regAlert.pyth_l || 0}</strong></div>
+                    </div>
+                  </div>
+                  <div class="text-right shrink-0">
+                    <div class="font-display text-2xl font-black ${isOverlucky ? 'text-amber-400' : 'text-emerald-400'} leading-none">${fmtSigned(regAlert.luck_diff || 0, 1)}W</div>
+                    <div class="text-[10px] font-mono font-bold text-amber-400 mt-0.5">LUCK &Delta;</div>
+                  </div>
+                </div>
+                <div class="pt-1 border-t bnn-border flex justify-between text-[11px] font-mono">
+                  <span>1-Run: <strong>${regAlert.one_run_str || '-'}</strong> &middot; X-Inn: <strong>${regAlert.xinn_str || '-'}</strong></span>
+                  <span>BsR &Delta;: <strong>${fmtSigned(regAlert.bsr_luck_diff || 0, 1)}W</strong></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 03 · LEAGUE RUN ENVIRONMENT & PARK CONTEXT (COBALT) -->
+            <div class="stretch-hero-kpi stretch-kpi-cobalt">
+              <div class="h-1.5 w-full bg-gradient-to-r from-blue-600 via-sky-400 to-cyan-400"></div>
+              <div class="p-3.5 space-y-2.5">
+                <div class="flex items-center justify-between">
+                  <span class="text-[11px] font-mono font-extrabold uppercase text-sky-400">&#9672; 03 &middot; RUN ENVIRONMENT &amp; FIP BASELINE</span>
+                  <span class="px-2 py-0.5 rounded-full text-[10.5px] font-mono font-black bg-blue-600 text-white">cFIP ${Number(env.fip_constant || 3.15).toFixed(2)}</span>
+                </div>
+                <div class="flex items-center justify-between gap-2">
+                  <div class="min-w-0">
+                    <div class="text-[11px] font-mono bnn-muted uppercase truncate">${ov.active_league ? ov.active_league.name : 'League'} (${env.season_year || ''})</div>
+                    <div class="text-xs sm:text-sm font-mono font-black mt-0.5">${fmtAvg(env.league_avg)} / ${fmtAvg(env.league_obp)} / ${fmtAvg(env.league_slg)} <span class="text-sky-400">(${fmtAvg(env.league_ops)})</span></div>
+                  </div>
+                  <div class="text-right shrink-0">
+                    <div class="font-display text-2xl font-black text-sky-400 leading-none">${Number(env.league_era || 0).toFixed(2)}</div>
+                    <div class="text-[10px] font-mono font-bold text-sky-400 mt-0.5">LG ERA</div>
+                  </div>
+                </div>
+                <div class="pt-1 border-t bnn-border flex justify-between text-[11px] font-mono">
+                  <span>lgwOBA: <strong class="text-sky-400">${fmtAvg(env.league_woba)}</strong></span>
+                  <span><strong>${Number(env.hr_per_game || 0).toFixed(2)}</strong> HR/G &middot; <strong>${Number(env.k_per_game || 0).toFixed(1)}</strong> K/G</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 04 · RED-HOT MOMENTUM & LAST-10 SURGE (EMERALD) -->
+            <div onclick="${hotClub.team_id ? `switchTeamAndGo(${hotClub.team_id})` : ''}" class="stretch-hero-kpi stretch-kpi-emerald cursor-pointer">
+              <div class="h-1.5 w-full bg-gradient-to-r from-emerald-500 via-teal-400 to-lime-400"></div>
+              <div class="p-3.5 space-y-2.5">
+                <div class="flex items-center justify-between">
+                  <span class="text-[11px] font-mono font-extrabold uppercase text-emerald-400">&#9650; 04 &middot; RED-HOT MOMENTUM &amp; L10 SURGE</span>
+                  <span class="px-2 py-0.5 rounded-full text-[10.5px] font-mono font-black bg-emerald-600 text-white">STRK ${hotClub.streak_str || '-'}</span>
+                </div>
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-2.5 min-w-0">
+                    <div class="w-9 h-9 rounded-lg bg-slate-900 border-2 border-emerald-500/70 flex items-center justify-center p-1 shrink-0">
+                      <img src="${teamLogoUrl(hotClub.logo_file_name)}" class="w-full h-full object-contain" alt="">
+                    </div>
+                    <div class="min-w-0">
+                      <div class="text-sm font-black truncate">${hotClub.full_name || 'Momentum Leader'}</div>
+                      <div class="text-[11px] font-mono bnn-muted truncate">L10 RD: <strong class="text-emerald-400">${fmtSigned(hotClub.l10_run_diff || 0, 0)}</strong> &middot; Odds: <strong>${Number(hotClub.playoff_prob || 0).toFixed(0)}%</strong></div>
+                    </div>
+                  </div>
+                  <div class="text-right shrink-0">
+                    <div class="font-display text-2xl font-black text-emerald-400 leading-none">${hotClub.l10_str || '5-5'}</div>
+                    <div class="text-[10px] font-mono font-bold text-emerald-300 mt-0.5">LAST 10</div>
+                  </div>
+                </div>
+                <div class="pt-1 border-t bnn-border flex items-center justify-between text-[11px] font-mono">
+                  <span class="bnn-muted">L10 Sequence:</span>
+                  ${renderSeqDots(hotClub.l10_seq)}
+                </div>
+              </div>
+            </div>
+          </div>
+          ${viewMode === "almanac" ? `
+            <!-- =========================================================== -->
+            <!-- ARCHETYPE 2: BASEBALL-REFERENCE / RETROSHEET SEASON ALMANAC -->
+            <!-- =========================================================== -->
+            <div class="space-y-4">
+              <div class="bnn-card rounded-xl overflow-hidden">
+                <div class="px-4 py-3 bnn-subcard border-t-0 border-x-0 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <span class="text-[11px] font-mono text-amber-400 font-extrabold uppercase">ARCHETYPE 2 &middot; BASEBALL-REFERENCE / RETROSHEET ARCHIVAL LEDGER</span>
+                    <h3 class="text-sm font-black mb-0">${ov.active_league ? ov.active_league.name : 'League'} (${env.season_year || ''}) — Expanded Situational Standings &amp; Season Totals</h3>
+                  </div>
+                  <div class="flex items-center gap-3 text-xs font-mono">
+                    <span class="bnn-muted">Totals: <strong>${Number(env.total_runs || 0).toLocaleString()} R</strong> &middot; <strong>${Number(env.total_hr || 0).toLocaleString()} HR</strong> &middot; <strong>${Number(env.total_k || 0).toLocaleString()} K</strong></span>
+                    <button onclick="setOverviewViewMode('portal')" class="px-2.5 py-1 rounded bg-amber-400 text-slate-950 font-black">&larr; Command Portal</button>
+                  </div>
+                </div>
+                <div class="overflow-x-auto">
+                  <table class="saber-table font-mono">
+                    <thead>
+                      <tr>
+                        <th class="text-left">Rk</th>
+                        <th class="text-left">Franchise</th>
+                        <th class="text-left">Sub-Lg / Div</th>
+                        <th class="text-right">W</th>
+                        <th class="text-right">L</th>
+                        <th class="text-right">T</th>
+                        <th class="text-right">PCT</th>
+                        <th class="text-right">Home</th>
+                        <th class="text-right">Away</th>
+                        <th class="text-right">1-Run</th>
+                        <th class="text-right">X-Inn</th>
+                        <th class="text-right">vs.RHP</th>
+                        <th class="text-right">vs.LHP</th>
+                        <th class="text-right">L10</th>
+                        <th class="text-right">RS</th>
+                        <th class="text-right">RA</th>
+                        <th class="text-right">Diff</th>
+                        <th class="text-right">Pyth W-L</th>
+                        <th class="text-right">BaseRuns W-L</th>
+                        <th class="text-right">Luck &Delta;</th>
+                        <th class="text-right">HR</th>
+                        <th class="text-right">SB</th>
+                        <th class="text-right">Def Eff</th>
+                        <th class="text-right">WAR</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${[...standings].sort((a, b) => (b.pct - a.pct) || (b.w - a.w)).map((t, idx) => `
+                        <tr onclick="switchTeamAndGo(${t.team_id})" class="cursor-pointer">
+                          <td class="bnn-muted">${idx + 1}</td>
+                          <td class="font-sans font-bold">${t.full_name} <span class="font-mono text-[10px] bnn-muted">(${t.abbr})</span></td>
+                          <td class="font-sans text-xs bnn-muted">${t.sub_league_name || ''} ${t.division_name && t.division_name !== 'Division 0' ? '· ' + t.division_name : ''}</td>
+                          <td class="text-right font-black">${t.w}</td>
+                          <td class="text-right">${t.l}</td>
+                          <td class="text-right bnn-muted">${t.t || 0}</td>
+                          <td class="text-right font-bold text-sky-400">${fmtAvg(t.pct)}</td>
+                          <td class="text-right">${t.home_str || '-'}</td>
+                          <td class="text-right">${t.away_str || '-'}</td>
+                          <td class="text-right font-semibold">${t.one_run_str || '-'}</td>
+                          <td class="text-right">${t.xinn_str || '-'}</td>
+                          <td class="text-right">${t.vs_rhp_str || '-'}</td>
+                          <td class="text-right">${t.vs_lhp_str || '-'}</td>
+                          <td class="text-right">${t.l10_str || '-'}</td>
+                          <td class="text-right">${t.rs}</td>
+                          <td class="text-right">${t.ra}</td>
+                          <td class="text-right font-bold ${t.run_diff >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${t.run_diff > 0 ? '+' : ''}${t.run_diff}</td>
+                          <td class="text-right">${t.pyth_w}-${t.pyth_l}</td>
+                          <td class="text-right font-bold text-sky-400">${t.bsr_w}-${t.bsr_l}</td>
+                          <td class="text-right font-bold ${t.luck_diff > 0 ? 'text-amber-400' : 'text-emerald-400'}">${fmtSigned(t.luck_diff, 1)}</td>
+                          <td class="text-right">${t.hr}</td>
+                          <td class="text-right">${t.sb}</td>
+                          <td class="text-right">${fmtAvg(t.def_eff)}</td>
+                          <td class="text-right font-black">${Number(t.total_war || 0).toFixed(1)}</td>
+                        </tr>
+                      `).join("")}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              ${(env.historical_almanac && env.historical_almanac.length) ? `
+                <div class="bnn-card rounded-xl p-3.5">
+                  <div class="text-xs font-mono uppercase text-emerald-400 font-extrabold mb-2">Season-to-Season Historical Almanac Comparison (Click Any Year to Load)</div>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 text-xs font-mono">
+                    ${env.historical_almanac.map(h => `
+                      <div onclick="onYearChanged(${h.year})" class="bnn-subcard rounded-xl p-2.5 cursor-pointer bnn-row-hover space-y-1">
+                        <div class="flex justify-between font-black text-sm"><span>${h.year}</span><span class="text-amber-400">${Number(h.era || 0).toFixed(2)} ERA</span></div>
+                        <div class="font-sans font-bold text-emerald-400">Top: ${h.leader_abbr} (${h.leader_record})</div>
+                        <div class="bnn-muted">Slash: ${h.slash}</div>
+                        <div class="bnn-muted">${Number(h.hr_per_g || 0).toFixed(2)} HR/G</div>
+                      </div>
+                    `).join("")}
+                  </div>
+                </div>
+              ` : ""}
+            </div>
+
+          ` : viewMode === "savant" ? `
+            <!-- =========================================================== -->
+            <!-- ARCHETYPE 3: SAVANT / FANGRAPHS PROCESS VS RESULTS LAB      -->
+            <!-- =========================================================== -->
+            <div class="bnn-card rounded-xl overflow-hidden">
+              <div class="px-4 py-3 bnn-subcard border-t-0 border-x-0 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span class="text-[11px] font-mono text-sky-400 font-extrabold uppercase">ARCHETYPE 3 &middot; BASEBALL SAVANT &amp; FANGRAPHS PROCESS DIAGNOSTIC LAB</span>
+                  <h3 class="text-sm font-black mb-0">True-Talent Process Rankings &amp; Residual Cluster-Luck Audit (Ranked by BaseRuns Win%)</h3>
+                </div>
+                <button onclick="setOverviewViewMode('portal')" class="px-2.5 py-1 rounded bg-amber-400 text-slate-950 text-xs font-mono font-black">&larr; Command Portal</button>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="saber-table font-mono">
+                  <thead>
+                    <tr>
+                      <th class="text-left">BsR Rk</th>
+                      <th class="text-left">Club</th>
+                      <th class="text-right">BsR W%</th>
+                      <th class="text-right">Act W%</th>
+                      <th class="text-right">xwOBA</th>
+                      <th class="text-right">wRC+</th>
+                      <th class="text-right">BsR RS</th>
+                      <th class="text-left">Offense Cluster Luck (RS &minus; BsR)</th>
+                      <th class="text-right">FIP</th>
+                      <th class="text-right">ERA-</th>
+                      <th class="text-right">K-BB%</th>
+                      <th class="text-left">Pitching Residual (ERA &minus; FIP)</th>
+                      <th class="text-right">Def ZR</th>
+                      <th class="text-right">Framing</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${[...standings].sort((a, b) => Number(b.bsr_pct || 0) - Number(a.bsr_pct || 0)).map((t, idx) => {
+                      const rsGap = Number(t.rs_bsr_gap || 0);
+                      const efGap = Number(t.era_fip_gap || 0);
+                      const offBar = Math.min(48, Math.abs(rsGap) * 1.8);
+                      const pitBar = Math.min(48, Math.abs(efGap) * 90);
+                      return `
+                        <tr onclick="switchTeamAndGo(${t.team_id})" class="cursor-pointer">
+                          <td class="font-black text-sky-400">#${idx + 1}</td>
+                          <td class="font-sans font-bold"><div class="flex items-center gap-2"><img src="${teamLogoUrl(t.logo_file_name)}" class="w-5 h-5 object-contain" alt=""><span>${t.full_name}</span></div></td>
+                          <td class="text-right font-black text-emerald-400">${fmtAvg(t.bsr_pct)}</td>
+                          <td class="text-right bnn-muted">${fmtAvg(t.pct)}</td>
+                          <td class="text-right font-bold">${fmtAvg(t.xwoba || t.woba)}</td>
+                          <td class="text-right font-bold">${t.wrc_plus}</td>
+                          <td class="text-right">${Number(t.bsr_rs || 0).toFixed(1)}</td>
+                          <td>
+                            <div class="flex items-center gap-2">
+                              <div class="w-24 h-2 rounded bg-slate-700/40 relative overflow-hidden">
+                                <div class="absolute top-0 bottom-0 ${rsGap >= 0 ? 'bg-amber-400 left-1/2' : 'bg-sky-400 right-1/2'}" style="width:${offBar}%"></div>
+                              </div>
+                              <span class="${rsGap >= 0 ? 'text-amber-400' : 'text-sky-400'} font-bold">${fmtSigned(rsGap, 1)} R</span>
+                            </div>
+                          </td>
+                          <td class="text-right font-bold text-emerald-400">${Number(t.fip || 0).toFixed(2)}</td>
+                          <td class="text-right">${t.era_minus || 100}</td>
+                          <td class="text-right">${Number(t.k_bb_pct || 0).toFixed(1)}%</td>
+                          <td>
+                            <div class="flex items-center gap-2">
+                              <div class="w-24 h-2 rounded bg-slate-700/40 relative overflow-hidden">
+                                <div class="absolute top-0 bottom-0 ${efGap <= 0 ? 'bg-amber-400 left-1/2' : 'bg-emerald-400 right-1/2'}" style="width:${pitBar}%"></div>
+                              </div>
+                              <span class="${efGap <= 0 ? 'text-amber-400' : 'text-emerald-400'} font-bold">${fmtSigned(efGap, 2)}</span>
+                            </div>
+                          </td>
+                          <td class="text-right font-bold ${t.zr >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${fmtSigned(t.zr, 1)}</td>
+                          <td class="text-right ${Number(t.framing || 0) >= 0 ? 'text-sky-400' : 'text-rose-400'}">${fmtSigned(t.framing || 0, 1)}</td>
+                        </tr>
+                      `;
+                    }).join("")}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          ` : viewMode === "comparator" ? `
+            <!-- =========================================================== -->
+            <!-- ARCHETYPE 4: HEAD-TO-HEAD DIVISION & CLUB COMPARATOR MATRIX -->
+            <!-- =========================================================== -->
+            <div class="space-y-4">
+              <div class="bnn-card rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <span class="text-[11px] font-mono text-emerald-400 font-extrabold uppercase">ARCHETYPE 4 &middot; FRONT OFFICE WORKBENCH</span>
+                  <h3 class="text-sm font-black mb-0">Head-to-Head Club &amp; Division Comparator Matrix</h3>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 text-xs font-mono">
+                  <select onchange="setOverviewCmpTeam('A', this.value)" class="bnn-subcard rounded px-2 py-1 font-bold">
+                    ${standings.map(t => `<option value="${t.team_id}" ${t.team_id === cmpA.team_id ? 'selected' : ''}>Club A: ${t.full_name} (${t.record_str})</option>`).join("")}
+                  </select>
+                  <span class="font-black text-amber-400">VS</span>
+                  <select onchange="setOverviewCmpTeam('B', this.value)" class="bnn-subcard rounded px-2 py-1 font-bold">
+                    ${standings.map(t => `<option value="${t.team_id}" ${t.team_id === cmpB.team_id ? 'selected' : ''}>Club B: ${t.full_name} (${t.record_str})</option>`).join("")}
+                  </select>
+                  <button onclick="setOverviewCmpDiv('ALL')" class="px-2 py-1 rounded bnn-pill-btn font-bold ${cmpDivFilter === 'ALL' ? 'active-blue' : ''}">ALL</button>
+                  ${divGroupList.map(g => `<button onclick="setOverviewCmpDiv('${g.key.replace(/'/g, "\\'")}')" class="px-2 py-1 rounded bnn-pill-btn font-bold ${cmpDivFilter === g.key ? 'active-blue' : ''}">${g.div}</button>`).join("")}
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3.5">
+                <div class="bnn-card rounded-xl p-3.5 space-y-2.5">
+                  <div class="flex justify-between items-center border-b bnn-border pb-1.5 text-xs font-mono font-extrabold">
+                    <span>${cmpA.abbr}</span><span class="text-rose-400">1. OFFENSE</span><span>${cmpB.abbr}</span>
+                  </div>
+                  ${renderCmpBarRow("wOBA", cmpA.woba, cmpB.woba, fmtAvg, true)}
+                  ${renderCmpBarRow("wRC+", cmpA.wrc_plus, cmpB.wrc_plus, v => Math.round(v), true)}
+                  ${renderCmpBarRow("Home Runs", cmpA.hr, cmpB.hr, v => Math.round(v), true)}
+                  ${renderCmpBarRow("Stolen Bases", cmpA.sb, cmpB.sb, v => Math.round(v), true)}
+                </div>
+                <div class="bnn-card rounded-xl p-3.5 space-y-2.5">
+                  <div class="flex justify-between items-center border-b bnn-border pb-1.5 text-xs font-mono font-extrabold">
+                    <span>${cmpA.abbr}</span><span class="text-sky-400">2. RUN PREVENTION</span><span>${cmpB.abbr}</span>
+                  </div>
+                  ${renderCmpBarRow("ERA", cmpA.era, cmpB.era, v => v.toFixed(2), false)}
+                  ${renderCmpBarRow("FIP", cmpA.fip, cmpB.fip, v => v.toFixed(2), false)}
+                  ${renderCmpBarRow("WHIP", cmpA.whip, cmpB.whip, v => v.toFixed(2), false)}
+                  ${renderCmpBarRow("Strikeouts", cmpA.k_pit, cmpB.k_pit, v => Math.round(v), true)}
+                </div>
+                <div class="bnn-card rounded-xl p-3.5 space-y-2.5">
+                  <div class="flex justify-between items-center border-b bnn-border pb-1.5 text-xs font-mono font-extrabold">
+                    <span>${cmpA.abbr}</span><span class="text-emerald-400">3. DEFENSE &amp; WAR</span><span>${cmpB.abbr}</span>
+                  </div>
+                  ${renderCmpBarRow("Zone Rating", cmpA.zr, cmpB.zr, v => fmtSigned(v, 1), true)}
+                  ${renderCmpBarRow("Framing", cmpA.framing, cmpB.framing, v => fmtSigned(v, 1), true)}
+                  ${renderCmpBarRow("Def Efficiency", cmpA.def_eff, cmpB.def_eff, fmtAvg, true)}
+                  ${renderCmpBarRow("Total WAR", cmpA.total_war, cmpB.total_war, v => v.toFixed(1), true)}
+                </div>
+                <div class="bnn-card rounded-xl p-3.5 space-y-2.5">
+                  <div class="flex justify-between items-center border-b bnn-border pb-1.5 text-xs font-mono font-extrabold">
+                    <span>${cmpA.abbr}</span><span class="text-amber-400">4. FO ECONOMY</span><span>${cmpB.abbr}</span>
+                  </div>
+                  ${renderCmpBarRow("Payroll ($M)", cmpA.payroll_m, cmpB.payroll_m, v => '$' + v.toFixed(1) + 'M', false)}
+                  ${renderCmpBarRow("Budget ($M)", cmpA.budget_m, cmpB.budget_m, v => '$' + v.toFixed(1) + 'M', true)}
+                  ${renderCmpBarRow("Cost $/WAR", cmpA.cost_per_war_m, cmpB.cost_per_war_m, v => '$' + v.toFixed(2) + 'M', false)}
+                  ${renderCmpBarRow("Fan Interest", cmpA.fan_interest, cmpB.fan_interest, v => Math.round(v) + '/100', true)}
+                </div>
+              </div>
+
+              <div class="bnn-card rounded-xl overflow-hidden">
+                <div class="px-4 py-2.5 bnn-subcard border-t-0 border-x-0 text-xs font-mono font-extrabold uppercase text-amber-400">
+                  Filtered Division Benchmark Matrix (${cmpDivFilter} &middot; ${cmpFilteredRows.length} Clubs) — Click Any Row to Load into Club B
+                </div>
+                <div class="overflow-x-auto">
+                  <table class="saber-table font-mono">
+                    <thead>
+                      <tr>
+                        <th class="text-left">Club</th>
+                        <th class="text-right">W-L</th>
+                        <th class="text-right">BsR W-L</th>
+                        <th class="text-right">wOBA</th>
+                        <th class="text-right">wRC+</th>
+                        <th class="text-right">ERA</th>
+                        <th class="text-right">FIP</th>
+                        <th class="text-right">WHIP</th>
+                        <th class="text-right">ZR</th>
+                        <th class="text-right">Fram</th>
+                        <th class="text-right">Payroll</th>
+                        <th class="text-right">Budget</th>
+                        <th class="text-right">$/WAR</th>
+                        <th class="text-right">Attend</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${cmpFilteredRows.map(t => `
+                        <tr onclick="setOverviewCmpTeam('B', ${t.team_id})" class="cursor-pointer ${t.team_id === cmpA.team_id || t.team_id === cmpB.team_id ? 'bg-sky-500/10' : ''}">
+                          <td class="font-sans font-bold"><div class="flex items-center gap-2"><img src="${teamLogoUrl(t.logo_file_name)}" class="w-5 h-5 object-contain" alt=""><span>${t.full_name}</span></div></td>
+                          <td class="text-right font-black">${t.record_str}</td>
+                          <td class="text-right text-sky-400 font-bold">${t.bsr_w}-${t.bsr_l}</td>
+                          <td class="text-right">${fmtAvg(t.woba)}</td>
+                          <td class="text-right font-bold">${t.wrc_plus}</td>
+                          <td class="text-right">${Number(t.era || 0).toFixed(2)}</td>
+                          <td class="text-right font-bold text-emerald-400">${Number(t.fip || 0).toFixed(2)}</td>
+                          <td class="text-right">${Number(t.whip || 0).toFixed(2)}</td>
+                          <td class="text-right">${fmtSigned(t.zr, 1)}</td>
+                          <td class="text-right">${fmtSigned(t.framing || 0, 1)}</td>
+                          <td class="text-right">${fmtMoney(t.payroll)}</td>
+                          <td class="text-right bnn-muted">${fmtMoney(t.budget)}</td>
+                          <td class="text-right font-bold text-amber-400">$${Number(t.cost_per_war_m || 0).toFixed(2)}M</td>
+                          <td class="text-right">${Number(t.attendance || 0).toLocaleString()}</td>
+                        </tr>
+                      `).join("")}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+          ` : `
+            <!-- =========================================================== -->
+            <!-- ARCHETYPE 1 (PRIMARY): BNN.COM LEAGUE COMMAND PORTAL        -->
+            <!-- =========================================================== -->
+            <div class="bnn-overview-grid">
+
+              <!-- LEFT MARGIN: LEAGUE PACESETTERS + ENVIRONMENT & VAULT -->
+              <aside class="bnn-overview-col-left space-y-3.5">
+                <div class="bnn-card rounded-xl overflow-hidden">
+                  <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 space-y-2">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <span class="text-[10.5px] font-mono text-amber-400 font-extrabold uppercase">LEFT MARGIN &middot; PACESETTERS</span>
+                        <h3 class="text-xs sm:text-sm font-extrabold mb-0">League Leaders &amp; Savant %</h3>
+                      </div>
+                      <span class="text-[10px] font-mono bnn-muted">Dossier / Dock</span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-1 text-[10.5px] font-mono">
+                      ${Object.entries(leaderConfigs).map(([k, cfg]) => `
+                        <button onclick="setOverviewLeaderCat('${k}')" class="py-1 px-1.5 rounded bnn-pill-btn font-bold ${leaderCat === k ? 'active-red' : ''}">${cfg.label}</button>
+                      `).join("")}
+                    </div>
+                  </div>
+                  <div class="divide-y bnn-border">
+                    ${activeLdrCfg.items.slice(0, 6).map((p, idx) => `
+                      <div onclick="openPlayerModal(${p.player_id})" class="p-2.5 bnn-row-hover cursor-pointer flex items-center justify-between gap-2">
+                        <div class="flex items-center gap-2 min-w-0">
+                          <span class="text-xs font-mono font-black w-4 ${idx === 0 ? 'text-amber-400' : 'bnn-muted'}">${idx + 1}</span>
+                          <img src="${playerPicUrl(p.player_id)}" class="w-7 h-8 object-cover rounded border bnn-border shrink-0" alt="">
+                          <div class="min-w-0">
+                            <div class="text-xs font-bold truncate">${p.name}</div>
+                            <div class="text-[10.5px] font-mono bnn-muted truncate">${p.team_abbr} &middot; ${p.position || p.role || ''} &middot; ${activeLdrCfg.subFn(p)}</div>
+                          </div>
+                        </div>
+                        <div class="flex items-center gap-1.5 shrink-0">
+                          <span class="font-mono text-xs font-black text-sky-400">${activeLdrCfg.valFn(p)}</span>
+                          ${savantPctBadge(p.savant_pct)}
+                          <button onclick="pinOverviewPlayerToDock(event, ${p.player_id})" title="Pin to Ultrawide Scout Side-Dock" class="px-1.5 py-0.5 rounded bnn-subcard hover:border-sky-400 text-[10px] text-sky-400">
+                            <i class="bi bi-layout-sidebar-inset-reverse"></i>
+                          </button>
+                        </div>
+                      </div>
+                    `).join("")}
+                  </div>
+                </div>
+
+                <!-- LEAGUE ENVIRONMENT & HISTORICAL SNAPSHOT VAULT STATUS CARD -->
+                <div class="bnn-card rounded-xl p-3.5 space-y-2.5">
+                  <div class="flex items-center justify-between border-b bnn-border pb-2">
+                    <div>
+                      <span class="text-[10.5px] font-mono uppercase text-emerald-400 font-extrabold">DATA TRUST &amp; VAULT</span>
+                      <h3 class="text-xs sm:text-sm font-extrabold mb-0">Environment &amp; Snapshot Vault</h3>
+                    </div>
+                    <span class="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono text-[10px] font-bold">SQLITE WAL</span>
+                  </div>
+                  <div class="space-y-1.5 text-xs font-mono">
+                    <div class="flex justify-between"><span class="bnn-muted">Pythagenpat Exp:</span><span class="font-bold text-sky-400">${Number(env.pyth_exponent || 1.83).toFixed(3)}</span></div>
+                    <div class="flex justify-between"><span class="bnn-muted">Runs / Game (Tm):</span><span class="font-bold">${Number(env.runs_per_game || 4.4).toFixed(2)} R/G</span></div>
+                    <div class="flex justify-between"><span class="bnn-muted">CSV Dumps / Alm:</span><span class="font-bold">${dumps.length} Dumps &middot; ${almanacs.length} Alm</span></div>
+                    <div class="flex justify-between"><span class="bnn-muted">Native BNN HTMLs:</span><span class="font-bold text-amber-400">${Number((ov.save_meta && ov.save_meta.html_count) || 0).toLocaleString()}</span></div>
+                  </div>
+                  <div class="grid grid-cols-2 gap-1.5 pt-1 text-[11px] font-mono">
+                    <button onclick="switchTab('evolution')" class="py-1.5 px-2 rounded bnn-subcard bnn-row-hover font-bold text-purple-400">Evolution Vault &rarr;</button>
+                    <button onclick="switchTab('bnn')" class="py-1.5 px-2 rounded bnn-subcard bnn-row-hover font-bold text-cyan-400">BNN Almanacs &rarr;</button>
+                  </div>
+                </div>
+              </aside>
+
+              <!-- CENTER STAGE: 1. MULTI-MODE TRUE-TALENT SUITE (TOP) + 2. BROADCAST STANDINGS (BELOW) -->
+              <section class="bnn-overview-col-center space-y-3.5 min-w-0">
+                ${renderTrueTalentVisualSuiteHtml()}
+                ${renderBroadcastStandingsHtml()}
+              </section>
+
+              <!-- RIGHT MARGIN: DIVISION POWER & PARITY INDEX + TEAM UNIT LEADERS -->
+              <aside class="bnn-overview-col-right space-y-3.5">
+                <div class="bnn-card rounded-xl overflow-hidden">
+                  <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 flex items-center justify-between">
+                    <div>
+                      <span class="text-[10.5px] font-mono uppercase text-sky-400 font-extrabold">RIGHT MARGIN &middot; PARITY INDEX</span>
+                      <h3 class="text-xs sm:text-sm font-extrabold mb-0">Division Power &amp; Parity</h3>
+                    </div>
+                    <span class="text-[10px] font-mono bnn-muted">W% &middot; WAR</span>
+                  </div>
+                  <div class="p-3 space-y-2">
+                    ${divGroupList.map(grp => {
+                      const dSorted = [...grp.teams].sort((a, b) => (b.pct - a.pct) || (b.w - a.w));
+                      const dLdr = dSorted[0] || {};
+                      const avgPct = dSorted.reduce((s, x) => s + Number(x.pct || 0.5), 0) / Math.max(1, dSorted.length);
+                      const spread = (dLdr.w || 0) - ((dSorted[dSorted.length - 1] || {}).w || 0);
+                      const divWar = dSorted.reduce((s, x) => s + Number(x.total_war || 0), 0).toFixed(1);
+                      return `
+                        <div class="bnn-subcard rounded-xl p-2.5 space-y-1 text-xs font-mono">
+                          <div class="flex items-center justify-between">
+                            <span class="font-sans font-extrabold truncate">${grp.key}</span>
+                            <span class="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-400 font-bold">Avg ${fmtAvg(avgPct)}</span>
+                          </div>
+                          <div class="flex justify-between text-[11px] bnn-muted">
+                            <span>Ldr: <strong class="text-emerald-400">${dLdr.abbr || '-'} (${dLdr.record_str || '-'})</strong></span>
+                            <span>${divWar} WAR</span>
+                          </div>
+                          <div class="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                            <div class="h-full bg-gradient-to-r from-sky-500 to-emerald-400" style="width:${Math.min(100, Math.round(avgPct * 165))}%"></div>
+                          </div>
+                          <div class="flex justify-between text-[10.5px] bnn-muted">
+                            <span>Spread: <strong>${spread} G</strong> (1st&ndash;Last)</span>
+                            <span>${spread <= 20 ? 'High Parity' : 'Top-Heavy'}</span>
+                          </div>
+                        </div>
+                      `;
+                    }).join("")}
+                  </div>
+                </div>
+
+                <!-- TEAM UNIT LEADERS -->
+                <div class="bnn-card rounded-xl overflow-hidden">
+                  <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0">
+                    <span class="text-[10.5px] font-mono uppercase text-amber-400 font-extrabold">UNIT BENCHMARKS</span>
+                    <h3 class="text-xs sm:text-sm font-extrabold mb-0">Team Unit Pacesetters</h3>
+                  </div>
+                  <div class="divide-y bnn-border text-xs">
+                    ${[
+                      { tag: "#1 OFFENSE (wRC+)", tm: bestOff, val: `${bestOff.wrc_plus || 100} wRC+`, sub: `${fmtAvg(bestOff.woba)} wOBA · ${Number(bestOff.bsr_rs || 0).toFixed(0)} BsR RS` },
+                      { tag: "#1 ROTATION (FIP)", tm: bestRot, val: `${Number(bestRot.fip || 0).toFixed(2)} FIP`, sub: `${Number(bestRot.era || 0).toFixed(2)} ERA · ${bestRot.fip_minus || 100} FIP-` },
+                      { tag: "#1 BULLPEN & K-BB%", tm: bestPen, val: `${bestPen.sv || 0} SV`, sub: `${Number(bestPen.k_bb_pct || 0).toFixed(1)}% K-BB · ${Number(bestPen.whip || 0).toFixed(2)} WHIP` },
+                      { tag: "#1 DEFENSE (ZR & FRAM)", tm: bestDef, val: `${fmtSigned(bestDef.zr || 0, 1)} ZR`, sub: `${fmtSigned(bestDef.framing || 0, 1)} Fram · ${fmtAvg(bestDef.def_eff)} Eff` },
+                      { tag: "#1 ATTENDANCE & FAN", tm: bestAtt, val: `${Number(bestAtt.attendance || 0).toLocaleString()}`, sub: `Fan Interest ${bestAtt.fan_interest || 50}/100 · ${fmtMoney(bestAtt.payroll)}` }
+                    ].map(u => `
+                      <div onclick="${u.tm.team_id ? `switchTeamAndGo(${u.tm.team_id})` : ''}" class="p-2.5 bnn-row-hover cursor-pointer flex items-center justify-between gap-2">
+                        <div class="flex items-center gap-2 min-w-0">
+                          <img src="${teamLogoUrl(u.tm.logo_file_name)}" class="w-5 h-5 object-contain shrink-0" alt="">
+                          <div class="min-w-0">
+                            <div class="text-[10px] font-mono font-bold text-amber-400">${u.tag}</div>
+                            <div class="font-bold truncate">${u.tm.full_name || '—'}</div>
+                            <div class="text-[10.5px] font-mono bnn-muted truncate">${u.sub}</div>
+                          </div>
+                        </div>
+                        <span class="font-mono font-black text-emerald-400 shrink-0">${u.val}</span>
+                      </div>
+                    `).join("")}
+                  </div>
+                </div>
+              </aside>
+
+              <!-- 21:9 ULTRAWIDE 4TH COLUMN: UNSTACKED SUB-LEAGUE & SPLIT EXPLORER -->
+              <aside class="bnn-overview-col-uw">
+                <div class="bnn-card rounded-xl overflow-hidden">
+                  <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 space-y-2">
+                    <div class="flex items-center justify-between">
+                      <span class="text-[10.5px] font-mono uppercase text-emerald-400 font-extrabold">21:9 COCKPIT &middot; 4TH COL</span>
+                      <span class="px-1.5 py-0.5 rounded bg-blue-600 text-white font-mono text-[10px] font-bold">UNSTACKED</span>
+                    </div>
+                    <h3 class="text-xs sm:text-sm font-extrabold mb-0">Sub-League Wild Card &amp; Split Explorer</h3>
+                    ${subLeagueNames.length > 1 ? `
+                      <div class="grid grid-cols-2 gap-1 text-[10.5px] font-mono">
+                        ${subLeagueNames.map((sl, si) => `
+                          <button onclick="setOverviewUwSlFilter(${si})" class="py-1 px-1.5 rounded bnn-pill-btn font-bold truncate ${uwSlIdx === si ? 'active-blue' : ''}">${sl}</button>
+                        `).join("")}
+                      </div>
+                    ` : ""}
+                  </div>
+                  <div class="divide-y bnn-border text-[11px] font-mono">
+                    ${uwSlTeams.map((t, idx) => `
+                      <div onclick="switchTeamAndGo(${t.team_id})" class="p-2.5 bnn-row-hover cursor-pointer space-y-1">
+                        <div class="flex items-center justify-between">
+                          <span class="flex items-center gap-1.5 font-sans font-bold">
+                            <span class="font-mono w-4 ${idx < 4 ? 'text-emerald-400 font-black' : 'bnn-muted'}">${idx + 1}</span>
+                            <img src="${teamLogoUrl(t.logo_file_name)}" class="w-4 h-4 object-contain" alt="">
+                            <span>${t.abbr}</span>
+                            <span class="px-1 py-0.2 rounded bnn-subcard text-[10px] font-mono">${t.magic_str || '-'}</span>
+                          </span>
+                          <span class="font-black">${t.record_str} (${fmtAvg(t.pct)})</span>
+                        </div>
+                        <div class="flex justify-between text-[10.5px] bnn-muted">
+                          <span>1-Run: <strong>${t.one_run_str || '-'}</strong> &middot; X-Inn: <strong>${t.xinn_str || '-'}</strong></span>
+                          <span>BsR: <strong class="text-sky-400">${t.bsr_w}-${t.bsr_l}</strong></span>
+                        </div>
+                        <div class="flex justify-between text-[10.5px] bnn-muted">
+                          <span>vsR: <strong>${t.vs_rhp_str || '-'}</strong> &middot; vsL: <strong>${t.vs_lhp_str || '-'}</strong></span>
+                          <span class="${Number(t.playoff_prob || 0) >= 50 ? 'text-emerald-400' : ''} font-bold">Odds ${Number(t.playoff_prob || 0).toFixed(0)}%</span>
+                        </div>
+                      </div>
+                    `).join("")}
+                  </div>
+                </div>
+              </aside>
+
+            </div>
+          `}
+
         </div>
       </div>
     </div>
   `;
+
+  initSortableTables(container);
 }
 
 /* ============================================================================
