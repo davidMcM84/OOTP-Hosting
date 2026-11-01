@@ -7300,12 +7300,13 @@ function renderLeagueLeadersSubView(container) {
 
 
 // ============================================================================
-// MODULE 10: ALL-TIME LEAGUE RECORDS BOOK & HISTORY LEADERBOARDS
+// MODULE 10: ALL-TIME LEAGUE RECORDS BOOK & HISTORY LEADERBOARDS (TAB 07)
+// BNN.COM Living Record Book • Elias Progressive Almanac • Cooperstown Vault • Era Lab
 // ============================================================================
 
 async function renderRecordsTab(container) {
   if (!AppState.recordsData) {
-    showLoading("Compiling All-Time Single-Season, Career, Single-Game & Streak Record Book...");
+    showLoading("Compiling All-Time Single-Season, Career, Single-Game, Era-Context & Streak Record Book...");
     try {
       const lid = AppState.activeLeagueId || "";
       AppState.recordsData = await fetchJSON(`/api/records?save=${AppState.activeSave}&league_id=${lid}`);
@@ -7318,75 +7319,1251 @@ async function renderRecordsTab(container) {
 
 window.setRecordsOption = function(key, val) {
   AppState[key] = val;
+  if (key === "recordsDomain") {
+    const defMap = { batting: "hr", pitching: "k", fielding: "zr" };
+    AppState.recordsSelectedMetric = defMap[val] || "war";
+    if (!AppState.recordsTrajMetricManual) {
+      AppState.recordsTrajMetric = val === "pitching" ? "pit_k" : (val === "fielding" ? "war" : "hr");
+    }
+  }
+  if (key === "recordsTrajMetric") {
+    AppState.recordsTrajMetricManual = true;
+  }
   const container = document.getElementById("main-view-container");
-  if (container) renderRecordsSubView(container);
+  if (container && AppState.activeTab === "records") {
+    renderRecordsSubView(container);
+  }
 };
 
+window.setRecordsTheme = function(theme) {
+  AppState.frontPageTheme = theme === "light" ? "light" : "dark";
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "records") {
+    renderRecordsSubView(container);
+  }
+};
+
+window.setRecordsViewportMode = function(mode) {
+  AppState.frontPageViewportMode = mode || "auto";
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "records") {
+    renderRecordsSubView(container);
+  }
+};
+
+window.jumpRecordsTicker = function(domain, metricKey, subTab) {
+  AppState.recordsViewMode = "portal";
+  if (domain && ["batting", "pitching", "fielding"].includes(domain)) {
+    AppState.recordsDomain = domain;
+  }
+  if (subTab) {
+    AppState.recordsSubTab = subTab;
+  }
+  if (metricKey) {
+    AppState.recordsSelectedMetric = metricKey;
+  }
+  const container = document.getElementById("main-view-container");
+  if (container && AppState.activeTab === "records") {
+    renderRecordsSubView(container);
+  }
+};
+
+function escRecHtml(str) {
+  return String(str === undefined || str === null ? "" : str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function fmtRecordValue(key, val) {
-  if (val === undefined || val === null) return "—";
+  if (val === undefined || val === null || val === "—") return "—";
   if (["avg", "obp", "slg", "ops", "iso", "woba", "w_pct", "pct"].includes(key)) return fmtAvg(val);
   if (["era", "whip", "fip", "k9", "h9", "k_bb", "wpa", "ubr", "zr", "framing", "arm", "def_runs"].includes(key)) return Number(val).toFixed(2);
   if (["war", "ra9war", "ip"].includes(key)) return Number(val).toFixed(1);
-  return Number(val).toLocaleString();
+  if (["ops_plus", "wrc_plus", "era_plus", "fip_minus"].includes(key)) return String(Math.round(Number(val)));
+  const n = Number(val);
+  return Number.isFinite(n) ? Math.round(n).toLocaleString() : String(val);
 }
 
-function renderRecordLeaderboardCard(recObj, modeLabel, isCareer = false) {
-  if (!recObj || !recObj.leaders || !recObj.leaders.length) return "";
-  const top = recObj.leaders[0];
-  const rest = recObj.leaders.slice(1, 10);
-  const key = recObj.key;
+function recStatusBadgesHtml(item) {
+  if (!item) return "";
+  const hof = item.is_hof ? `<span class="records-hof-pill" title="Inducted Hall of Famer">★ HOF</span>` : "";
+  const act = item.active ? `<span class="records-active-pill" title="Active Player"><span class="records-pulse-dot"></span>ACTIVE</span>` : "";
+  return `${hof}${hof && act ? " " : ""}${act}`;
+}
+
+function recFilterLeaders(leaders, statusFilter) {
+  const arr = Array.isArray(leaders) ? leaders : [];
+  if (statusFilter === "HOF") return arr.filter(x => x.is_hof);
+  if (statusFilter === "ACTIVE") return arr.filter(x => x.active);
+  return arr;
+}
+
+function renderMiniLinescoreHtml(box) {
+  if (!box || !Array.isArray(box.away_innings) || !Array.isArray(box.home_innings)) return "";
+  const nInn = Math.max(9, box.away_innings.length, box.home_innings.length);
+  const innHeaders = Array.from({ length: nInn }, (_, i) => `<th>${i + 1}</th>`).join("");
+  const awayCells = Array.from({ length: nInn }, (_, i) => `<td>${box.away_innings[i] ?? 0}</td>`).join("");
+  const homeCells = Array.from({ length: nInn }, (_, i) => `<td>${box.home_innings[i] ?? 0}</td>`).join("");
+  const aRhe = box.away_rhe || [0, 0, 0];
+  const hRhe = box.home_rhe || [0, 0, 0];
 
   return `
-    <div class="glass-card p-4 border border-slate-800/90 flex flex-col justify-between">
+    <div class="overflow-x-auto rounded-lg border bnn-border mt-2">
+      <table class="records-linescore-table">
+        <thead>
+          <tr>
+            <th class="team-cell">CLUB</th>
+            ${innHeaders}
+            <th>R</th><th>H</th><th>E</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="team-cell">${escRecHtml(box.away_abbr || "AWY")}</td>
+            ${awayCells}
+            <td class="rhe-r">${aRhe[0] ?? 0}</td>
+            <td class="font-bold">${aRhe[1] ?? 0}</td>
+            <td class="bnn-muted">${aRhe[2] ?? 0}</td>
+          </tr>
+          <tr>
+            <td class="team-cell">${escRecHtml(box.home_abbr || "HME")}</td>
+            ${homeCells}
+            <td class="rhe-r">${hRhe[0] ?? 0}</td>
+            <td class="font-bold">${hRhe[1] ?? 0}</td>
+            <td class="bnn-muted">${hRhe[2] ?? 0}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderRecordLeaderboardCard(recObj, modeLabel, isCareer = false, contextMode = "era", statusFilter = "ALL") {
+  if (!recObj || !recObj.leaders || !recObj.leaders.length) return "";
+  const filtered = recFilterLeaders(recObj.leaders, statusFilter);
+  const pool = filtered.length ? filtered : recObj.leaders;
+  const top = pool[0];
+  const rest = pool.slice(1, 10);
+  const key = recObj.key;
+  const qualTag = recObj.min_pa_qual
+    ? ` · Rule 9.22 ≥${recObj.min_pa_qual} PA`
+    : (recObj.min_ip_qual ? ` · Rule 9.22 ≥${recObj.min_ip_qual} IP` : "");
+
+  const eraSub = (!isCareer && contextMode === "era" && (top.lg_rg || top.ops_plus || top.era_plus))
+    ? `<span class="px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-400 border border-cyan-400/30 text-[9.5px] font-mono font-bold">
+         ${top.lg_rg ? `${Number(top.lg_rg).toFixed(2)} R/G` : ""}${top.ops_plus ? ` · ${top.ops_plus} OPS+` : ""}${top.era_plus ? ` · ${top.era_plus} ERA+` : ""}
+       </span>`
+    : "";
+
+  return `
+    <div class="bnn-card rounded-xl p-3.5 flex flex-col justify-between">
       <div>
-        <div class="flex items-center justify-between gap-2 border-b border-slate-800 pb-2.5 mb-3">
-          <div>
-            <div class="text-xs font-black text-white uppercase tracking-tight">${recObj.label}</div>
-            <div class="text-[10px] font-mono text-slate-400">${modeLabel}${recObj.min_pa_qual ? ` • Min ${recObj.min_pa_qual} PA` : (recObj.min_ip_qual ? ` • Min ${recObj.min_ip_qual} IP` : '')}</div>
+        <div class="flex items-start justify-between gap-2 border-b bnn-border pb-2 mb-2.5">
+          <div class="min-w-0">
+            <div class="text-xs font-extrabold uppercase tracking-tight truncate">${escRecHtml(recObj.label)}</div>
+            <div class="text-[10px] font-mono bnn-muted">${escRecHtml(modeLabel)}${qualTag}</div>
           </div>
-          <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-[10px] font-mono font-bold text-emerald-300 uppercase">${recObj.group || ''}</span>
+          <div class="flex items-center gap-1 shrink-0">
+            ${recObj.margin_pct > 0 && statusFilter === "ALL" ? `<span class="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-400/30 text-[9.5px] font-mono font-extrabold" title="% Margin Over #2 All-Time">${escRecHtml(recObj.margin_str)}</span>` : ""}
+            <span class="px-1.5 py-0.5 rounded bnn-subcard text-[9.5px] font-mono font-bold uppercase">${escRecHtml(recObj.group || "")}</span>
+          </div>
         </div>
 
-        <!-- All-Time Record Holder (#1) -->
-        <div onclick="openPlayerModal(${top.player_id})" class="p-3 rounded-xl bg-gradient-to-r from-emerald-500/15 via-slate-900/90 to-slate-950 border border-emerald-400/40 mb-3 cursor-pointer hover:border-emerald-300 transition flex items-center justify-between gap-3">
+        <!-- #1 Spotlight Podium -->
+        <div onclick="openPlayerModal(${top.player_id})" class="p-2.5 rounded-xl bnn-subcard border-l-4 border-l-amber-400 mb-2.5 cursor-pointer bnn-row-hover flex items-center justify-between gap-2.5">
           <div class="flex items-center gap-2.5 min-w-0">
             <div class="relative shrink-0">
-              <img src="${playerPicUrl(top.player_id)}" class="w-11 h-14 rounded-lg object-cover bg-slate-950 border border-emerald-400/50" onerror="this.style.display='none'">
-              <span class="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-emerald-400 text-slate-950 font-black text-[10px] flex items-center justify-center shadow">#1</span>
+              <img src="${playerPicUrl(top.player_id)}" class="w-10 h-13 rounded-lg object-cover bg-slate-950 border border-amber-400/50" onerror="this.style.display='none'">
+              <span class="absolute -top-1.5 -left-1.5 px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 font-mono font-black text-[9.5px] shadow">#${top.rank}</span>
             </div>
             <div class="min-w-0">
-              <div class="flex items-center gap-1.5">
+              <div class="flex flex-wrap items-center gap-1">
                 <img src="${teamLogoUrl(top.team?.logo)}" class="w-4 h-4 object-contain shrink-0">
-                <span class="text-sm font-black text-white truncate hover:underline">${top.name}</span>
-                ${top.is_hof ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-400 text-slate-950" title="Inducted Hall of Famer">HOF</span>` : ''}
+                <span class="text-xs sm:text-sm font-black truncate hover:underline">${escRecHtml(top.name)}</span>
+                ${recStatusBadgesHtml(top)}
               </div>
-              <div class="text-[11px] text-slate-300 font-mono mt-0.5">
-                <span class="font-bold text-sky-300">${top.team?.abbr || ''}</span>
-                • <span>${isCareer ? `${top.years} (${top.seasons} Yr)` : `Season ${top.year}`}</span>
-                • <span>${top.position}</span>
+              <div class="text-[10.5px] font-mono bnn-muted mt-0.5">
+                <strong class="text-cyan-400">${escRecHtml(top.team?.abbr || "")}</strong>
+                · <span>${isCareer ? `${escRecHtml(top.years)} (${top.seasons} Yr)` : `Season ${top.year}`}</span>
+                · <span>${escRecHtml(top.position || "")}</span>
               </div>
+              ${eraSub ? `<div class="mt-1">${eraSub}</div>` : ""}
             </div>
           </div>
           <div class="text-right shrink-0">
-            <div class="text-2xl font-black font-mono text-emerald-300">${fmtRecordValue(key, top.value)}</div>
-            <div class="text-[10px] font-mono text-slate-400">${top.war !== undefined ? `${Number(top.war).toFixed(1)} WAR` : `${top.g} G`}</div>
+            <div class="text-xl sm:text-2xl font-black font-mono text-amber-400 leading-none">${fmtRecordValue(key, top.value)}</div>
+            <div class="text-[10px] font-mono bnn-muted mt-1">${top.war !== undefined ? `${Number(top.war).toFixed(1)} WAR` : `${top.g} G`}</div>
           </div>
         </div>
 
-        <!-- #2 to #10 All-Time List -->
+        <!-- #2 to #10 Ladder -->
         <div class="space-y-1">
-          ${rest.map(item => `
-            <div onclick="openPlayerModal(${item.player_id})" class="px-2 py-1 rounded-lg hover:bg-slate-800/70 cursor-pointer transition flex items-center justify-between text-xs">
-              <div class="flex items-center gap-2 min-w-0">
-                <span class="w-5 text-[11px] font-mono font-bold text-slate-400">${item.rank}.</span>
-                <img src="${teamLogoUrl(item.team?.logo)}" class="w-3.5 h-3.5 object-contain shrink-0">
-                <span class="font-semibold text-slate-200 truncate hover:text-white">${item.name}</span>
-                ${item.is_hof ? `<span class="px-1 py-0.2 rounded text-[8px] font-black bg-amber-400/25 text-amber-300 border border-amber-400/40">HOF</span>` : ''}
-                <span class="text-[10px] font-mono text-slate-400">${item.team?.abbr || ''} (${isCareer ? item.years : item.year})</span>
+          ${rest.map(item => {
+            const barPct = recObj.asc
+              ? Math.max(25, Math.min(100, (Number(top.value || 1) / Math.max(0.05, Number(item.value || 1))) * 100))
+              : Math.max(20, Math.min(100, (Number(item.value || 0) / Math.max(0.001, Number(top.value || 1))) * 100));
+            return `
+              <div onclick="openPlayerModal(${item.player_id})" class="px-2 py-1 rounded-lg bnn-row-hover cursor-pointer flex items-center justify-between gap-2 text-xs">
+                <div class="flex items-center gap-1.5 min-w-0">
+                  <span class="w-5 text-[10.5px] font-mono font-bold bnn-muted">${item.rank}.</span>
+                  <img src="${teamLogoUrl(item.team?.logo)}" class="w-3.5 h-3.5 object-contain shrink-0">
+                  <span class="font-bold truncate">${escRecHtml(item.name)}</span>
+                  ${item.is_hof ? `<span class="records-hof-pill">HOF</span>` : (item.active ? `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Active"></span>` : "")}
+                  <span class="text-[10px] font-mono bnn-muted shrink-0">${escRecHtml(item.team?.abbr || "")} (${isCareer ? escRecHtml(item.years) : item.year})</span>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <div class="hidden sm:block w-12 h-1.5 rounded-full bg-slate-800/80 overflow-hidden">
+                    <div class="h-full bg-cyan-400/75" style="width:${barPct.toFixed(0)}%"></div>
+                  </div>
+                  <span class="font-mono font-extrabold">${fmtRecordValue(key, item.value)}</span>
+                </div>
               </div>
-              <span class="font-mono font-bold text-white ml-2">${fmtRecordValue(key, item.value)}</span>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderRecordsVisualSuiteHtml(data, visualMode, trajMetric, contextMode) {
+  const vs = data.visual_suite || {};
+  const trajAll = vs.trajectory_curves || {};
+  const activeTraj = trajAll[trajMetric] || trajAll.hr || { series: [], record_val: 0, record_holder: "—" };
+  const eraPts = vs.era_dominance_points || [];
+  const outliers = vs.unbreakable_outliers || [];
+
+  let bodySvgHtml = "";
+
+  if (visualMode === "trajectory") {
+    const series = activeTraj.series || [];
+    const recVal = Number(activeTraj.record_val || 100);
+    let maxY = Math.max(recVal * 1.08, 10);
+    series.forEach(s => {
+      (s.points || []).forEach(p => { if (Number(p.val) > maxY) maxY = Number(p.val) * 1.06; });
+      (s.projected || []).forEach(p => { if (Number(p.p90) > maxY) maxY = Number(p.p90) * 1.05; });
+    });
+
+    const minAge = 19;
+    const maxAge = 42;
+    const xOf = age => 66 + ((Math.max(minAge, Math.min(maxAge, age)) - minAge) / (maxAge - minAge)) * 644;
+    const yOf = val => 228 - (Math.max(0, Number(val)) / Math.max(1, maxY)) * 192;
+
+    const recY = yOf(recVal);
+    const yTicks = [0.25, 0.5, 0.75, 1.0].map(f => {
+      const v = recVal * f;
+      const py = yOf(v);
+      return `
+        <line x1="66" y1="${py.toFixed(1)}" x2="718" y2="${py.toFixed(1)}" stroke="#1E293B" stroke-width="1" stroke-dasharray="3,3" class="records-svg-grid"/>
+        <text x="58" y="${(py + 3.5).toFixed(1)}" text-anchor="end" fill="#94A3B8" font-family="'JetBrains Mono', monospace" font-size="9.5" class="records-svg-muted">${trajMetric === 'war' ? v.toFixed(0) : Math.round(v).toLocaleString()}</text>
+      `;
+    }).join("");
+
+    const ageTicks = [20, 24, 28, 32, 36, 40, 42].map(a => {
+      const px = xOf(a);
+      return `
+        <line x1="${px.toFixed(1)}" y1="28" x2="${px.toFixed(1)}" y2="228" stroke="#1E293B" stroke-width="0.8" class="records-svg-grid"/>
+        <text x="${px.toFixed(1)}" y="244" text-anchor="middle" fill="#94A3B8" font-family="'JetBrains Mono', monospace" font-size="9.5" class="records-svg-muted">Age ${a}</text>
+      `;
+    }).join("");
+
+    const pathsSvg = series.map((s, idx) => {
+      const pts = s.points || [];
+      if (!pts.length) return "";
+      const poly = pts.map(p => `${xOf(p.age).toFixed(1)},${yOf(p.val).toFixed(1)}`).join(" ");
+      const last = pts[pts.length - 1];
+      const lx = xOf(last.age);
+      const ly = yOf(last.val);
+
+      let projSvg = "";
+      if (s.projected && s.projected.length > 1) {
+        const p50Poly = s.projected.map(p => `${xOf(p.age).toFixed(1)},${yOf(p.p50).toFixed(1)}`).join(" ");
+        const upper = s.projected.map(p => `${xOf(p.age).toFixed(1)},${yOf(p.p90).toFixed(1)}`);
+        const lower = [...s.projected].reverse().map(p => `${xOf(p.age).toFixed(1)},${yOf(p.p50 * 0.92).toFixed(1)}`);
+        const fanPts = [...upper, ...lower].join(" ");
+        const endP = s.projected[s.projected.length - 1];
+        projSvg = `
+          <polygon points="${fanPts}" fill="#10B981" fill-opacity="0.14"/>
+          <polyline points="${p50Poly}" fill="none" stroke="#10B981" stroke-width="2.2" stroke-dasharray="5,3"/>
+          <circle cx="${xOf(endP.age).toFixed(1)}" cy="${yOf(endP.p50).toFixed(1)}" r="4" fill="#10B981" stroke="#090D14" stroke-width="1.2">
+            <title>${escRecHtml(s.name)} Marcel P50 @ Age ${endP.age}: ${endP.p50} (P90 Ceiling: ${endP.p90})</title>
+          </circle>
+        `;
+      }
+
+      const sw = idx === 0 || s.is_chaser ? "2.8" : "1.9";
+      const op = idx === 0 || s.is_chaser ? "0.98" : "0.72";
+      const labelY = Math.max(22, Math.min(222, ly - (idx % 2 === 0 ? 7 : -12)));
+
+      return `
+        <g onclick="openPlayerModal(${s.player_id})" class="cursor-pointer">
+          ${projSvg}
+          <polyline points="${poly}" fill="none" stroke="${s.color}" stroke-width="${sw}" stroke-opacity="${op}" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="${s.is_chaser || idx === 0 ? 5 : 3.8}" fill="${s.color}" stroke="#090D14" stroke-width="1.4">
+            <title>${escRecHtml(s.name)} (${escRecHtml(s.team_abbr)}) · Age ${last.age}: ${last.val.toLocaleString()}</title>
+          </circle>
+          <text x="${Math.min(708, lx + 6).toFixed(1)}" y="${labelY.toFixed(1)}" fill="${s.color}" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="9.5">
+            ${escRecHtml(s.name.split(" ").slice(-1)[0])} (${trajMetric === 'war' ? Number(last.val).toFixed(1) : Number(last.val).toLocaleString()})
+          </text>
+        </g>
+      `;
+    }).join("");
+
+    bodySvgHtml = `
+      <div class="space-y-2.5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="text-[11px] font-mono bnn-muted">
+            Cumulative Career Accumulation Across Ages 19–42 · All-Time Benchmark: <strong class="text-amber-400">${escRecHtml(activeTraj.record_holder)} (${fmtRecordValue(trajMetric === 'pit_k' ? 'k' : trajMetric, activeTraj.record_val)})</strong>
+          </div>
+          <div class="inline-flex rounded-lg bnn-subcard p-0.5 text-[10.5px] font-mono">
+            ${[
+              ["hr", "Career HR"],
+              ["h", "Career Hits"],
+              ["war", "Career WAR"],
+              ["pit_k", "Pitching K"],
+            ].map(([k, lbl]) => `
+              <button onclick="setRecordsOption('recordsTrajMetric','${k}')" class="px-2 py-0.5 rounded font-bold transition ${trajMetric === k ? 'bg-cyan-400 text-slate-950 font-black' : 'bnn-muted hover:text-white'}">${lbl}</button>
+            `).join("")}
+          </div>
+        </div>
+
+        <div class="records-visual-canvas rounded-xl p-2.5 overflow-hidden">
+          <svg viewBox="0 0 755 254" class="w-full h-auto block select-none">
+            ${ageTicks}
+            ${yTicks}
+            <line x1="66" y1="228" x2="718" y2="228" stroke="#475569" stroke-width="1.3" class="records-svg-grid"/>
+            <!-- #1 All-Time Record Horizontal Gold Benchmark -->
+            <line x1="66" y1="${recY.toFixed(1)}" x2="718" y2="${recY.toFixed(1)}" stroke="#F59E0B" stroke-width="1.4" stroke-dasharray="6,3"/>
+            <text x="72" y="${Math.max(16, recY - 5).toFixed(1)}" fill="#FBBF24" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="9.5">
+              ★ ALL-TIME RECORD: ${escRecHtml(activeTraj.record_holder)} (${fmtRecordValue(trajMetric === 'pit_k' ? 'k' : trajMetric, activeTraj.record_val)})
+            </text>
+            ${pathsSvg}
+          </svg>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 text-[10.5px] font-mono">
+          ${series.map(s => `
+            <button onclick="openPlayerModal(${s.player_id})" class="px-2 py-1 rounded-lg bnn-subcard bnn-row-hover flex items-center gap-1.5">
+              <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${s.color}"></span>
+              <span class="font-sans font-bold">${escRecHtml(s.name)}</span>
+              <span class="bnn-muted">(${escRecHtml(s.team_abbr)})</span>
+              <strong style="color:${s.color}">${fmtRecordValue(trajMetric === 'pit_k' ? 'k' : trajMetric, s.final_val)}</strong>
+              ${s.is_chaser ? `<span class="text-emerald-400 font-extrabold">· CHASER P50/P90</span>` : ""}
+            </button>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  } else if (visualMode === "era_scatter") {
+    const rgs = eraPts.map(p => Number(p.lg_rg || 4.5));
+    const idxs = eraPts.map(p => Number(p.plus_index || 170));
+    const minRg = Math.min(3.4, ...(rgs.length ? rgs : [3.8])) - 0.18;
+    const maxRg = Math.max(5.5, ...(rgs.length ? rgs : [5.2])) + 0.18;
+    const minIdx = Math.max(120, Math.min(145, ...(idxs.length ? idxs : [150])) - 15);
+    const maxIdx = Math.max(240, ...(idxs.length ? idxs : [240])) + 18;
+
+    const xOf = rg => 72 + ((rg - minRg) / Math.max(0.4, maxRg - minRg)) * 636;
+    const yOf = idx => 224 - ((Math.min(maxIdx, Math.max(minIdx, idx)) - minIdx) / Math.max(20, maxIdx - minIdx)) * 186;
+    const midRg = Number(data.rule922_meta?.avg_lg_rg || 4.55);
+    const midX = xOf(midRg);
+    const idx200Y = yOf(200);
+
+    const dotsSvg = eraPts.map(pt => {
+      const cx = xOf(Number(pt.lg_rg || 4.5));
+      const cy = yOf(Number(pt.plus_index || 175));
+      const rad = Math.max(5.5, Math.min(11.5, Number(pt.war || 8) * 0.72));
+      const col = pt.domain === "pitching" ? "#38BDF8" : "#F59E0B";
+      return `
+        <g onclick="openPlayerModal(${pt.player_id})" class="cursor-pointer">
+          <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${rad.toFixed(1)}" fill="${col}" fill-opacity="0.84" stroke="#090D14" stroke-width="1.5">
+            <title>${escRecHtml(pt.name)} (${pt.year} ${escRecHtml(pt.team_abbr)}) · ${escRecHtml(pt.raw_label)} · ${escRecHtml(pt.plus_label)} in ${Number(pt.lg_rg).toFixed(2)} R/G Era (${Number(pt.war).toFixed(1)} WAR)</title>
+          </circle>
+          <text x="${cx.toFixed(1)}" y="${(cy - rad - 3).toFixed(1)}" text-anchor="middle" fill="#E2E8F0" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="8.8" class="records-svg-text">
+            ${escRecHtml(pt.name.split(" ").slice(-1)[0])} '${String(pt.year).slice(-2)}
+          </text>
+        </g>
+      `;
+    }).join("");
+
+    bodySvgHtml = `
+      <div class="space-y-2">
+        <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono bnn-muted">
+          <span>X-Axis: League Scoring Environment (Runs/Team-G) · Y-Axis: Era &amp; Park Adjusted Dominance (OPS+ / ERA+) · Bubble = WAR</span>
+          <span class="flex items-center gap-3">
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>Batting Peak (OPS+)</span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>Pitching Peak (ERA+)</span>
+          </span>
+        </div>
+        <div class="records-visual-canvas rounded-xl p-2.5 overflow-hidden">
+          <svg viewBox="0 0 755 252" class="w-full h-auto block select-none">
+            <rect x="72" y="28" width="${Math.max(12, midX - 72).toFixed(1)}" height="${Math.max(12, idx200Y - 28).toFixed(1)}" fill="#10B981" fill-opacity="0.07"/>
+            <rect x="${midX.toFixed(1)}" y="28" width="${Math.max(12, 708 - midX).toFixed(1)}" height="${Math.max(12, idx200Y - 28).toFixed(1)}" fill="#F59E0B" fill-opacity="0.07"/>
+            <line x1="${midX.toFixed(1)}" y1="28" x2="${midX.toFixed(1)}" y2="224" stroke="#64748B" stroke-width="1.1" stroke-dasharray="4,4"/>
+            <line x1="72" y1="${idx200Y.toFixed(1)}" x2="708" y2="${idx200Y.toFixed(1)}" stroke="#F59E0B" stroke-width="1.1" stroke-dasharray="4,4"/>
+            <line x1="72" y1="224" x2="708" y2="224" stroke="#475569" stroke-width="1.3" class="records-svg-grid"/>
+            <text x="80" y="42" fill="#34D399" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="9.5">DEAD-BALL / PITCHER-ERA IMMORTAL OUTLIERS (LOW R/G · 200+ INDEX)</text>
+            <text x="702" y="42" text-anchor="end" fill="#FBBF24" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="9.5">HIGH-OFFENSE ERA TITANS (HIGH R/G · 200+ INDEX)</text>
+            <text x="${midX.toFixed(1)}" y="242" text-anchor="middle" fill="#94A3B8" font-family="'JetBrains Mono', monospace" font-size="9.5" class="records-svg-muted">Assn Mean ${midRg.toFixed(2)} R/G</text>
+            <text x="76" y="242" fill="#94A3B8" font-family="'JetBrains Mono', monospace" font-size="9.5" class="records-svg-muted">← Pitcher Era (${minRg.toFixed(2)} R/G)</text>
+            <text x="706" y="242" text-anchor="end" fill="#94A3B8" font-family="'JetBrains Mono', monospace" font-size="9.5" class="records-svg-muted">Offensive Era (${maxRg.toFixed(2)} R/G) →</text>
+            <text x="64" y="${(idx200Y + 3).toFixed(1)}" text-anchor="end" fill="#FBBF24" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="9.5">200+</text>
+            ${dotsSvg}
+          </svg>
+        </div>
+      </div>
+    `;
+  } else {
+    const maxZ = Math.max(2.5, ...outliers.map(o => Number(o.z_score || 1.5)));
+    bodySvgHtml = `
+      <div class="space-y-2">
+        <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono bnn-muted">
+          <span>Association's Most Untouchable Benchmarks Ranked by Standard Deviations Above Peer Top-15/20 (Z-Score), % Margin Over #2 &amp; Longevity</span>
+          <span class="text-amber-400 font-bold">Click any outlier to inspect full leaderboard</span>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+          ${outliers.map((o, i) => {
+            const wPct = Math.max(24, Math.min(100, (Number(o.z_score || 1.2) / maxZ) * 100));
+            return `
+              <div onclick="jumpRecordsTicker('${o.domain}', '${o.metric_key}', 'side_by_side')" class="p-2.5 rounded-xl bnn-subcard bnn-row-hover cursor-pointer border-l-4 ${i < 2 ? 'border-l-amber-400' : 'border-l-cyan-400'}">
+                <div class="flex items-center justify-between gap-2 mb-1">
+                  <span class="text-[10px] font-mono font-extrabold uppercase text-cyan-400">#${i + 1} · ${escRecHtml(o.label)}</span>
+                  <span class="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 font-mono font-black text-[10px]">+${Number(o.z_score).toFixed(2)}σ · ${escRecHtml(o.margin_str)}</span>
+                </div>
+                <div class="flex items-baseline justify-between gap-2">
+                  <div class="truncate">
+                    <span class="text-xs font-extrabold">${escRecHtml(o.holder_name)}</span>
+                    <span class="text-[10.5px] font-mono bnn-muted">(${escRecHtml(o.team_abbr)} · ${escRecHtml(o.year_label)})</span>
+                  </div>
+                  <span class="text-base font-black font-mono text-amber-400 shrink-0">${escRecHtml(o.value_str)}</span>
+                </div>
+                <div class="w-full h-1.5 rounded-full bg-slate-900/80 overflow-hidden my-1.5">
+                  <div class="h-full bg-gradient-to-r from-cyan-400 via-amber-400 to-rose-500" style="width:${wPct.toFixed(0)}%"></div>
+                </div>
+                <div class="flex items-center justify-between text-[10px] font-mono bnn-muted">
+                  <span>#2: ${escRecHtml(o.runner_up_name)} (${escRecHtml(o.runner_up_str)})</span>
+                  <span>${o.years_stood > 0 ? `Stood ${o.years_stood} Yrs` : "Active Era"}</span>
+                </div>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="bnn-card rounded-xl overflow-hidden">
+      <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <span class="text-[10px] font-mono uppercase text-emerald-400 font-extrabold">
+            CENTER STAGE TOP · INTERACTIVE HISTORICAL &amp; ERA-CONTEXT VISUAL SUITE
+          </span>
+          <h3 class="text-xs sm:text-sm font-extrabold mb-0">
+            ${visualMode === "era_scatter"
+              ? "Raw Benchmark vs. Era Run-Environment Dominance (OPS+ / ERA+ vs. League R/G)"
+              : visualMode === "outliers"
+              ? "\"Unbreakable Outliers\" — Record Longevity, Z-Score & % Margin Over #2 All-Time"
+              : "Career Cumulative Trajectory Race (\"Chase to #1\" Age-by-Age Curve & Marcel Projection)"}
+          </h3>
+        </div>
+        <div class="inline-flex rounded-lg bnn-card p-0.5 text-[10.5px] font-mono">
+          <button onclick="setRecordsOption('recordsVisualMode','trajectory')" class="px-2.5 py-1 rounded bnn-pill-btn font-bold ${visualMode === 'trajectory' ? 'active-blue' : ''}">
+            A. Trajectory Race
+          </button>
+          <button onclick="setRecordsOption('recordsVisualMode','era_scatter')" class="px-2.5 py-1 rounded bnn-pill-btn font-bold ${visualMode === 'era_scatter' ? 'active-blue' : ''}">
+            B. Era Dominance
+          </button>
+          <button onclick="setRecordsOption('recordsVisualMode','outliers')" class="px-2.5 py-1 rounded bnn-pill-btn font-bold ${visualMode === 'outliers' ? 'active-blue' : ''}">
+            C. Unbreakable σ
+          </button>
+        </div>
+      </div>
+      <div class="p-3">
+        ${bodySvgHtml}
+      </div>
+    </div>
+  `;
+}
+
+function renderSplitInspectorHtml(selKey, selSeason, selCareer, contextMode, statusFilter, isDedicatedUwCol = false) {
+  const sLeaders = recFilterLeaders(selSeason.leaders || [], statusFilter);
+  const cLeaders = recFilterLeaders(selCareer.leaders || [], statusFilter);
+  const sTopVal = Number((selSeason.leaders || [])[0]?.value || 1);
+  const cTopVal = Number((selCareer.leaders || [])[0]?.value || 1);
+  const isAsc = Boolean(selSeason.asc);
+
+  const sQualNote = selSeason.min_pa_qual
+    ? `Rule 9.22 ≥${selSeason.min_pa_qual} PA`
+    : (selSeason.min_ip_qual ? `Rule 9.22 ≥${selSeason.min_ip_qual} IP` : "All Campaigns");
+  const cQualNote = selCareer.min_pa_qual
+    ? `Career ≥${selCareer.min_pa_qual.toLocaleString()} PA`
+    : (selCareer.min_ip_qual ? `Career ≥${selCareer.min_ip_qual.toLocaleString()} IP` : "All-Time Totals");
+
+  const renderLadderRows = (rows, topVal, isCareer) => {
+    if (!rows.length) {
+      return `<div class="p-4 text-center text-xs font-mono bnn-muted">No ${statusFilter} leaders in this category.</div>`;
+    }
+    return rows.map(l => {
+      const v = Number(l.value || 0);
+      const pct = isAsc
+        ? Math.max(20, Math.min(100, (Math.max(0.05, topVal) / Math.max(0.05, v)) * 100))
+        : Math.max(16, Math.min(100, (v / Math.max(0.001, topVal)) * 100));
+      const eraTag = (!isCareer && contextMode === "era" && (l.ops_plus || l.era_plus || l.lg_rg))
+        ? `<span class="text-[9.5px] font-mono text-cyan-400">${l.ops_plus ? `${l.ops_plus} OPS+` : (l.era_plus ? `${l.era_plus} ERA+` : `${Number(l.lg_rg).toFixed(2)} R/G`)}</span>`
+        : "";
+      return `
+        <div onclick="openPlayerModal(${l.player_id})" class="px-2 py-1.5 rounded-lg bnn-row-hover cursor-pointer border-b bnn-border last:border-b-0">
+          <div class="flex items-center justify-between gap-1.5 text-xs">
+            <div class="flex items-center gap-1.5 min-w-0">
+              <span class="w-5 font-mono font-black text-[10.5px] ${l.rank === 1 ? 'text-amber-400' : 'bnn-muted'}">#${l.rank}</span>
+              <img src="${teamLogoUrl(l.team?.logo)}" class="w-3.5 h-3.5 object-contain shrink-0">
+              <span class="font-bold truncate">${escRecHtml(l.name)}</span>
+              ${l.is_hof ? `<span class="records-hof-pill">HOF</span>` : ""}
+              ${l.active ? `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Active"></span>` : ""}
+            </div>
+            <span class="font-mono font-black ${isCareer ? 'text-amber-400' : 'text-emerald-400'} shrink-0">${fmtRecordValue(selKey, l.value)}</span>
+          </div>
+          <div class="flex items-center justify-between gap-2 mt-0.5 pl-6">
+            <span class="text-[10px] font-mono bnn-muted truncate">${escRecHtml(l.team?.abbr || "")} · ${isCareer ? `${escRecHtml(l.years)} (${l.seasons}y)` : l.year} · ${escRecHtml(l.position || "")}</span>
+            <div class="flex items-center gap-1.5 shrink-0">
+              ${eraTag}
+              <div class="w-12 h-1 rounded-full bg-slate-800/90 overflow-hidden">
+                <div class="h-full ${isCareer ? 'bg-amber-400' : 'bg-emerald-400'}" style="width:${pct.toFixed(0)}%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join("");
+  };
+
+  return `
+    <div class="bnn-card rounded-xl overflow-hidden">
+      <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 flex items-center justify-between gap-2">
+        <div>
+          <span class="text-[10px] font-mono uppercase ${isDedicatedUwCol ? 'text-amber-400' : 'text-cyan-400'} font-extrabold">
+            ${isDedicatedUwCol ? '21:9 4TH COLUMN · UNSTACKED SPLIT INSPECTOR' : 'SELECTED CATEGORY DEEP-DIVE INSPECTOR'}
+          </span>
+          <h3 class="text-xs sm:text-sm font-extrabold mb-0">${escRecHtml(selSeason.label || selKey)}</h3>
+        </div>
+        ${selSeason.margin_pct > 0 ? `<span class="px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-400/30 font-mono font-black text-[10px]">Season ${escRecHtml(selSeason.margin_str)}</span>` : ""}
+      </div>
+
+      <div class="grid grid-cols-1 ${isDedicatedUwCol ? 'xl:grid-cols-2' : ''} divide-y ${isDedicatedUwCol ? 'xl:divide-y-0 xl:divide-x' : ''} bnn-border">
+        <!-- Single-Season Top 15 -->
+        <div>
+          <div class="px-3 py-1.5 bnn-subcard border-0 border-b bnn-border flex items-center justify-between text-[10px] font-mono">
+            <span class="font-extrabold text-emerald-400 uppercase">⚡ Top-15 Single-Season</span>
+            <span class="bnn-muted">${sQualNote}</span>
+          </div>
+          <div class="max-h-[430px] overflow-y-auto p-1.5">
+            ${renderLadderRows(sLeaders, sTopVal, false)}
+          </div>
+        </div>
+
+        <!-- Career Top 20 -->
+        <div>
+          <div class="px-3 py-1.5 bnn-subcard border-0 border-b bnn-border flex items-center justify-between text-[10px] font-mono">
+            <span class="font-extrabold text-amber-400 uppercase">∞ Top-20 All-Time Career</span>
+            <span class="bnn-muted">${cQualNote}</span>
+          </div>
+          <div class="max-h-[430px] overflow-y-auto p-1.5">
+            ${renderLadderRows(cLeaders, cTopVal, true)}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderEliasArchetypeHtml(data, contextMode, statusFilter) {
+  const progMap = data.progressive_records || {};
+  const progKeys = Object.keys(progMap);
+  const selProgKey = (AppState.recordsProgKey && progMap[AppState.recordsProgKey]) ? AppState.recordsProgKey : (progKeys[0] || "s_hr");
+  const activeProg = progMap[selProgKey] || { label: "Progressive Record History", chain: [], is_asc: false };
+  const chain = activeProg.chain || [];
+  const rMeta = data.rule922_meta || {};
+
+  // Build SVG Step-Function Curve for Progressive Chain
+  let stepSvg = "";
+  if (chain.length) {
+    const yrs = chain.map(c => Number(c.year_set));
+    const minY = Math.min(...yrs);
+    const maxY = Math.max(Number(data.current_year || 0), ...yrs);
+    const vals = chain.map(c => Number(c.value));
+    const vMin = Math.min(...vals) * 0.88;
+    const vMax = Math.max(...vals) * 1.08;
+    const xOf = yr => 65 + ((yr - minY) / Math.max(1, maxY - minY)) * 645;
+    const yOf = val => activeProg.is_asc
+      ? 35 + ((val - vMin) / Math.max(0.05, vMax - vMin)) * 145
+      : 180 - ((val - vMin) / Math.max(0.001, vMax - vMin)) * 145;
+
+    let stepPts = [];
+    chain.forEach((c, i) => {
+      const x1 = xOf(c.year_set);
+      const y1 = yOf(Number(c.value));
+      const nextYr = i < chain.length - 1 ? chain[i + 1].year_set : maxY;
+      const x2 = xOf(nextYr);
+      stepPts.push(`${x1.toFixed(1)},${y1.toFixed(1)}`);
+      stepPts.push(`${x2.toFixed(1)},${y1.toFixed(1)}`);
+    });
+
+    const markers = chain.map(c => {
+      const cx = xOf(c.year_set);
+      const cy = yOf(Number(c.value));
+      return `
+        <g onclick="openPlayerModal(${c.player_id})" class="cursor-pointer">
+          <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${c.is_current ? 5.5 : 4}" fill="${c.is_current ? '#F59E0B' : '#38BDF8'}" stroke="#090D14" stroke-width="1.3">
+            <title>${c.year_set}: ${escRecHtml(c.name)} (${escRecHtml(c.team_abbr)}) — ${escRecHtml(c.value_str)} (${escRecHtml(c.delta_str)} vs. ${escRecHtml(c.prev_holder)})</title>
+          </circle>
+          <text x="${cx.toFixed(1)}" y="${Math.max(16, cy - 8).toFixed(1)}" text-anchor="middle" fill="${c.is_current ? '#FBBF24' : '#E2E8F0'}" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="9" class="records-svg-text">
+            ${escRecHtml(c.name.split(" ").slice(-1)[0])} (${escRecHtml(c.value_str)})
+          </text>
+          <text x="${cx.toFixed(1)}" y="200" text-anchor="middle" fill="#94A3B8" font-family="'JetBrains Mono', monospace" font-size="9" class="records-svg-muted">${c.year_set}</text>
+        </g>
+      `;
+    }).join("");
+
+    stepSvg = `
+      <div class="records-visual-canvas rounded-xl p-2.5 mb-3 overflow-hidden">
+        <svg viewBox="0 0 755 212" class="w-full h-auto block select-none">
+          <line x1="65" y1="184" x2="715" y2="184" stroke="#475569" stroke-width="1.2" class="records-svg-grid"/>
+          <polyline points="${stepPts.join(" ")}" fill="none" stroke="#F59E0B" stroke-width="2.4"/>
+          ${markers}
+        </svg>
+      </div>
+    `;
+  }
+
+  const renderAgateBlock = (title, accentCls, sMap, cMap) => {
+    const keys = Object.keys(sMap);
+    return `
+      <div class="bnn-card rounded-xl overflow-hidden">
+        <div class="px-3.5 py-2 bnn-subcard border-t-0 border-x-0 flex items-center justify-between">
+          <span class="text-xs font-extrabold uppercase ${accentCls}">${escRecHtml(title)}</span>
+          <span class="text-[10px] font-mono bnn-muted">${keys.length} Official Categories</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="records-agate-table">
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th>Single-Season #1 (Yr)</th>
+                <th class="text-right">Mark</th>
+                <th>Career #1 (Span)</th>
+                <th class="text-right">Career</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${keys.map(k => {
+                const sObj = sMap[k];
+                const cObj = cMap[k];
+                const s1 = recFilterLeaders(sObj?.leaders || [], statusFilter)[0] || sObj?.leaders?.[0];
+                const c1 = recFilterLeaders(cObj?.leaders || [], statusFilter)[0] || cObj?.leaders?.[0];
+                return `
+                  <tr class="bnn-row-hover">
+                    <td class="font-bold">${escRecHtml(sObj?.label || k)}${sObj?.is_rate ? `<span class="text-amber-400 font-mono text-[9px] ml-0.5">*</span>` : ""}</td>
+                    <td>
+                      ${s1 ? `<span onclick="openPlayerModal(${s1.player_id})" class="cursor-pointer hover:underline ${s1.is_hof ? 'font-black' : 'font-semibold'}">${escRecHtml(s1.name)}</span> <span class="font-mono text-[10px] bnn-muted">${escRecHtml(s1.team?.abbr || "")} '${String(s1.year).slice(-2)}</span>` : "—"}
+                    </td>
+                    <td class="text-right font-mono font-black text-emerald-400">${s1 ? fmtRecordValue(k, s1.value) : "—"}</td>
+                    <td>
+                      ${c1 ? `<span onclick="openPlayerModal(${c1.player_id})" class="cursor-pointer hover:underline ${c1.is_hof ? 'font-black' : 'font-semibold'}">${escRecHtml(c1.name)}</span> <span class="font-mono text-[10px] bnn-muted">${escRecHtml(c1.years || "")}</span>` : "—"}
+                    </td>
+                    <td class="text-right font-mono font-black text-amber-400">${c1 ? fmtRecordValue(k, c1.value) : "—"}</td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  };
+
+  return `
+    <div class="space-y-4">
+      <!-- Progressive Chain-of-Custody Almanac Ledger -->
+      <div class="bnn-card rounded-xl overflow-hidden">
+        <div class="px-4 py-2.5 bnn-subcard border-t-0 border-x-0 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span class="text-[10px] font-mono uppercase text-amber-400 font-extrabold">ARCHETYPE 2 · ELIAS SPORTS BUREAU / BASEBALL-REFERENCE ALMANAC</span>
+            <h3 class="text-xs sm:text-sm font-extrabold mb-0">Progressive Record Chain-of-Custody (${escRecHtml(activeProg.label)})</h3>
+          </div>
+          <div class="flex flex-wrap items-center gap-1 text-[10.5px] font-mono">
+            ${[
+              ["s_hr", "Season HR"],
+              ["c_hr", "Career HR"],
+              ["s_h", "Season Hits"],
+              ["s_avg", "Season AVG*"],
+              ["s_pit_k", "Season Pit K"],
+              ["s_pit_era", "Season ERA*"],
+            ].filter(([k]) => progMap[k]).map(([k, lbl]) => `
+              <button onclick="setRecordsOption('recordsProgKey','${k}')" class="px-2.5 py-1 rounded bnn-pill-btn font-bold ${selProgKey === k ? 'active-blue' : ''}">${lbl}</button>
+            `).join("")}
+          </div>
+        </div>
+        <div class="p-3.5">
+          ${stepSvg}
+          <div class="overflow-x-auto">
+            <table class="records-agate-table">
+              <thead>
+                <tr>
+                  <th>Era #</th>
+                  <th>Year Set</th>
+                  <th>Broken</th>
+                  <th>Reign</th>
+                  <th>Record Holder</th>
+                  <th>Club</th>
+                  <th class="text-right">Benchmark</th>
+                  <th>Supplanted Previous Holder</th>
+                  <th class="text-right">Delta</th>
+                  <th class="text-right">Era Lg R/G</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${chain.map(c => `
+                  <tr onclick="openPlayerModal(${c.player_id})" class="bnn-row-hover cursor-pointer ${c.is_current ? 'bg-amber-500/10' : ''}">
+                    <td class="font-mono bnn-muted">#${c.era_index}</td>
+                    <td class="font-mono font-black text-cyan-400">${c.year_set}</td>
+                    <td class="font-mono">${c.year_broken || '<span class="text-amber-400 font-black">STANDING</span>'}</td>
+                    <td class="font-mono">${c.years_held} yr${c.years_held === 1 ? "" : "s"}</td>
+                    <td>
+                      <span class="font-extrabold">${escRecHtml(c.name)}</span>
+                      <span class="text-[10px] font-mono bnn-muted ml-1">${escRecHtml(c.position)}</span>
+                      ${recStatusBadgesHtml(c)}
+                    </td>
+                    <td class="font-mono font-bold">${escRecHtml(c.team_abbr)}</td>
+                    <td class="text-right font-mono font-black text-base ${c.is_current ? 'text-amber-400' : 'text-emerald-400'}">${escRecHtml(c.value_str)}</td>
+                    <td class="bnn-muted">${escRecHtml(c.prev_holder)}</td>
+                    <td class="text-right font-mono font-bold text-emerald-400">${escRecHtml(c.delta_str)}</td>
+                    <td class="text-right font-mono bnn-muted">${Number(c.lg_rg || 4.5).toFixed(2)} R/G</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3-Column Encyclopedic Agate Directories -->
+      <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        ${renderAgateBlock("Batting Agate Directory", "text-cyan-400", data.season_batting_records || {}, data.career_batting_records || {})}
+        ${renderAgateBlock("Pitching Agate Directory", "text-amber-400", data.season_pitching_records || {}, data.career_pitching_records || {})}
+        ${renderAgateBlock("Fielding Agate Directory", "text-emerald-400", data.season_fielding_records || {}, data.career_fielding_records || {})}
+      </div>
+
+      <!-- Rule 9.22 Archival Qualification Footnote -->
+      <div class="bnn-card rounded-xl p-3 text-[11px] font-mono bnn-muted flex flex-wrap items-center justify-between gap-2">
+        <span><strong class="text-amber-400">* Official Rule 9.22 Rate Qualification:</strong> Dynamically scaled to each season's scheduled games (3.1 PA/Team-G = <strong>${rMeta.std_min_pa || 502} PA</strong> &amp; 1.0 IP/Team-G = <strong>${rMeta.std_min_ip || 162.0} IP</strong> on ${rMeta.full_schedule_g || 162}-G schedule; Career Rate Minimums: <strong>${(rMeta.career_min_pa || 1500).toLocaleString()} PA</strong> / <strong>${(rMeta.career_min_ip || 500).toLocaleString()} IP</strong>).</span>
+        <span><strong>Bold Black-Ink</strong> denotes inducted Cooperstown Hall of Famers.</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderCooperstownArchetypeHtml(data) {
+  const plaqueSpecs = [
+    { title: "ALL-TIME CAREER WAR IMMORTAL", cat: data.career_batting_records?.war, key: "war", isCareer: true },
+    { title: "ALL-TIME CAREER HOME RUN KING", cat: data.career_batting_records?.hr, key: "hr", isCareer: true },
+    { title: "ALL-TIME CAREER HITS KING", cat: data.career_batting_records?.h, key: "h", isCareer: true },
+    { title: "ALL-TIME PITCHING STRIKEOUT KING", cat: data.career_pitching_records?.k, key: "k", isCareer: true },
+    { title: "SINGLE-SEASON HOME RUN BENCHMARK", cat: data.season_batting_records?.hr, key: "hr", isCareer: false },
+    { title: "SINGLE-SEASON ERA BENCHMARK", cat: data.season_pitching_records?.era, key: "era", isCareer: false },
+  ].filter(p => p.cat && p.cat.leaders && p.cat.leaders.length);
+
+  const pitGems = (data.single_game_feats?.pitching || []).slice(0, 3);
+  const batGems = (data.single_game_feats?.batting || []).slice(0, 3);
+  const topStreaks = (data.streaks || []).slice(0, 10);
+
+  return `
+    <div class="space-y-4">
+      <!-- Row 1: Bronze & Gold Commemorative Plaques -->
+      <div class="bnn-card rounded-xl p-3.5">
+        <div class="flex flex-wrap items-center justify-between gap-2 pb-2.5 mb-3 border-b bnn-border">
+          <div>
+            <span class="text-[10px] font-mono uppercase text-amber-400 font-extrabold">ARCHETYPE 3 · COOPERSTOWN VAULT &amp; MLB NETWORK PRIME</span>
+            <h3 class="text-xs sm:text-sm font-extrabold mb-0">Mount Rushmore Bronze &amp; Gold Record-Holder Plaques</h3>
+          </div>
+          <span class="text-[11px] font-mono bnn-muted">Click any plaque to open full Player Career Dossier</span>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
+          ${plaqueSpecs.map(sp => {
+            const l1 = sp.cat.leaders[0];
+            return `
+              <div onclick="openPlayerModal(${l1.player_id})" class="records-plaque-card rounded-xl p-3.5 cursor-pointer transition hover:-translate-y-0.5">
+                <div class="flex items-center justify-between gap-2 text-[10px] font-mono font-extrabold text-amber-400 uppercase mb-2">
+                  <span>★ ${escRecHtml(sp.title)}</span>
+                  <span>${escRecHtml(sp.cat.margin_str || "")}</span>
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <img src="${playerPicUrl(l1.player_id)}" class="w-12 h-16 rounded-lg object-cover bg-slate-950 border-2 border-amber-400/60 shrink-0" onerror="this.style.display='none'">
+                    <div class="min-w-0">
+                      <div class="flex flex-wrap items-center gap-1.5">
+                        <img src="${teamLogoUrl(l1.team?.logo)}" class="w-4 h-4 object-contain">
+                        <span class="text-sm sm:text-base font-black truncate">${escRecHtml(l1.name)}</span>
+                      </div>
+                      <div class="mt-0.5 flex flex-wrap items-center gap-1">
+                        ${recStatusBadgesHtml(l1)}
+                        <span class="text-[10.5px] font-mono bnn-muted">${escRecHtml(l1.team?.abbr || "")} · ${sp.isCareer ? `${escRecHtml(l1.years)} (${l1.seasons} Yr)` : `Season ${l1.year}`}</span>
+                      </div>
+                      <div class="text-[10px] font-mono bnn-muted mt-1 truncate">
+                        #2: ${escRecHtml(sp.cat.runner_up_name || "—")} (${fmtRecordValue(sp.key, sp.cat.runner_up_val)})
+                      </div>
+                    </div>
+                  </div>
+                  <div class="text-right shrink-0">
+                    <div class="text-2xl sm:text-3xl font-black font-mono text-amber-400 leading-none">${fmtRecordValue(sp.key, l1.value)}</div>
+                    <div class="text-[10px] font-mono bnn-muted uppercase mt-1">${escRecHtml(sp.key.toUpperCase())}</div>
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+
+      <!-- Row 2: Historic Single-Game 9-Inning Mini Box-Score Gems -->
+      <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div class="bnn-card rounded-xl p-3.5">
+          <div class="flex items-center justify-between pb-2 mb-3 border-b bnn-border">
+            <h3 class="text-xs sm:text-sm font-extrabold uppercase text-cyan-400">🔥 Historic Pitching Masterpieces &amp; 9-Inning Line Scores</h3>
+            <span class="text-[10px] font-mono bnn-muted">Bill James Game Score (GSc)</span>
+          </div>
+          <div class="space-y-3">
+            ${pitGems.map(g => `
+              <div onclick="openPlayerModal(${g.player_id})" class="p-3 rounded-xl bnn-subcard bnn-row-hover cursor-pointer">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div class="flex items-center gap-2">
+                    <img src="${teamLogoUrl(g.team?.logo)}" class="w-5 h-5 object-contain">
+                    <span class="text-sm font-black">${escRecHtml(g.name)}</span>
+                    <span class="text-[11px] font-mono bnn-muted">${escRecHtml(g.team?.abbr || "")} vs. ${escRecHtml(g.opponent?.abbr || "")} · ${escRecHtml(g.date)}</span>
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    ${(g.badges || []).map(b => `<span class="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 text-[10px] font-mono font-extrabold">${escRecHtml(b)}</span>`).join("")}
+                    <span class="px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-mono font-black text-xs">${g.game_score} GSc</span>
+                  </div>
+                </div>
+                <div class="flex flex-wrap items-center justify-between gap-2 text-xs font-mono mt-1.5">
+                  <strong class="text-emerald-400">${escRecHtml(g.line)}</strong>
+                  <span class="text-[10.5px] bnn-muted">${escRecHtml(g.formula || "")} · +${Number(g.wpa || 0).toFixed(2)} WPA</span>
+                </div>
+                ${renderMiniLinescoreHtml(g.box_score)}
+              </div>
+            `).join("")}
+          </div>
+        </div>
+
+        <div class="bnn-card rounded-xl p-3.5">
+          <div class="flex items-center justify-between pb-2 mb-3 border-b bnn-border">
+            <h3 class="text-xs sm:text-sm font-extrabold uppercase text-amber-400">⚡ Historic Batting Explosions &amp; 9-Inning Line Scores</h3>
+            <span class="text-[10px] font-mono bnn-muted">Total Bases &amp; Win Probability Added</span>
+          </div>
+          <div class="space-y-3">
+            ${batGems.map(g => `
+              <div onclick="openPlayerModal(${g.player_id})" class="p-3 rounded-xl bnn-subcard bnn-row-hover cursor-pointer">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div class="flex items-center gap-2">
+                    <img src="${teamLogoUrl(g.team?.logo)}" class="w-5 h-5 object-contain">
+                    <span class="text-sm font-black">${escRecHtml(g.name)}</span>
+                    <span class="text-[11px] font-mono bnn-muted">${escRecHtml(g.team?.abbr || "")} vs. ${escRecHtml(g.opponent?.abbr || "")} · ${escRecHtml(g.date)}</span>
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    ${(g.badges || []).map(b => `<span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-400/40 text-[10px] font-mono font-extrabold">${escRecHtml(b)}</span>`).join("")}
+                    <span class="px-2 py-0.5 rounded bg-emerald-400 text-slate-950 font-mono font-black text-xs">${g.tb} TB</span>
+                  </div>
+                </div>
+                <div class="flex flex-wrap items-center justify-between gap-2 text-xs font-mono mt-1.5">
+                  <strong class="text-amber-400">${escRecHtml(g.line)}</strong>
+                  <span class="text-[10.5px] bnn-muted">${escRecHtml(g.formula || "")}</span>
+                </div>
+                ${renderMiniLinescoreHtml(g.box_score)}
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 3: Horizontal Mar-Oct Calendar Streak Timeline -->
+      <div class="bnn-card rounded-xl p-3.5">
+        <div class="flex flex-wrap items-center justify-between gap-2 pb-2 mb-3 border-b bnn-border">
+          <div>
+            <span class="text-[10px] font-mono uppercase text-emerald-400 font-extrabold">HISTORIC &amp; LIVE STREAK CALENDAR GANTT</span>
+            <h3 class="text-xs sm:text-sm font-extrabold mb-0">Horizontal Season Span Timeline (Apr – Oct)</h3>
+          </div>
+          <div class="grid grid-cols-7 gap-3 text-[10px] font-mono bnn-muted uppercase pr-4">
+            <span>Apr</span><span>May</span><span>Jun</span><span>Jul</span><span>Aug</span><span>Sep</span><span>Oct</span>
+          </div>
+        </div>
+        <div class="space-y-2">
+          ${topStreaks.map(st => `
+            <div onclick="openPlayerModal(${st.player_id})" class="p-2 rounded-lg bnn-subcard bnn-row-hover cursor-pointer grid grid-cols-1 lg:grid-cols-12 items-center gap-2">
+              <div class="lg:col-span-4 flex items-center justify-between gap-2 min-w-0">
+                <div class="flex items-center gap-2 min-w-0">
+                  <img src="${teamLogoUrl(st.team?.logo)}" class="w-4 h-4 object-contain shrink-0">
+                  <span class="text-xs font-extrabold truncate">${escRecHtml(st.name)}</span>
+                  ${st.is_active ? `<span class="records-active-pill"><span class="records-pulse-dot"></span>ACTIVE</span>` : ""}
+                </div>
+                <span class="text-xs font-mono font-black text-amber-400 shrink-0">${st.value} ${escRecHtml(st.streak_unit)} · ${escRecHtml(st.streak_name)}</span>
+              </div>
+              <div class="lg:col-span-6 relative h-5 rounded-full bg-slate-900/80 border bnn-border overflow-hidden">
+                <div class="absolute top-0.5 bottom-0.5 rounded-full ${st.is_active ? 'bg-gradient-to-r from-emerald-500 to-emerald-300' : 'bg-gradient-to-r from-cyan-500 to-amber-400'}"
+                     style="left:${Number(st.start_pct || 10)}%; width:${Math.max(8, Number(st.width_pct || 35))}%"></div>
+              </div>
+              <div class="lg:col-span-2 text-right text-[10.5px] font-mono bnn-muted">
+                ${escRecHtml(st.started || "—")} → ${st.is_active ? '<strong class="text-emerald-400">LIVE</strong>' : escRecHtml(st.ended || "—")}
+              </div>
             </div>
           `).join("")}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderTranslatorLabArchetypeHtml(data) {
+  const rMeta = data.rule922_meta || {};
+  const nDom = AppState.recordsNeutDomain || "batting";
+  const peaksList = (data.neutralizer_peaks && data.neutralizer_peaks[nDom]) || [];
+  const nIdx = Math.min(Math.max(0, Number(AppState.recordsNeutIdx || 0)), Math.max(0, peaksList.length - 1));
+  const pk = peaksList[nIdx] || null;
+
+  const targetRg = Number(AppState.recordsNeutTargetRg || 4.50);
+  const parkMode = AppState.recordsNeutParkMode || "neutral"; // neutral | actual
+  const targetSched = Number(AppState.recordsNeutSchedG || rMeta.full_schedule_g || 162);
+
+  const translatePeak = (item) => {
+    if (!item) return null;
+    const origRg = Math.max(2.5, Number(item.lg_rg || 4.55));
+    const pf = Math.max(80, Math.min(125, Number(item.park_factor || 100)));
+    const homePfMult = parkMode === "neutral" ? ((pf / 100.0 + 1.0) / 2.0) : 1.0;
+    const schedMult = targetSched / Math.max(50, Number(item.sched_g || rMeta.full_schedule_g || 162));
+
+    if (nDom === "batting") {
+      const envMult = (targetRg / origRg) / homePfMult;
+      const rateMult = Math.pow(envMult, 0.58);
+      return {
+        hr: Math.round(item.hr * envMult * schedMult),
+        h: Math.round(item.h * rateMult * schedMult),
+        rbi: Math.round(item.rbi * envMult * schedMult),
+        avg: Math.min(0.465, item.avg * Math.pow(envMult, 0.42)),
+        ops: Math.min(1.650, item.ops * Math.pow(envMult, 0.55)),
+        war: Number((item.war * schedMult).toFixed(1)),
+        envDeltaPct: ((envMult * schedMult - 1.0) * 100),
+      };
+    } else {
+      const envMult = (targetRg / origRg) / homePfMult;
+      return {
+        era: Math.max(0.45, item.era * envMult),
+        whip: Math.max(0.50, item.whip * Math.pow(envMult, 0.48)),
+        fip: Math.max(0.55, item.fip * envMult),
+        k: Math.round(item.k * schedMult),
+        w: Math.round(item.w * schedMult),
+        war: Number((item.war * schedMult).toFixed(1)),
+        envDeltaPct: ((envMult - 1.0) * 100),
+      };
+    }
+  };
+
+  const tr = translatePeak(pk);
+
+  // Active Aging-Curve Career Pace Simulator
+  const simCands = data.simulator_candidates || [];
+  const simIdx = Math.min(Math.max(0, Number(AppState.recordsSimIdx || 0)), Math.max(0, simCands.length - 1));
+  const sc = simCands[simIdx] || null;
+  const retAge = Number(AppState.recordsSimRetAge || 40);
+  const healthPct = Number(AppState.recordsSimHealthPct || 92);
+  const slopeMode = AppState.recordsSimSlope || "standard"; // gentle | standard | steep
+  const slopeRate = slopeMode === "gentle" ? 0.045 : (slopeMode === "steep" ? 0.095 : 0.068);
+
+  let simRows = [];
+  let p50Final = sc ? Number(sc.current_val) : 0;
+  let p90Final = p50Final;
+  let p10Final = p50Final;
+  let breakAge = null;
+
+  if (sc) {
+    let c50 = Number(sc.current_val);
+    let c90 = c50;
+    let c10 = c50;
+    const baseRate = Number(sc.annual_rate || 25) * (healthPct / 100.0);
+    for (let a = Number(sc.age) + 1; a <= Math.max(Number(sc.age) + 1, retAge); a++) {
+      const decay50 = Math.max(0.18, 1.0 - Math.max(0, a - 30) * slopeRate);
+      const decay90 = Math.max(0.32, 1.0 - Math.max(0, a - 31) * (slopeRate * 0.72));
+      const decay10 = Math.max(0.10, 1.0 - Math.max(0, a - 29) * (slopeRate * 1.32));
+      const add50 = baseRate * decay50;
+      c50 += add50;
+      c90 += baseRate * 1.14 * decay90;
+      c10 += baseRate * 0.84 * decay10;
+      if (!breakAge && c50 >= Number(sc.record_val)) {
+        breakAge = a;
+      }
+      simRows.push({
+        age: a,
+        add: sc.metric_key === "war" ? add50.toFixed(1) : Math.round(add50),
+        p10: sc.metric_key === "war" ? Number(c10.toFixed(1)) : Math.round(c10),
+        p50: sc.metric_key === "war" ? Number(c50.toFixed(1)) : Math.round(c50),
+        p90: sc.metric_key === "war" ? Number(c90.toFixed(1)) : Math.round(c90),
+      });
+    }
+    p50Final = simRows.length ? simRows[simRows.length - 1].p50 : c50;
+    p90Final = simRows.length ? simRows[simRows.length - 1].p90 : c90;
+    p10Final = simRows.length ? simRows[simRows.length - 1].p10 : c10;
+  }
+
+  let simProb = 0;
+  if (sc) {
+    const recV = Number(sc.record_val || 1);
+    if (p10Final >= recV) simProb = 94;
+    else if (p50Final >= recV) simProb = Math.min(90, Math.round(52 + ((p50Final - recV) / Math.max(1, p90Final - p50Final)) * 35));
+    else if (p90Final >= recV) simProb = Math.max(12, Math.round(((p90Final - recV) / Math.max(1, p90Final - p50Final)) * 46));
+    else simProb = Math.max(2, Math.round((p90Final / Math.max(1, recV)) * 10));
+  }
+
+  // Build Simulator SVG Fan
+  let simSvgHtml = "";
+  if (sc && simRows.length) {
+    const ptsAll = [{ age: sc.age, p10: sc.current_val, p50: sc.current_val, p90: sc.current_val }, ...simRows];
+    const maxV = Math.max(Number(sc.record_val) * 1.1, p90Final * 1.06, 10);
+    const minA = Number(sc.age);
+    const maxA = Math.max(minA + 1, retAge);
+    const xOf = a => 55 + ((a - minA) / Math.max(1, maxA - minA)) * 440;
+    const yOf = v => 168 - (Number(v) / maxV) * 138;
+    const recY = yOf(sc.record_val);
+
+    const p50Line = ptsAll.map(p => `${xOf(p.age).toFixed(1)},${yOf(p.p50).toFixed(1)}`).join(" ");
+    const fanPoly = [
+      ...ptsAll.map(p => `${xOf(p.age).toFixed(1)},${yOf(p.p90).toFixed(1)}`),
+      ...[...ptsAll].reverse().map(p => `${xOf(p.age).toFixed(1)},${yOf(p.p10).toFixed(1)}`),
+    ].join(" ");
+
+    simSvgHtml = `
+      <div class="records-visual-canvas rounded-xl p-2 overflow-hidden">
+        <svg viewBox="0 0 525 190" class="w-full h-auto block select-none">
+          <line x1="55" y1="168" x2="500" y2="168" stroke="#475569" stroke-width="1.2" class="records-svg-grid"/>
+          <line x1="55" y1="${recY.toFixed(1)}" x2="500" y2="${recY.toFixed(1)}" stroke="#F59E0B" stroke-width="1.5" stroke-dasharray="5,3"/>
+          <text x="60" y="${Math.max(15, recY - 5).toFixed(1)}" fill="#FBBF24" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="9">
+            #1 RECORD: ${escRecHtml(sc.record_holder)} (${fmtRecordValue(sc.metric_key, sc.record_val)} ${escRecHtml(sc.unit)})
+          </text>
+          <polygon points="${fanPoly}" fill="#10B981" fill-opacity="0.18"/>
+          <polyline points="${p50Line}" fill="none" stroke="#10B981" stroke-width="2.6"/>
+          ${ptsAll.map(p => `
+            <circle cx="${xOf(p.age).toFixed(1)}" cy="${yOf(p.p50).toFixed(1)}" r="3.5" fill="#10B981" stroke="#090D14" stroke-width="1">
+              <title>Age ${p.age}: P50 ${p.p50} (P10 ${p.p10} – P90 ${p.p90})</title>
+            </circle>
+            <text x="${xOf(p.age).toFixed(1)}" y="182" text-anchor="middle" fill="#94A3B8" font-family="'JetBrains Mono', monospace" font-size="8.5" class="records-svg-muted">${p.age}</text>
+          `).join("")}
+        </svg>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      <!-- Left Lab: Era- & Park-Neutralized Single-Season Translator -->
+      <div class="bnn-card rounded-xl overflow-hidden">
+        <div class="px-4 py-2.5 bnn-subcard border-t-0 border-x-0 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span class="text-[10px] font-mono uppercase text-cyan-400 font-extrabold">ARCHETYPE 4A · FRONT-OFFICE HISTORICAL TRANSLATOR</span>
+            <h3 class="text-xs sm:text-sm font-extrabold mb-0">Era Run-Environment, Park &amp; Schedule Neutralizer</h3>
+          </div>
+          <div class="inline-flex rounded-lg bnn-card p-0.5 text-[10.5px] font-mono">
+            <button onclick="setRecordsOption('recordsNeutDomain','batting'); setRecordsOption('recordsNeutIdx',0)" class="px-2.5 py-0.5 rounded bnn-pill-btn font-bold ${nDom === 'batting' ? 'active-blue' : ''}">Batting Peaks</button>
+            <button onclick="setRecordsOption('recordsNeutDomain','pitching'); setRecordsOption('recordsNeutIdx',0)" class="px-2.5 py-0.5 rounded bnn-pill-btn font-bold ${nDom === 'pitching' ? 'active-blue' : ''}">Pitching Peaks</button>
+          </div>
+        </div>
+
+        <div class="p-3.5 space-y-3">
+          ${pk && tr ? `
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs font-mono">
+              <div>
+                <label class="block text-[10px] bnn-muted uppercase mb-1">1. Select Historical Peak Campaign</label>
+                <select onchange="setRecordsOption('recordsNeutIdx', Number(this.value))" class="w-full bnn-subcard px-2.5 py-1.5 rounded-lg font-bold focus:outline-none">
+                  ${peaksList.map((item, idx) => `
+                    <option value="${idx}" ${idx === nIdx ? "selected" : ""}>
+                      ${item.year} ${escRecHtml(item.name)} (${escRecHtml(item.team_abbr)}) — ${nDom === 'batting' ? `${item.hr} HR / ${fmtAvg(item.ops)} OPS` : `${item.era.toFixed(2)} ERA / ${item.k} K`} (${item.war.toFixed(1)} WAR)
+                    </option>
+                  `).join("")}
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] bnn-muted uppercase mb-1">2. Target Era Run Environment</label>
+                <div class="flex items-center gap-1">
+                  ${[
+                    [3.42, "3.42 ('68 Dead)"],
+                    [4.50, "4.50 (Neutral)"],
+                    [Number(rMeta.avg_lg_rg || 4.68), `${Number(rMeta.avg_lg_rg || 4.68).toFixed(2)} (Assn)`],
+                    [5.35, "5.35 ('00 High)"],
+                  ].map(([rgVal, lbl]) => `
+                    <button onclick="setRecordsOption('recordsNeutTargetRg', ${rgVal})" class="flex-1 px-1.5 py-1.5 rounded bnn-pill-btn text-[10px] font-bold ${Math.abs(targetRg - rgVal) < 0.03 ? 'active-blue' : ''}">${lbl}</button>
+                  `).join("")}
+                </div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs font-mono">
+              <div>
+                <label class="block text-[10px] bnn-muted uppercase mb-1">3. Ballpark Factor Normalization</label>
+                <div class="flex items-center gap-1.5">
+                  <button onclick="setRecordsOption('recordsNeutParkMode','neutral')" class="flex-1 px-2 py-1 rounded bnn-pill-btn text-[10.5px] font-bold ${parkMode === 'neutral' ? 'active-blue' : ''}">Neutral Park (100 PF)</button>
+                  <button onclick="setRecordsOption('recordsNeutParkMode','actual')" class="flex-1 px-2 py-1 rounded bnn-pill-btn text-[10.5px] font-bold ${parkMode === 'actual' ? 'active-blue' : ''}">Actual (${pk.park_factor} PF)</button>
+                </div>
+              </div>
+              <div>
+                <label class="block text-[10px] bnn-muted uppercase mb-1">4. Schedule Length Normalization</label>
+                <div class="flex items-center gap-1.5">
+                  ${[154, 162, rMeta.full_schedule_g || 162].filter((v, i, a) => a.indexOf(v) === i).map(gLen => `
+                    <button onclick="setRecordsOption('recordsNeutSchedG', ${gLen})" class="flex-1 px-2 py-1 rounded bnn-pill-btn text-[10.5px] font-bold ${targetSched === gLen ? 'active-blue' : ''}">${gLen}-G</button>
+                  `).join("")}
+                </div>
+              </div>
+            </div>
+
+            <!-- Actual vs Neutralized Side-by-Side Comparison Card -->
+            <div class="p-3 rounded-xl bnn-subcard border-l-4 border-l-cyan-400">
+              <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <div onclick="openPlayerModal(${pk.player_id})" class="cursor-pointer hover:underline font-extrabold text-sm">
+                  ${pk.year} ${escRecHtml(pk.name)} (${escRecHtml(pk.team_abbr)} · ${escRecHtml(pk.park_name)}, ${pk.park_factor} PF)
+                </div>
+                <span class="text-[10.5px] font-mono text-cyan-400 font-bold">
+                  Actual ${pk.lg_rg.toFixed(2)} R/G (${pk.sched_g} G) → Target ${targetRg.toFixed(2)} R/G (${targetSched} G)
+                </span>
+              </div>
+              ${nDom === "batting" ? `
+                <div class="grid grid-cols-5 gap-2 text-center font-mono">
+                  ${[
+                    ["HR", pk.hr, tr.hr],
+                    ["HITS", pk.h, tr.h],
+                    ["RBI", pk.rbi, tr.rbi],
+                    ["AVG", fmtAvg(pk.avg), fmtAvg(tr.avg)],
+                    ["OPS", fmtAvg(pk.ops), fmtAvg(tr.ops)],
+                  ].map(([lbl, rawV, adjV]) => `
+                    <div class="p-2 rounded-lg bnn-card">
+                      <div class="text-[9.5px] bnn-muted">${lbl}</div>
+                      <div class="text-xs bnn-muted line-through">${rawV}</div>
+                      <div class="text-base font-black text-amber-400">${adjV}</div>
+                    </div>
+                  `).join("")}
+                </div>
+              ` : `
+                <div class="grid grid-cols-5 gap-2 text-center font-mono">
+                  ${[
+                    ["ERA", pk.era.toFixed(2), tr.era.toFixed(2)],
+                    ["FIP", pk.fip.toFixed(2), tr.fip.toFixed(2)],
+                    ["WHIP", pk.whip.toFixed(2), tr.whip.toFixed(2)],
+                    ["K", pk.k, tr.k],
+                    ["WINS", pk.w, tr.w],
+                  ].map(([lbl, rawV, adjV]) => `
+                    <div class="p-2 rounded-lg bnn-card">
+                      <div class="text-[9.5px] bnn-muted">${lbl}</div>
+                      <div class="text-xs bnn-muted line-through">${rawV}</div>
+                      <div class="text-base font-black text-cyan-400">${adjV}</div>
+                    </div>
+                  `).join("")}
+                </div>
+              `}
+            </div>
+
+            <!-- Re-Ranked Neutralized Top-8 Table -->
+            <div class="overflow-x-auto max-h-[225px]">
+              <table class="records-agate-table">
+                <thead>
+                  <tr>
+                    <th>Player (Yr · Club)</th>
+                    <th>Orig R/G · PF</th>
+                    <th class="text-right">Raw Line</th>
+                    <th class="text-right">Neutralized (${targetRg.toFixed(2)} R/G)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${peaksList.slice(0, 8).map((item, idx) => {
+                    const tItem = translatePeak(item);
+                    return `
+                      <tr onclick="setRecordsOption('recordsNeutIdx', ${idx})" class="bnn-row-hover cursor-pointer ${idx === nIdx ? 'records-cat-selected' : ''}">
+                        <td class="font-bold">${escRecHtml(item.name)} <span class="font-mono text-[10px] bnn-muted">(${item.year} ${escRecHtml(item.team_abbr)})</span></td>
+                        <td class="font-mono text-[10.5px] bnn-muted">${item.lg_rg.toFixed(2)} R/G · ${item.park_factor} PF</td>
+                        <td class="text-right font-mono">${nDom === 'batting' ? `${item.hr} HR / ${fmtAvg(item.ops)}` : `${item.era.toFixed(2)} ERA / ${item.k} K`}</td>
+                        <td class="text-right font-mono font-black text-amber-400">${nDom === 'batting' ? `${tItem.hr} HR / ${fmtAvg(tItem.ops)}` : `${tItem.era.toFixed(2)} ERA / ${tItem.k} K`}</td>
+                      </tr>
+                    `;
+                  }).join("")}
+                </tbody>
+              </table>
+            </div>
+          ` : `<div class="p-6 text-center text-xs font-mono bnn-muted">No qualified historical peaks available.</div>`}
+        </div>
+      </div>
+
+      <!-- Right Lab: Active Superstar Aging-Curve Career Pace Simulator -->
+      <div class="bnn-card rounded-xl overflow-hidden">
+        <div class="px-4 py-2.5 bnn-subcard border-t-0 border-x-0 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span class="text-[10px] font-mono uppercase text-emerald-400 font-extrabold">ARCHETYPE 4B · MARCEL AGING-CURVE PACE SIMULATOR</span>
+            <h3 class="text-xs sm:text-sm font-extrabold mb-0">Active Career Record Probability &amp; Retirement Horizon Lab</h3>
+          </div>
+          ${sc ? `<span class="px-2 py-0.5 rounded font-mono font-black text-xs ${simProb >= 55 ? 'bg-emerald-400 text-slate-950' : (simProb >= 25 ? 'bg-amber-400 text-slate-950' : 'bg-slate-800 text-slate-300')}">${simProb}% RECORD PROB</span>` : ""}
+        </div>
+
+        <div class="p-3.5 space-y-3">
+          ${sc ? `
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs font-mono">
+              <div>
+                <label class="block text-[10px] bnn-muted uppercase mb-1">1. Active Chaser &amp; Target Record</label>
+                <select onchange="setRecordsOption('recordsSimIdx', Number(this.value))" class="w-full bnn-subcard px-2.5 py-1.5 rounded-lg font-bold focus:outline-none">
+                  ${simCands.map((c, idx) => `
+                    <option value="${idx}" ${idx === simIdx ? "selected" : ""}>
+                      ${escRecHtml(c.name)} (${escRecHtml(c.team_abbr)}, Age ${c.age}) — ${fmtRecordValue(c.metric_key, c.current_val)} ${c.unit} (Rec: ${fmtRecordValue(c.metric_key, c.record_val)})
+                    </option>
+                  `).join("")}
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] bnn-muted uppercase mb-1">2. Marcel Aging Decline Slope</label>
+                <div class="flex items-center gap-1">
+                  ${[
+                    ["gentle", "HOF Gentle"],
+                    ["standard", "Marcel Std"],
+                    ["steep", "Steep Attr."],
+                  ].map(([k, lbl]) => `
+                    <button onclick="setRecordsOption('recordsSimSlope','${k}')" class="flex-1 px-2 py-1.5 rounded bnn-pill-btn text-[10px] font-bold ${slopeMode === k ? 'active-blue' : ''}">${lbl}</button>
+                  `).join("")}
+                </div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">
+              <div class="p-2 rounded-lg bnn-subcard">
+                <div class="flex justify-between text-[10.5px] mb-1">
+                  <span class="bnn-muted">RETIREMENT HORIZON</span>
+                  <strong class="text-cyan-400">Age ${retAge} (${Math.max(1, retAge - sc.age)} Seasons Left)</strong>
+                </div>
+                <input type="range" min="${Math.min(37, sc.age + 2)}" max="43" value="${retAge}" onchange="setRecordsOption('recordsSimRetAge', Number(this.value))" class="w-full accent-cyan-400">
+              </div>
+              <div class="p-2 rounded-lg bnn-subcard">
+                <div class="flex justify-between text-[10.5px] mb-1">
+                  <span class="bnn-muted">PLAYING TIME / HEALTH</span>
+                  <strong class="text-emerald-400">${healthPct}% (${(sc.annual_rate * healthPct / 100).toFixed(1)} ${sc.unit}/yr base)</strong>
+                </div>
+                <input type="range" min="70" max="100" step="2" value="${healthPct}" onchange="setRecordsOption('recordsSimHealthPct', Number(this.value))" class="w-full accent-emerald-400">
+              </div>
+            </div>
+
+            ${simSvgHtml}
+
+            <div class="p-2.5 rounded-xl bnn-subcard flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+              <div>
+                <span class="bnn-muted">Projected P50 Finish:</span>
+                <strong class="text-emerald-400 text-sm ml-1">${fmtRecordValue(sc.metric_key, p50Final)} ${escRecHtml(sc.unit)}</strong>
+                <span class="text-[10.5px] bnn-muted ml-1">(P10 ${fmtRecordValue(sc.metric_key, p10Final)} – P90 ${fmtRecordValue(sc.metric_key, p90Final)})</span>
+              </div>
+              <div class="font-bold ${breakAge ? 'text-amber-400' : 'bnn-muted'}">
+                ${breakAge ? `★ Projected to Break #1 Record at Age ${breakAge}!` : `Falls ${fmtRecordValue(sc.metric_key, Math.max(0, sc.record_val - p50Final))} ${escRecHtml(sc.unit)} shy on P50`}
+              </div>
+            </div>
+          ` : `<div class="p-6 text-center text-xs font-mono bnn-muted">No active roster superstars eligible for multi-year pace simulation.</div>`}
         </div>
       </div>
     </div>
@@ -7396,12 +8573,29 @@ function renderRecordLeaderboardCard(recObj, modeLabel, isCareer = false) {
 function renderRecordsSubView(container) {
   const data = AppState.recordsData;
   if (!data || data.error) {
-    container.innerHTML = `<div class="glass-card p-8 text-center text-rose-400">${(data && data.error) || 'Failed to load League Records'}</div>`;
+    container.innerHTML = `<div class="glass-card p-8 text-center text-rose-400">${escRecHtml((data && data.error) || "Failed to load League Records")}</div>`;
     return;
   }
 
+  const themeCls = AppState.frontPageTheme === "light" ? "bnn-portal-light" : "bnn-portal-dark";
+  const vpMode = AppState.frontPageViewportMode || "auto";
+  const vpClass = vpMode === "ultrawide" ? "bnn-vp-ultrawide" : (vpMode === "standard" ? "bnn-vp-standard" : "bnn-vp-auto");
+
+  const viewMode = AppState.recordsViewMode || "portal"; // portal | elias | cooperstown | translator
   const subTab = AppState.recordsSubTab || "side_by_side";
   const dom = AppState.recordsDomain || "batting";
+  const contextMode = AppState.recordsContextMode || "era"; // era | raw
+  const statusFilter = AppState.recordsStatusFilter || "ALL"; // ALL | HOF | ACTIVE
+  const visualMode = AppState.recordsVisualMode || "trajectory"; // trajectory | era_scatter | outliers
+  const trajMetric = AppState.recordsTrajMetric || (dom === "pitching" ? "pit_k" : "hr");
+
+  const rMeta = data.rule922_meta || {};
+  const heroKpis = data.hero_kpis || {};
+  const k1 = heroKpis.hottest_chase || {};
+  const k2 = heroKpis.career_war_king || {};
+  const k3 = heroKpis.greatest_era_peak || {};
+  const k4 = heroKpis.greatest_single_game || {};
+
   const sBat = data.season_batting_records || {};
   const cBat = data.career_batting_records || {};
   const sPit = data.season_pitching_records || {};
@@ -7419,151 +8613,106 @@ function renderRecordsSubView(container) {
     activeCareerMap = cFld;
   }
 
-  let viewHtml = "";
+  const keys = Object.keys(activeSeasonMap);
+  const selKey = (AppState.recordsSelectedMetric && activeSeasonMap[AppState.recordsSelectedMetric])
+    ? AppState.recordsSelectedMetric
+    : (keys[0] || "war");
+  const selSeason = activeSeasonMap[selKey] || { label: selKey, leaders: [] };
+  const selCareer = activeCareerMap[selKey] || { label: selKey, leaders: [] };
 
+  // Build Center-Stage Vault Content for Archetype 1 (portal)
+  let centerVaultHtml = "";
   if (subTab === "side_by_side") {
-    const keys = Object.keys(activeSeasonMap);
-    const selKey = (AppState.recordsSelectedMetric && activeSeasonMap[AppState.recordsSelectedMetric]) ? AppState.recordsSelectedMetric : (keys[0] || "hr");
-    const selSeason = activeSeasonMap[selKey] || { leaders: [] };
-    const selCareer = activeCareerMap[selKey] || { leaders: [] };
-
-    viewHtml = `
-      <div class="space-y-5">
-        <!-- Domain Switcher + OOTP History Index Side-by-Side Table -->
-        <div class="glass-card p-4">
-          <div class="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-800">
-            <div class="flex items-center gap-2">
-              <button onclick="setRecordsOption('recordsDomain','batting')" class="px-4 py-2 rounded-xl text-xs font-extrabold uppercase ${dom === 'batting' ? 'bg-sky-500 text-slate-950 shadow-lg' : 'bg-slate-900 text-slate-300 border border-slate-700'}">
-                <i class="bi bi-trophy-fill mr-1"></i> Batting Record Book (${Object.keys(sBat).length} Categories)
-              </button>
-              <button onclick="setRecordsOption('recordsDomain','pitching')" class="px-4 py-2 rounded-xl text-xs font-extrabold uppercase ${dom === 'pitching' ? 'bg-amber-400 text-slate-950 shadow-lg' : 'bg-slate-900 text-slate-300 border border-slate-700'}">
-                <i class="bi bi-fire mr-1"></i> Pitching Record Book (${Object.keys(sPit).length} Categories)
-              </button>
-              <button onclick="setRecordsOption('recordsDomain','fielding')" class="px-4 py-2 rounded-xl text-xs font-extrabold uppercase ${dom === 'fielding' ? 'bg-emerald-400 text-slate-950 shadow-lg' : 'bg-slate-900 text-slate-300 border border-slate-700'}">
-                <i class="bi bi-shield-fill-check mr-1"></i> Defensive Record Book (${Object.keys(sFld).length} Categories)
-              </button>
-            </div>
-            <div class="text-xs font-mono text-slate-400">Click any category row below to inspect full Top-15 Single-Season vs. Top-20 Career Leaderboards</div>
+    centerVaultHtml = `
+      <div class="bnn-card rounded-xl overflow-hidden">
+        <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span class="text-[10px] font-mono uppercase text-cyan-400 font-extrabold">MASTER RECORD MATRIX · ${escRecHtml(dom.toUpperCase())} (${keys.length} CATEGORIES)</span>
+            <h3 class="text-xs sm:text-sm font-extrabold mb-0">Side-by-Side Single-Season #1 vs. All-Time Career #1 &amp; Active Threat</h3>
           </div>
-
-          <!-- Side-by-Side Master Summary Table (Single-Season #1 vs Career #1) -->
-          <div class="overflow-x-auto">
-            <table class="saber-table">
-              <thead>
-                <tr>
-                  <th>Statistic Category</th>
-                  <th>Group</th>
-                  <th>Single-Season Record Holder (#1)</th>
-                  <th>Team / Year</th>
-                  <th class="text-right">Season Record</th>
-                  <th>All-Time Career Record Holder (#1)</th>
-                  <th>Primary Team / Span</th>
-                  <th class="text-right">Career Record</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${keys.map(k => {
-                  const sObj = activeSeasonMap[k];
-                  const cObj = activeCareerMap[k];
-                  const s1 = sObj?.leaders?.[0];
-                  const c1 = cObj?.leaders?.[0];
-                  const isSel = k === selKey;
-                  return `
-                    <tr onclick="setRecordsOption('recordsSelectedMetric','${k}')" class="cursor-pointer ${isSel ? 'bg-sky-500/15 border-l-4 border-l-sky-400' : ''}">
-                      <td class="font-extrabold text-white">${sObj?.label || k}</td>
-                      <td><span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-[10px] font-mono text-slate-300">${sObj?.group || ''}</span></td>
-                      <td>
-                        ${s1 ? `
-                          <div class="flex items-center gap-2">
-                            <img src="${teamLogoUrl(s1.team?.logo)}" class="w-4 h-4 object-contain">
-                            <span onclick="event.stopPropagation(); openPlayerModal(${s1.player_id})" class="font-bold text-sky-300 hover:underline">${s1.name}</span>
-                            ${s1.is_hof ? `<span class="px-1 py-0.2 rounded text-[9px] font-black bg-amber-400 text-slate-950">HOF</span>` : ''}
-                          </div>
-                        ` : '—'}
-                      </td>
-                      <td class="font-mono text-xs text-slate-300">${s1 ? `${s1.team?.abbr || ''} (${s1.year})` : '—'}</td>
-                      <td class="text-right font-mono font-black text-base text-emerald-300">${s1 ? fmtRecordValue(k, s1.value) : '—'}</td>
-                      <td>
-                        ${c1 ? `
-                          <div class="flex items-center gap-2">
-                            <img src="${teamLogoUrl(c1.team?.logo)}" class="w-4 h-4 object-contain">
-                            <span onclick="event.stopPropagation(); openPlayerModal(${c1.player_id})" class="font-bold text-amber-300 hover:underline">${c1.name}</span>
-                            ${c1.is_hof ? `<span class="px-1 py-0.2 rounded text-[9px] font-black bg-amber-400 text-slate-950">HOF</span>` : ''}
-                          </div>
-                        ` : '—'}
-                      </td>
-                      <td class="font-mono text-xs text-slate-300">${c1 ? `${c1.team?.abbr || ''} (${c1.years})` : '—'}</td>
-                      <td class="text-right font-mono font-black text-base text-amber-300">${c1 ? fmtRecordValue(k, c1.value) : '—'}</td>
-                    </tr>
-                  `;
-                }).join("")}
-              </tbody>
-            </table>
-          </div>
+          <span class="text-[10.5px] font-mono bnn-muted">Click any row to load Top-15 Season vs. Top-20 Career Split Inspector</span>
         </div>
+        <div class="overflow-x-auto">
+          <table class="records-agate-table">
+            <thead>
+              <tr>
+                <th>Statistic Category</th>
+                <th>Single-Season #1 Holder</th>
+                <th class="text-right">Season Mark</th>
+                <th>All-Time Career #1 Holder</th>
+                <th class="text-right">Career Mark</th>
+                <th>Active Best / Pace Threat</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${keys.map(k => {
+                const sObj = activeSeasonMap[k];
+                const cObj = activeCareerMap[k];
+                const sPool = recFilterLeaders(sObj?.leaders || [], statusFilter);
+                const cPool = recFilterLeaders(cObj?.leaders || [], statusFilter);
+                const s1 = sPool[0];
+                const c1 = cPool[0];
+                const isSel = k === selKey;
+                const ab = cObj?.active_best;
+                const ap = sObj?.active_pace;
+                const qualPill = sObj?.min_pa_qual
+                  ? `<span class="text-[9.5px] font-mono bnn-muted block">≥${sObj.min_pa_qual} PA</span>`
+                  : (sObj?.min_ip_qual ? `<span class="text-[9.5px] font-mono bnn-muted block">≥${sObj.min_ip_qual} IP</span>` : "");
+                const sEraMeta = (s1 && contextMode === "era")
+                  ? `<div class="text-[9.5px] font-mono text-cyan-400">${s1.ops_plus ? `${s1.ops_plus} OPS+ · ` : (s1.era_plus ? `${s1.era_plus} ERA+ · ` : "")}${s1.lg_rg ? `${Number(s1.lg_rg).toFixed(2)} R/G` : ""}${sObj.margin_pct > 0 ? ` · ${sObj.margin_str}` : ""}</div>`
+                  : "";
+                const cEraMeta = (c1 && contextMode === "era" && cObj.margin_pct > 0)
+                  ? `<div class="text-[9.5px] font-mono text-amber-400">${cObj.margin_str} over #2</div>`
+                  : "";
 
-        <!-- Deep-Dive Side-by-Side Comparison for Selected Category -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <div class="glass-card p-5 border-t-4 border-t-emerald-400">
-            <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
-              <h3 class="text-base font-black text-white uppercase"><i class="bi bi-lightning-charge-fill text-emerald-400 mr-1.5"></i>Single-Season Top 15 — ${selSeason.label || selKey}</h3>
-              <span class="text-xs font-mono text-slate-400">All-Time Single-Season Leaders</span>
-            </div>
-            <div class="overflow-x-auto">
-              <table class="saber-table">
-                <thead><tr><th>Rank</th><th>Player</th><th>Team</th><th>Year</th><th>Pos</th><th class="text-right">${selSeason.label || 'Value'}</th></tr></thead>
-                <tbody>
-                  ${(selSeason.leaders || []).map(l => `
-                    <tr onclick="openPlayerModal(${l.player_id})" class="cursor-pointer">
-                      <td class="font-mono font-bold ${l.rank === 1 ? 'text-emerald-300' : 'text-slate-400'}">#${l.rank}</td>
-                      <td>
-                        <div class="flex items-center gap-2">
-                          <img src="${playerPicUrl(l.player_id)}" class="w-6 h-8 rounded object-cover bg-slate-900" onerror="this.style.display='none'">
-                          <span class="font-bold text-white">${l.name}</span>
-                          ${l.is_hof ? `<span class="px-1.5 py-0.2 rounded text-[9px] font-black bg-amber-400 text-slate-950">HOF</span>` : ''}
+                return `
+                  <tr onclick="setRecordsOption('recordsSelectedMetric','${k}')" class="records-cat-row cursor-pointer ${isSel ? 'records-cat-selected' : ''}">
+                    <td>
+                      <div class="font-extrabold text-xs">${escRecHtml(sObj?.label || k)}</div>
+                      ${qualPill}
+                    </td>
+                    <td>
+                      ${s1 ? `
+                        <div class="flex items-center gap-1.5">
+                          <img src="${teamLogoUrl(s1.team?.logo)}" class="w-4 h-4 object-contain shrink-0">
+                          <span onclick="event.stopPropagation(); openPlayerModal(${s1.player_id})" class="font-bold hover:underline">${escRecHtml(s1.name)}</span>
+                          ${s1.is_hof ? `<span class="records-hof-pill">HOF</span>` : (s1.active ? `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Active"></span>` : "")}
                         </div>
-                      </td>
-                      <td><div class="flex items-center gap-1.5"><img src="${teamLogoUrl(l.team?.logo)}" class="w-4 h-4 object-contain"><span>${l.team?.abbr || ''}</span></div></td>
-                      <td class="font-mono text-sky-300 font-bold">${l.year}</td>
-                      <td>${l.position}</td>
-                      <td class="text-right font-mono font-black text-emerald-300 text-sm">${fmtRecordValue(selKey, l.value)}</td>
-                    </tr>
-                  `).join("")}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div class="glass-card p-5 border-t-4 border-t-amber-400">
-            <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
-              <h3 class="text-base font-black text-white uppercase"><i class="bi bi-infinity text-amber-400 mr-1.5"></i>Career Top 20 — ${selCareer.label || selKey}</h3>
-              <span class="text-xs font-mono text-slate-400">All-Time Career Leaders</span>
-            </div>
-            <div class="overflow-x-auto">
-              <table class="saber-table">
-                <thead><tr><th>Rank</th><th>Player</th><th>Primary Team</th><th>Years (Seasons)</th><th>Pos</th><th class="text-right">${selCareer.label || 'Value'}</th></tr></thead>
-                <tbody>
-                  ${(selCareer.leaders || []).map(l => `
-                    <tr onclick="openPlayerModal(${l.player_id})" class="cursor-pointer">
-                      <td class="font-mono font-bold ${l.rank === 1 ? 'text-amber-300' : 'text-slate-400'}">#${l.rank}</td>
-                      <td>
-                        <div class="flex items-center gap-2">
-                          <img src="${playerPicUrl(l.player_id)}" class="w-6 h-8 rounded object-cover bg-slate-900" onerror="this.style.display='none'">
-                          <span class="font-bold text-white">${l.name}</span>
-                          ${l.is_hof ? `<span class="px-1.5 py-0.2 rounded text-[9px] font-black bg-amber-400 text-slate-950">HOF</span>` : ''}
-                          ${l.active ? `<span class="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/40">Active</span>` : ''}
+                        <div class="text-[10px] font-mono bnn-muted">${escRecHtml(s1.team?.abbr || "")} (${s1.year})</div>
+                        ${sEraMeta}
+                      ` : `<span class="bnn-muted">—</span>`}
+                    </td>
+                    <td class="text-right font-mono font-black text-sm text-emerald-400">${s1 ? fmtRecordValue(k, s1.value) : "—"}</td>
+                    <td>
+                      ${c1 ? `
+                        <div class="flex items-center gap-1.5">
+                          <img src="${teamLogoUrl(c1.team?.logo)}" class="w-4 h-4 object-contain shrink-0">
+                          <span onclick="event.stopPropagation(); openPlayerModal(${c1.player_id})" class="font-bold hover:underline">${escRecHtml(c1.name)}</span>
+                          ${c1.is_hof ? `<span class="records-hof-pill">HOF</span>` : (c1.active ? `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Active"></span>` : "")}
                         </div>
-                      </td>
-                      <td><div class="flex items-center gap-1.5"><img src="${teamLogoUrl(l.team?.logo)}" class="w-4 h-4 object-contain"><span>${l.team?.abbr || ''}</span></div></td>
-                      <td class="font-mono text-slate-300">${l.years} (${l.seasons} yr)</td>
-                      <td>${l.position}</td>
-                      <td class="text-right font-mono font-black text-amber-300 text-sm">${fmtRecordValue(selKey, l.value)}</td>
-                    </tr>
-                  `).join("")}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                        <div class="text-[10px] font-mono bnn-muted">${escRecHtml(c1.team?.abbr || "")} (${escRecHtml(c1.years)})</div>
+                        ${cEraMeta}
+                      ` : `<span class="bnn-muted">—</span>`}
+                    </td>
+                    <td class="text-right font-mono font-black text-sm text-amber-400">${c1 ? fmtRecordValue(k, c1.value) : "—"}</td>
+                    <td>
+                      ${ab ? `
+                        <div onclick="event.stopPropagation(); openPlayerModal(${ab.player_id})" class="text-[10.5px] font-mono hover:underline">
+                          <span class="text-emerald-400 font-bold">● ${escRecHtml(ab.name)}</span>
+                          <span class="bnn-muted">(#${ab.rank}: ${fmtRecordValue(k, ab.value)} · ${ab.pct_of_record}%)</span>
+                        </div>
+                      ` : (ap ? `
+                        <div onclick="event.stopPropagation(); openPlayerModal(${ap.player_id})" class="text-[10.5px] font-mono hover:underline">
+                          <span class="text-rose-400 font-bold">⚡ ${escRecHtml(ap.name)}</span>
+                          <span class="bnn-muted">(Pace ${fmtRecordValue(k, ap.projected_val)})</span>
+                        </div>
+                      ` : `<span class="text-[10px] font-mono bnn-muted">—</span>`)}
+                    </td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+          </table>
         </div>
       </div>
     `;
@@ -7571,107 +8720,126 @@ function renderRecordsSubView(container) {
     const isCareer = subTab === "career_records";
     const mapToUse = isCareer ? activeCareerMap : activeSeasonMap;
     const modeLabel = isCareer ? "All-Time Career Record" : "Single-Season Record";
-    viewHtml = `
-      <div class="space-y-4">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <div class="flex items-center gap-2">
-            <button onclick="setRecordsOption('recordsDomain','batting')" class="px-3.5 py-1.5 rounded-xl text-xs font-extrabold uppercase ${dom === 'batting' ? 'bg-sky-500 text-slate-950' : 'bg-slate-900 text-slate-300 border border-slate-700'}">Batting</button>
-            <button onclick="setRecordsOption('recordsDomain','pitching')" class="px-3.5 py-1.5 rounded-xl text-xs font-extrabold uppercase ${dom === 'pitching' ? 'bg-amber-400 text-slate-950' : 'bg-slate-900 text-slate-300 border border-slate-700'}">Pitching</button>
-            <button onclick="setRecordsOption('recordsDomain','fielding')" class="px-3.5 py-1.5 rounded-xl text-xs font-extrabold uppercase ${dom === 'fielding' ? 'bg-emerald-400 text-slate-950' : 'bg-slate-900 text-slate-300 border border-slate-700'}">Defense</button>
-          </div>
-          <span class="text-xs font-mono text-slate-400">${modeLabel} Cards (${Object.keys(mapToUse).length} Categories)</span>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 uw:grid-cols-5 gap-4">
-          ${Object.values(mapToUse).map(rec => renderRecordLeaderboardCard(rec, modeLabel, isCareer)).join("")}
-        </div>
+    centerVaultHtml = `
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+        ${Object.values(mapToUse).map(rec => renderRecordLeaderboardCard(rec, modeLabel, isCareer, contextMode, statusFilter)).join("")}
       </div>
     `;
   } else if (subTab === "single_game") {
-    const batFeats = data.single_game_feats?.batting || [];
-    const pitFeats = data.single_game_feats?.pitching || [];
-    viewHtml = `
-      <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
-        <div class="glass-card p-5">
-          <h3 class="text-base font-black text-white uppercase mb-3 pb-2 border-b border-slate-800 flex items-center justify-between">
-            <span><i class="bi bi-lightning-fill text-amber-400 mr-1.5"></i>Single-Game Batting Explosions</span>
-            <span class="text-xs font-mono text-slate-400">Multi-HR, 4+ Hit, 5+ RBI & High-WPA Games</span>
-          </h3>
-          <div class="overflow-x-auto max-h-[70vh]">
-            <table class="saber-table">
-              <thead><tr><th>Player</th><th>Team vs Opp</th><th>Date</th><th>Game Line</th><th>TB</th><th>WPA</th><th>Feat Badges</th></tr></thead>
-              <tbody>
-                ${batFeats.map(f => `
-                  <tr onclick="openPlayerModal(${f.player_id})" class="cursor-pointer">
-                    <td class="font-bold text-white">${f.name}</td>
-                    <td><div class="flex items-center gap-1.5"><img src="${teamLogoUrl(f.team?.logo)}" class="w-4 h-4 object-contain"><span>${f.team?.abbr}</span><span class="text-slate-500">vs</span><span>${f.opponent?.abbr || ''}</span></div></td>
-                    <td class="font-mono text-xs text-slate-300">${f.date || '—'}</td>
-                    <td class="font-mono font-bold text-amber-300">${f.line}</td>
-                    <td class="font-mono font-bold">${f.tb}</td>
-                    <td class="font-mono text-emerald-400">${f.wpa > 0 ? '+' : ''}${f.wpa.toFixed(2)}</td>
-                    <td><div class="flex flex-wrap gap-1">${(f.badges || []).map(b => `<span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-400/40 text-[10px] font-bold">${b}</span>`).join("")}</div></td>
-                  </tr>
-                `).join("")}
-              </tbody>
-            </table>
-          </div>
+    const batFeats = recFilterLeaders(data.single_game_feats?.batting || [], statusFilter);
+    const pitFeats = recFilterLeaders(data.single_game_feats?.pitching || [], statusFilter);
+    centerVaultHtml = `
+      <div class="space-y-4">
+        <!-- Spotlight 9-Inning Box Gems -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+          ${pitFeats[0] ? `
+            <div onclick="openPlayerModal(${pitFeats[0].player_id})" class="bnn-card rounded-xl p-3.5 cursor-pointer bnn-row-hover border-t-4 border-t-cyan-400">
+              <div class="flex items-center justify-between text-[10px] font-mono font-extrabold text-cyan-400 uppercase mb-1">
+                <span>#1 SINGLE-GAME PITCHING MASTERPIECE</span>
+                <span>${pitFeats[0].game_score} GSc · +${Number(pitFeats[0].wpa || 0).toFixed(2)} WPA</span>
+              </div>
+              <div class="text-sm font-black">${escRecHtml(pitFeats[0].name)} (${escRecHtml(pitFeats[0].team?.abbr || "")} vs. ${escRecHtml(pitFeats[0].opponent?.abbr || "")} · ${escRecHtml(pitFeats[0].date)})</div>
+              <div class="text-xs font-mono text-emerald-400 font-bold mt-0.5">${escRecHtml(pitFeats[0].line)}</div>
+              ${renderMiniLinescoreHtml(pitFeats[0].box_score)}
+            </div>
+          ` : ""}
+          ${batFeats[0] ? `
+            <div onclick="openPlayerModal(${batFeats[0].player_id})" class="bnn-card rounded-xl p-3.5 cursor-pointer bnn-row-hover border-t-4 border-t-amber-400">
+              <div class="flex items-center justify-between text-[10px] font-mono font-extrabold text-amber-400 uppercase mb-1">
+                <span>#1 SINGLE-GAME BATTING EXPLOSION</span>
+                <span>${batFeats[0].tb} TB · +${Number(batFeats[0].wpa || 0).toFixed(2)} WPA</span>
+              </div>
+              <div class="text-sm font-black">${escRecHtml(batFeats[0].name)} (${escRecHtml(batFeats[0].team?.abbr || "")} vs. ${escRecHtml(batFeats[0].opponent?.abbr || "")} · ${escRecHtml(batFeats[0].date)})</div>
+              <div class="text-xs font-mono text-amber-400 font-bold mt-0.5">${escRecHtml(batFeats[0].line)}</div>
+              ${renderMiniLinescoreHtml(batFeats[0].box_score)}
+            </div>
+          ` : ""}
         </div>
 
-        <div class="glass-card p-5">
-          <h3 class="text-base font-black text-white uppercase mb-3 pb-2 border-b border-slate-800 flex items-center justify-between">
-            <span><i class="bi bi-fire text-sky-400 mr-1.5"></i>Single-Game Pitching Gems & No-Hitters</span>
-            <span class="text-xs font-mono text-slate-400">No-Hitters, Shutouts, 10+ K & Game Score Leaders</span>
-          </h3>
-          <div class="overflow-x-auto max-h-[70vh]">
-            <table class="saber-table">
-              <thead><tr><th>Pitcher</th><th>Team vs Opp</th><th>Date</th><th>Pitching Line</th><th>GSc</th><th>WPA</th><th>Feat Badges</th></tr></thead>
-              <tbody>
-                ${pitFeats.map(f => `
-                  <tr onclick="openPlayerModal(${f.player_id})" class="cursor-pointer">
-                    <td class="font-bold text-white">${f.name}</td>
-                    <td><div class="flex items-center gap-1.5"><img src="${teamLogoUrl(f.team?.logo)}" class="w-4 h-4 object-contain"><span>${f.team?.abbr}</span><span class="text-slate-500">vs</span><span>${f.opponent?.abbr || ''}</span></div></td>
-                    <td class="font-mono text-xs text-slate-300">${f.date || '—'}</td>
-                    <td class="font-mono font-bold text-sky-300">${f.line}</td>
-                    <td class="font-mono font-black text-emerald-300">${f.game_score}</td>
-                    <td class="font-mono text-emerald-400">${f.wpa > 0 ? '+' : ''}${f.wpa.toFixed(2)}</td>
-                    <td><div class="flex flex-wrap gap-1">${(f.badges || []).map(b => `<span class="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-400/40 text-[10px] font-bold">${b}</span>`).join("")}</div></td>
-                  </tr>
-                `).join("")}
-              </tbody>
-            </table>
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-3.5">
+          <div class="bnn-card rounded-xl overflow-hidden">
+            <div class="px-3.5 py-2 bnn-subcard border-t-0 border-x-0 text-xs font-extrabold uppercase text-cyan-400">🔥 Single-Game Pitching Gems (${pitFeats.length})</div>
+            <div class="overflow-x-auto max-h-[540px]">
+              <table class="records-agate-table">
+                <thead><tr><th>Pitcher</th><th>Matchup</th><th>Date</th><th>Line</th><th class="text-right">GSc</th><th>Feat</th></tr></thead>
+                <tbody>
+                  ${pitFeats.map(f => `
+                    <tr onclick="openPlayerModal(${f.player_id})" class="bnn-row-hover cursor-pointer">
+                      <td class="font-bold">${escRecHtml(f.name)} ${f.is_hof ? `<span class="records-hof-pill">HOF</span>` : ""}</td>
+                      <td class="font-mono text-[10.5px]">${escRecHtml(f.team?.abbr || "")} vs ${escRecHtml(f.opponent?.abbr || "")}</td>
+                      <td class="font-mono text-[10.5px] bnn-muted">${escRecHtml(f.date || "—")}</td>
+                      <td class="font-mono font-bold text-cyan-400">${escRecHtml(f.line)}</td>
+                      <td class="text-right font-mono font-black text-emerald-400">${f.game_score}</td>
+                      <td>${(f.badges || []).map(b => `<span class="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 text-[9.5px] font-mono font-bold mr-1">${escRecHtml(b)}</span>`).join("")}</td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="bnn-card rounded-xl overflow-hidden">
+            <div class="px-3.5 py-2 bnn-subcard border-t-0 border-x-0 text-xs font-extrabold uppercase text-amber-400">⚡ Single-Game Batting Explosions (${batFeats.length})</div>
+            <div class="overflow-x-auto max-h-[540px]">
+              <table class="records-agate-table">
+                <thead><tr><th>Batter</th><th>Matchup</th><th>Date</th><th>Line</th><th class="text-right">TB</th><th>Feat</th></tr></thead>
+                <tbody>
+                  ${batFeats.map(f => `
+                    <tr onclick="openPlayerModal(${f.player_id})" class="bnn-row-hover cursor-pointer">
+                      <td class="font-bold">${escRecHtml(f.name)} ${f.is_hof ? `<span class="records-hof-pill">HOF</span>` : ""}</td>
+                      <td class="font-mono text-[10.5px]">${escRecHtml(f.team?.abbr || "")} vs ${escRecHtml(f.opponent?.abbr || "")}</td>
+                      <td class="font-mono text-[10.5px] bnn-muted">${escRecHtml(f.date || "—")}</td>
+                      <td class="font-mono font-bold text-amber-400">${escRecHtml(f.line)}</td>
+                      <td class="text-right font-mono font-black text-emerald-400">${f.tb}</td>
+                      <td>${(f.badges || []).map(b => `<span class="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[9.5px] font-mono font-bold mr-1">${escRecHtml(b)}</span>`).join("")}</td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
     `;
   } else if (subTab === "streaks") {
-    const streaks = data.streaks || [];
-    viewHtml = `
-      <div class="glass-card p-5">
-        <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
-          <h3 class="text-base font-black text-white uppercase"><i class="bi bi-activity text-emerald-400 mr-1.5"></i>All-Time Player Streaks (${streaks.length} Historic Streaks)</h3>
-          <span class="text-xs font-mono text-slate-400">Hitting, On-Base, Scoring, HR, Scoreless IP & Winning Streaks</span>
+    const streaks = recFilterLeaders(data.streaks || [], statusFilter);
+    centerVaultHtml = `
+      <div class="bnn-card rounded-xl overflow-hidden">
+        <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 flex items-center justify-between">
+          <h3 class="text-xs sm:text-sm font-extrabold uppercase mb-0">🔥 All-Time &amp; Live Active Player Streaks (${streaks.length})</h3>
+          <span class="text-[10.5px] font-mono bnn-muted">Partitioned Across Hitting, On-Base, HR, Scoreless IP, Saves &amp; Wins</span>
         </div>
-        <div class="overflow-x-auto max-h-[72vh]">
-          <table class="saber-table">
-            <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Pos</th><th>Streak Category</th><th>Length</th><th>Started</th><th>Ended</th><th>Status</th></tr></thead>
+        <div class="overflow-x-auto max-h-[650px]">
+          <table class="records-agate-table">
+            <thead>
+              <tr>
+                <th>#</th><th>Player</th><th>Club</th><th>Streak Category</th>
+                <th class="text-right">Length</th><th>% of Benchmark</th><th>Span</th><th>Status</th>
+              </tr>
+            </thead>
             <tbody>
-              ${streaks.map((st, idx) => {
-                const sName = (st.streak_name && typeof st.streak_name === "object") ? (st.streak_name.name || "Streak") : (st.streak_name || "Streak");
-                const sUnit = st.streak_unit || (st.streak_name && typeof st.streak_name === "object" && st.streak_name.unit) || "G";
-                const pName = st.name || st.player_name || `Player #${st.player_id}`;
-                return `
-                <tr onclick="openPlayerModal(${st.player_id})" class="cursor-pointer">
-                  <td class="font-mono text-slate-400">${idx + 1}</td>
-                  <td class="font-bold text-white">${pName}</td>
-                  <td><div class="flex items-center gap-1.5"><img src="${teamLogoUrl(st.team?.logo)}" class="w-4 h-4 object-contain"><span>${st.team?.abbr || ''}</span></div></td>
-                  <td>${st.position || ''}</td>
-                  <td class="font-bold text-sky-300">${sName}</td>
-                  <td class="font-mono font-black text-lg text-amber-300">${st.value} <span class="text-xs font-normal text-slate-400">${sUnit}</span></td>
-                  <td class="font-mono text-xs text-slate-300">${st.started || '—'}</td>
-                  <td class="font-mono text-xs text-slate-300">${st.is_active ? 'Ongoing' : (st.ended || '—')}</td>
-                  <td>${st.is_active ? `<span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-[10px] font-black">ACTIVE</span>` : `<span class="text-xs text-slate-500">Completed</span>`}</td>
+              ${streaks.map((st, idx) => `
+                <tr onclick="openPlayerModal(${st.player_id})" class="bnn-row-hover cursor-pointer">
+                  <td class="font-mono bnn-muted">${idx + 1}</td>
+                  <td>
+                    <span class="font-bold">${escRecHtml(st.name)}</span>
+                    ${recStatusBadgesHtml(st)}
+                  </td>
+                  <td class="font-mono font-bold">${escRecHtml(st.team?.abbr || "")}</td>
+                  <td class="font-bold text-cyan-400">${escRecHtml(st.streak_name)}</td>
+                  <td class="text-right font-mono font-black text-sm text-amber-400">${st.value} <span class="text-[10px] bnn-muted">${escRecHtml(st.streak_unit)}</span></td>
+                  <td>
+                    <div class="flex items-center gap-1.5 font-mono text-[10px]">
+                      <div class="w-16 h-1.5 rounded-full bg-slate-800/90 overflow-hidden">
+                        <div class="h-full ${st.is_active ? 'bg-emerald-400' : 'bg-amber-400'}" style="width:${Number(st.pct_of_benchmark || 100)}%"></div>
+                      </div>
+                      <span class="bnn-muted">${Number(st.pct_of_benchmark || 100).toFixed(0)}%</span>
+                    </div>
+                  </td>
+                  <td class="font-mono text-[10.5px] bnn-muted">${escRecHtml(st.started || "—")} → ${st.is_active ? "LIVE" : escRecHtml(st.ended || "—")}</td>
+                  <td>${st.is_active ? `<span class="records-active-pill"><span class="records-pulse-dot"></span>ACTIVE</span>` : `<span class="text-[10px] font-mono bnn-muted">Completed</span>`}</td>
                 </tr>
-              `;
-              }).join("")}
+              `).join("")}
             </tbody>
           </table>
         </div>
@@ -7680,119 +8848,506 @@ function renderRecordsSubView(container) {
   } else {
     const teamRecs = data.team_season_records || [];
     const franRecs = data.franchise_all_time || [];
-    const hints = data.league_hints || [];
-    viewHtml = `
-      <div class="space-y-5">
-        <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
-          <div class="glass-card p-5">
-            <h3 class="text-base font-black text-white uppercase mb-3 pb-2 border-b border-slate-800">
-              <i class="bi bi-shield-fill text-sky-400 mr-1.5"></i>Best Single-Season Team Records
-            </h3>
-            <div class="overflow-x-auto max-h-[65vh]">
-              <table class="saber-table">
-                <thead><tr><th>#</th><th>Team</th><th>Year</th><th>W-L</th><th>W%</th><th>Run Diff</th><th>R</th><th>HR</th><th>OPS</th><th>ERA</th></tr></thead>
-                <tbody>
-                  ${teamRecs.map((t, i) => `
-                    <tr onclick="switchTeamAndGo(${t.team_id})" class="cursor-pointer">
-                      <td class="font-mono text-slate-400">${i + 1}</td>
-                      <td><div class="flex items-center gap-2"><img src="${teamLogoUrl(t.team?.logo)}" class="w-5 h-5 object-contain"><span class="font-bold text-white">${t.team?.full_name}</span></div></td>
-                      <td class="font-mono font-bold text-sky-300">${t.year}</td>
-                      <td class="font-mono font-bold text-white">${t.w}-${t.l}</td>
-                      <td class="font-mono font-black text-emerald-400">${fmtAvg(t.pct)}</td>
-                      <td class="font-mono ${t.run_diff >= 0 ? 'text-emerald-300' : 'text-rose-400'}">${t.run_diff > 0 ? '+' : ''}${t.run_diff}</td>
-                      <td>${t.runs_scored || '—'}</td>
-                      <td>${t.team_hr || '—'}</td>
-                      <td>${t.team_ops ? fmtAvg(t.team_ops) : '—'}</td>
-                      <td>${t.team_era ? t.team_era.toFixed(2) : '—'}</td>
-                    </tr>
-                  `).join("")}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div class="glass-card p-5">
-            <h3 class="text-base font-black text-white uppercase mb-3 pb-2 border-b border-slate-800">
-              <i class="bi bi-building-fill text-amber-400 mr-1.5"></i>All-Time Franchise Win Ledger
-            </h3>
-            <div class="overflow-x-auto max-h-[65vh]">
-              <table class="saber-table">
-                <thead><tr><th>#</th><th>Franchise</th><th>Seasons</th><th>All-Time W-L</th><th>W%</th><th>Run Diff</th><th>Best Season</th></tr></thead>
-                <tbody>
-                  ${franRecs.map((f, i) => `
-                    <tr onclick="switchTeamAndGo(${f.team_id})" class="cursor-pointer">
-                      <td class="font-mono text-slate-400">${i + 1}</td>
-                      <td><div class="flex items-center gap-2"><img src="${teamLogoUrl(f.team?.logo)}" class="w-5 h-5 object-contain"><span class="font-bold text-white">${f.team?.full_name}</span></div></td>
-                      <td class="font-mono">${f.seasons}</td>
-                      <td class="font-mono font-bold text-white">${f.w.toLocaleString()}-${f.l.toLocaleString()}</td>
-                      <td class="font-mono font-black text-amber-300">${fmtAvg(f.pct)}</td>
-                      <td class="font-mono ${f.run_diff >= 0 ? 'text-emerald-300' : 'text-rose-400'}">${f.run_diff > 0 ? '+' : ''}${f.run_diff.toLocaleString()}</td>
-                      <td class="font-mono text-xs text-sky-300">${f.best_year} (${f.best_record}, ${fmtAvg(f.best_pct)})</td>
-                    </tr>
-                  `).join("")}
-                </tbody>
-              </table>
-            </div>
+    centerVaultHtml = `
+      <div class="grid grid-cols-1 xl:grid-cols-2 gap-3.5">
+        <div class="bnn-card rounded-xl overflow-hidden">
+          <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 text-xs font-extrabold uppercase text-cyan-400">🛡️ Greatest Single-Season Club Campaigns</div>
+          <div class="overflow-x-auto max-h-[600px]">
+            <table class="records-agate-table">
+              <thead><tr><th>#</th><th>Club</th><th>Yr</th><th>W-L</th><th>W%</th><th>Diff</th><th>OPS</th><th>ERA</th></tr></thead>
+              <tbody>
+                ${teamRecs.map((t, i) => `
+                  <tr onclick="switchTeamAndGo(${t.team_id})" class="bnn-row-hover cursor-pointer">
+                    <td class="font-mono bnn-muted">${i + 1}</td>
+                    <td><div class="flex items-center gap-1.5"><img src="${teamLogoUrl(t.team?.logo)}" class="w-4 h-4 object-contain"><span class="font-bold">${escRecHtml(t.team?.full_name || "")}</span></div></td>
+                    <td class="font-mono font-bold text-cyan-400">${t.year}</td>
+                    <td class="font-mono font-bold">${t.w}-${t.l}</td>
+                    <td class="font-mono font-black text-emerald-400">${fmtAvg(t.pct)}</td>
+                    <td class="font-mono ${t.run_diff >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${t.run_diff > 0 ? "+" : ""}${t.run_diff}</td>
+                    <td class="font-mono">${t.team_ops ? fmtAvg(t.team_ops) : "—"}</td>
+                    <td class="font-mono">${t.team_era ? Number(t.team_era).toFixed(2) : "—"}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
           </div>
         </div>
 
-        ${hints.length ? `
-          <div class="glass-card p-5">
-            <h3 class="text-sm font-black text-amber-300 uppercase mb-3"><i class="bi bi-bookmark-star-fill mr-1.5"></i>Official OOTP Historical Record Book Notes</h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5">
-              ${hints.map(h => `<div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-200 font-mono">${h}</div>`).join("")}
-            </div>
+        <div class="bnn-card rounded-xl overflow-hidden">
+          <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 text-xs font-extrabold uppercase text-amber-400">🏛️ All-Time Franchise Win% Ledger</div>
+          <div class="overflow-x-auto max-h-[600px]">
+            <table class="records-agate-table">
+              <thead><tr><th>#</th><th>Franchise</th><th>Yrs</th><th>All-Time W-L</th><th>W%</th><th>Peak Season</th></tr></thead>
+              <tbody>
+                ${franRecs.map((f, i) => `
+                  <tr onclick="switchTeamAndGo(${f.team_id})" class="bnn-row-hover cursor-pointer">
+                    <td class="font-mono bnn-muted">${i + 1}</td>
+                    <td><div class="flex items-center gap-1.5"><img src="${teamLogoUrl(f.team?.logo)}" class="w-4 h-4 object-contain"><span class="font-bold">${escRecHtml(f.team?.full_name || "")}</span></div></td>
+                    <td class="font-mono">${f.seasons}</td>
+                    <td class="font-mono font-bold">${Number(f.w).toLocaleString()}-${Number(f.l).toLocaleString()}</td>
+                    <td class="font-mono font-black text-amber-400">${fmtAvg(f.pct)}</td>
+                    <td class="font-mono text-[10.5px] text-cyan-400">${f.best_year} (${escRecHtml(f.best_record)})</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
           </div>
-        ` : ''}
+        </div>
       </div>
     `;
   }
 
-  container.innerHTML = `
-    <div class="animate-view space-y-5">
-      <!-- Top Records Header -->
-      <div class="glass-card p-5 border-l-4 border-l-emerald-400 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+  // Right Column Chronicle Card
+  const chronicleList = data.record_chronicle || [];
+  const rawHints = data.league_hints || [];
+  const chronicleCardHtml = `
+    <div class="bnn-card rounded-xl overflow-hidden">
+      <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 flex items-center justify-between">
         <div>
-          <div class="flex flex-wrap items-center gap-2 mb-1">
-            <span class="px-2.5 py-0.5 rounded-full text-xs font-extrabold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-400/40">
-              <i class="bi bi-journal-bookmark-fill mr-1"></i> Official League Record Book
-            </span>
-            <span class="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-slate-900 text-sky-300 border border-slate-700">
-              ${data.league_name} • ${data.year_span} (${data.num_seasons} Seasons)
-            </span>
-          </div>
-          <h2 class="text-2xl sm:text-3xl font-black text-white tracking-tight">All-Time Single-Season, Career, Game & Franchise Records</h2>
+          <span class="text-[10px] font-mono uppercase text-amber-400 font-extrabold">HISTORICAL CHRONICLE</span>
+          <h3 class="text-xs font-extrabold mb-0">Official OOTP Record Notes &amp; Feats</h3>
         </div>
-
-        <div class="flex flex-wrap items-center gap-1.5">
-          <button onclick="setRecordsOption('recordsSubTab','side_by_side')" class="px-3.5 py-2 rounded-xl text-xs font-extrabold uppercase transition ${subTab === 'side_by_side' ? 'bg-emerald-400 text-slate-950 shadow-lg' : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-600'}">
-            <i class="bi bi-layout-split mr-1"></i> Season vs. Career Book
-          </button>
-          <button onclick="setRecordsOption('recordsSubTab','season_records')" class="px-3.5 py-2 rounded-xl text-xs font-extrabold uppercase transition ${subTab === 'season_records' ? 'bg-sky-400 text-slate-950 shadow-lg' : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-600'}">
-            <i class="bi bi-lightning-charge-fill mr-1"></i> Single-Season Cards
-          </button>
-          <button onclick="setRecordsOption('recordsSubTab','career_records')" class="px-3.5 py-2 rounded-xl text-xs font-extrabold uppercase transition ${subTab === 'career_records' ? 'bg-amber-400 text-slate-950 shadow-lg' : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-600'}">
-            <i class="bi bi-infinity mr-1"></i> Career Immortals
-          </button>
-          <button onclick="setRecordsOption('recordsSubTab','single_game')" class="px-3.5 py-2 rounded-xl text-xs font-extrabold uppercase transition ${subTab === 'single_game' ? 'bg-purple-400 text-slate-950 shadow-lg' : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-600'}">
-            <i class="bi bi-stars mr-1"></i> Single-Game Feats
-          </button>
-          <button onclick="setRecordsOption('recordsSubTab','streaks')" class="px-3.5 py-2 rounded-xl text-xs font-extrabold uppercase transition ${subTab === 'streaks' ? 'bg-rose-400 text-slate-950 shadow-lg' : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-600'}">
-            <i class="bi bi-activity mr-1"></i> Streaks
-          </button>
-          <button onclick="setRecordsOption('recordsSubTab','teams')" class="px-3.5 py-2 rounded-xl text-xs font-extrabold uppercase transition ${subTab === 'teams' ? 'bg-white text-slate-950 shadow-lg' : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-600'}">
-            <i class="bi bi-shield-shaded mr-1"></i> Team Records
-          </button>
-        </div>
+        <span class="text-[10px] font-mono bnn-muted">${escRecHtml(data.year_span)}</span>
       </div>
+      <div class="p-2.5 space-y-2 max-h-[380px] overflow-y-auto">
+        ${chronicleList.map(c => `
+          <div onclick="${c.player_id ? `openPlayerModal(${c.player_id})` : (c.team_id ? `switchTeamAndGo(${c.team_id})` : "")}"
+               class="p-2.5 rounded-lg bnn-subcard bnn-row-hover ${c.player_id || c.team_id ? 'cursor-pointer' : ''} border-l-4 ${c.accent === 'crimson' ? 'border-l-rose-500' : (c.accent === 'emerald' ? 'border-l-emerald-400' : (c.accent === 'cobalt' ? 'border-l-cyan-400' : 'border-l-amber-400'))}">
+            <div class="flex items-center justify-between text-[9.5px] font-mono font-extrabold uppercase bnn-muted mb-0.5">
+              <span>${escRecHtml(c.tag)}</span>
+              <span>${escRecHtml(c.year_label)}</span>
+            </div>
+            <div class="text-xs font-extrabold">${escRecHtml(c.headline)}</div>
+            <div class="text-[10.5px] font-mono bnn-muted mt-0.5">${escRecHtml(c.detail)}</div>
+          </div>
+        `).join("")}
+        ${rawHints.slice(0, 8).map(h => `
+          <div class="p-2 rounded-lg bnn-subcard text-[10.5px] font-mono bnn-muted">${escRecHtml(h)}</div>
+        `).join("")}
+      </div>
+    </div>
 
-      ${viewHtml}
+    <div class="bnn-card rounded-xl p-3 text-[10.5px] font-mono space-y-1.5">
+      <div class="text-[10px] font-extrabold uppercase text-cyan-400">RULE 9.22 QUALIFICATION &amp; ERA STANDARDS</div>
+      <div class="flex justify-between"><span class="bnn-muted">Standard Schedule:</span><strong>${rMeta.full_schedule_g || 162} Games</strong></div>
+      <div class="flex justify-between"><span class="bnn-muted">Season Bat Rate Min (3.1 PA/G):</span><strong class="text-emerald-400">${rMeta.std_min_pa || 502} PA</strong></div>
+      <div class="flex justify-between"><span class="bnn-muted">Season Pit Rate Min (1.0 IP/G):</span><strong class="text-cyan-400">${rMeta.std_min_ip || 162.0} IP</strong></div>
+      <div class="flex justify-between"><span class="bnn-muted">Career Rate Minimums:</span><strong>${(rMeta.career_min_pa || 1500).toLocaleString()} PA / ${(rMeta.career_min_ip || 500).toLocaleString()} IP</strong></div>
+      <div class="flex justify-between"><span class="bnn-muted">Association Mean R/G:</span><strong class="text-amber-400">${Number(rMeta.avg_lg_rg || 4.55).toFixed(2)} R/G</strong></div>
+    </div>
+  `;
+
+  container.innerHTML = `
+    <div id="records-bnn-root" class="animate-view ${themeCls} ${vpClass} -mx-2 sm:-mx-4 -mt-2 pb-10">
+      <div class="bnn-shell min-h-screen">
+
+        <!-- =============================================================== -->
+        <!-- 1. TOP STRIP: LIVE RECORD-WATCH & MILESTONE COUNTDOWN TICKER    -->
+        <!-- =============================================================== -->
+        <section class="bnn-card border-t-0 border-x-0 px-3 py-2">
+          <div class="bnn-stretch-container flex items-center gap-3">
+            <div class="shrink-0 pr-3 border-r bnn-border">
+              <div class="flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
+                <span class="text-xs font-extrabold uppercase tracking-wider">RECORD WATCH</span>
+              </div>
+              <div class="text-[10px] font-mono bnn-muted">${escRecHtml(data.league_abbr)} · ${escRecHtml(data.year_span)}</div>
+            </div>
+
+            <div class="flex items-center gap-2.5 overflow-x-auto pb-0.5 flex-1 text-xs font-mono">
+              ${(data.live_ticker || []).map(tk => {
+                const borderCls = tk.accent === "crimson" ? "border-l-rose-500"
+                  : (tk.accent === "emerald" ? "border-l-emerald-400"
+                  : (tk.accent === "cobalt" ? "border-l-cyan-400" : "border-l-amber-400"));
+                const tagCls = tk.accent === "crimson" ? "text-rose-400"
+                  : (tk.accent === "emerald" ? "text-emerald-400"
+                  : (tk.accent === "cobalt" ? "text-cyan-400" : "text-amber-400"));
+                return `
+                  <div onclick="jumpRecordsTicker('${tk.domain || "batting"}','${tk.metric_key || ""}','${tk.sub_tab || "side_by_side"}')"
+                       class="w-64 shrink-0 p-1.5 rounded bnn-subcard border-l-4 ${borderCls} cursor-pointer bnn-row-hover">
+                    <div class="flex items-center justify-between mb-0.5">
+                      <span class="font-extrabold text-[10px] ${tagCls}">${escRecHtml(tk.tag)}</span>
+                      ${tk.player_id ? `<span onclick="event.stopPropagation(); openPlayerModal(${tk.player_id})" class="text-[10px] bnn-muted hover:text-white" title="Open Player Card">↗ Card</span>` : ""}
+                    </div>
+                    <div class="font-sans font-bold truncate">${escRecHtml(tk.title)}</div>
+                    <div class="text-[10.5px] bnn-muted truncate">${escRecHtml(tk.detail)}</div>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          </div>
+        </section>
+
+        <!-- =============================================================== -->
+        <!-- 2. LOCKED-IN BNN.COM | OOTP+ SCOREBUG HEADER & 4-ARCHETYPE BAR  -->
+        <!-- =============================================================== -->
+        <header class="bg-gradient-to-r from-[#0F172A] via-[#1E293B] to-[#0B132B] text-white px-4 py-2 shadow-md border-b border-white/15">
+          <div class="bnn-stretch-container flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-4">
+              <!-- Locked-in Logo 3: [B][N][N] .COM / OOTP+ Broadcast Scorebug Tile SVG -->
+              <svg width="185" height="40" viewBox="0 0 240 54" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="BNN.COM OOTP+ Broadcast Logo" class="shrink-0">
+                <g transform="skewX(-10) translate(12, 8)">
+                  <rect x="0" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
+                  <text x="17" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">B</text>
+                  <rect x="38" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
+                  <text x="55" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">N</text>
+                  <rect x="76" y="0" width="34" height="36" rx="3" fill="#FFFFFF"/>
+                  <text x="93" y="28" text-anchor="middle" fill="#0F172A" font-family="'Inter', sans-serif" font-weight="900" font-size="28">N</text>
+                  <rect x="114" y="0" width="68" height="23" rx="3" fill="#090D14" stroke="#FFFFFF" stroke-width="1.2"/>
+                  <text x="148" y="16.5" text-anchor="middle" fill="#FFFFFF" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="16">.COM</text>
+                  <rect x="114" y="25" width="68" height="11" rx="2" fill="#F59E0B"/>
+                  <text x="148" y="33.2" text-anchor="middle" fill="#090D14" font-family="'JetBrains Mono', monospace" font-weight="800" font-size="8.5" letter-spacing="1.2">OOTP+</text>
+                </g>
+              </svg>
+
+              <div>
+                <div class="flex items-center gap-2 text-[10.5px] font-mono uppercase text-amber-300 font-bold">
+                  <span>TAB 07 · OFFICIAL RECORD BOOK &amp; HISTORICAL VAULT</span>
+                  <span class="px-1.5 py-0.2 rounded bg-white/10 text-cyan-300">${escRecHtml(data.league_name)} · ${data.num_seasons} Seasons</span>
+                </div>
+                <div class="text-xs font-mono text-white/75">
+                  Rule 9.22 (${rMeta.std_min_pa || 502} PA / ${rMeta.std_min_ip || 162.0} IP on ${rMeta.full_schedule_g || 162}-G) · ${Number(rMeta.total_players || 0).toLocaleString()} Historical Players
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Controls: 4-Archetype Switcher, Viewport Simulator & Dark/Light Theme -->
+            <div class="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+              <div class="inline-flex items-center rounded-lg bg-black/45 p-0.5 border border-white/20">
+                <button onclick="setRecordsOption('recordsViewMode','portal')" class="px-2 py-0.5 rounded font-bold transition ${viewMode === 'portal' ? 'bg-amber-400 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">
+                  1. Living Book ★
+                </button>
+                <button onclick="setRecordsOption('recordsViewMode','elias')" class="px-2 py-0.5 rounded font-bold transition ${viewMode === 'elias' ? 'bg-amber-400 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">
+                  2. Elias Almanac
+                </button>
+                <button onclick="setRecordsOption('recordsViewMode','cooperstown')" class="px-2 py-0.5 rounded font-bold transition ${viewMode === 'cooperstown' ? 'bg-amber-400 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">
+                  3. Cooperstown
+                </button>
+                <button onclick="setRecordsOption('recordsViewMode','translator')" class="px-2 py-0.5 rounded font-bold transition ${viewMode === 'translator' ? 'bg-amber-400 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}">
+                  4. Era &amp; Pace Lab
+                </button>
+              </div>
+
+              <!-- 16:9 UHD vs 21:9 Ultrawide Display Ergonomics Simulator -->
+              <div class="inline-flex items-center rounded-lg bg-black/45 p-0.5 border border-white/20">
+                <button onclick="setRecordsViewportMode('auto')" class="px-2 py-0.5 rounded font-bold ${vpMode === 'auto' ? 'bg-white text-slate-950' : 'text-slate-300 hover:text-white'}" title="Auto-detect screen width">Auto</button>
+                <button onclick="setRecordsViewportMode('standard')" class="px-2 py-0.5 rounded font-bold ${vpMode === 'standard' ? 'bg-white text-slate-950' : 'text-slate-300 hover:text-white'}" title="Standard 16:9 UHD (1580px 3-Column Portal)">16:9 (3-Col)</button>
+                <button onclick="setRecordsViewportMode('ultrawide')" class="px-2 py-0.5 rounded font-bold ${vpMode === 'ultrawide' ? 'bg-cyan-400 text-slate-950 font-black' : 'text-slate-300 hover:text-white'}" title="21:9 Ultrawide (Unstacked 4th-Column Split Inspector)">21:9 (4-Col)</button>
+              </div>
+
+              <!-- Dark / Light Broadcast Theme Toggle -->
+              <div class="inline-flex items-center rounded-lg bg-black/45 p-0.5 border border-white/20">
+                <button onclick="setRecordsTheme('dark')" class="px-2 py-0.5 rounded font-bold ${AppState.frontPageTheme !== 'light' ? 'bg-amber-400 text-slate-950' : 'text-slate-300 hover:text-white'}">🌙 Dark</button>
+                <button onclick="setRecordsTheme('light')" class="px-2 py-0.5 rounded font-bold ${AppState.frontPageTheme === 'light' ? 'bg-white text-slate-950' : 'text-slate-300 hover:text-white'}">☀️ Light</button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <!-- =============================================================== -->
+        <!-- 3. UNIFIED RECORD DOMAIN, VAULT SCOPE & ERA CONTEXT FILTER BAR  -->
+        <!-- =============================================================== -->
+        <section class="bnn-card border-t-0 border-x-0 px-3.5 py-2">
+          <div class="bnn-stretch-container flex flex-wrap items-center justify-between gap-2.5 text-xs font-mono">
+            <!-- Domain Switcher -->
+            <div class="flex flex-wrap items-center gap-1.5">
+              <button onclick="setRecordsOption('recordsDomain','batting')" class="px-3 py-1 rounded-lg font-extrabold uppercase transition ${dom === 'batting' ? 'bg-cyan-400 text-slate-950 shadow' : 'bnn-pill-btn'}">
+                ⚾ Batting (${Object.keys(sBat).length})
+              </button>
+              <button onclick="setRecordsOption('recordsDomain','pitching')" class="px-3 py-1 rounded-lg font-extrabold uppercase transition ${dom === 'pitching' ? 'bg-amber-400 text-slate-950 shadow' : 'bnn-pill-btn'}">
+                🔥 Pitching (${Object.keys(sPit).length})
+              </button>
+              <button onclick="setRecordsOption('recordsDomain','fielding')" class="px-3 py-1 rounded-lg font-extrabold uppercase transition ${dom === 'fielding' ? 'bg-emerald-400 text-slate-950 shadow' : 'bnn-pill-btn'}">
+                🛡️ Defense (${Object.keys(sFld).length})
+              </button>
+
+              ${viewMode === "portal" ? `
+                <span class="mx-1 bnn-muted hidden md:inline">|</span>
+                <div class="flex flex-wrap items-center gap-1">
+                  ${[
+                    ["side_by_side", "Season vs. Career"],
+                    ["season_records", "Season Podiums"],
+                    ["career_records", "Career Immortals"],
+                    ["single_game", "Single-Game Feats"],
+                    ["streaks", "Streaks"],
+                    ["teams", "Team & Franchise"],
+                  ].map(([stKey, stLbl]) => `
+                    <button onclick="setRecordsOption('recordsSubTab','${stKey}')" class="px-2.5 py-1 rounded-lg font-bold transition ${subTab === stKey ? 'bnn-pill-btn active-blue' : 'bnn-pill-btn'}">${stLbl}</button>
+                  `).join("")}
+                </div>
+              ` : ""}
+            </div>
+
+            <!-- Context Mode & HOF / Active Filter -->
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="inline-flex rounded-lg bnn-subcard p-0.5 text-[10.5px]">
+                <button onclick="setRecordsOption('recordsContextMode','era')" class="px-2 py-0.5 rounded font-bold ${contextMode === 'era' ? 'bg-cyan-400 text-slate-950 font-black' : 'bnn-muted'}">Era-Context (R/G · OPS+/ERA+)</button>
+                <button onclick="setRecordsOption('recordsContextMode','raw')" class="px-2 py-0.5 rounded font-bold ${contextMode === 'raw' ? 'bg-white text-slate-950 font-black' : 'bnn-muted'}">Raw Marks</button>
+              </div>
+              <div class="inline-flex rounded-lg bnn-subcard p-0.5 text-[10.5px]">
+                <button onclick="setRecordsOption('recordsStatusFilter','ALL')" class="px-2 py-0.5 rounded font-bold ${statusFilter === 'ALL' ? 'bg-blue-600 text-white' : 'bnn-muted'}">All</button>
+                <button onclick="setRecordsOption('recordsStatusFilter','HOF')" class="px-2 py-0.5 rounded font-bold ${statusFilter === 'HOF' ? 'bg-amber-400 text-slate-950 font-black' : 'bnn-muted'}">★ HOF</button>
+                <button onclick="setRecordsOption('recordsStatusFilter','ACTIVE')" class="px-2 py-0.5 rounded font-bold ${statusFilter === 'ACTIVE' ? 'bg-emerald-400 text-slate-950 font-black' : 'bnn-muted'}">● Active</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- =============================================================== -->
+        <!-- 4. MAIN WORKSPACE CONTAINER (HERO KPI STRIP + ACTIVE ARCHETYPE) -->
+        <!-- =============================================================== -->
+        <main class="bnn-stretch-container px-3 sm:px-4 pt-3.5 space-y-4">
+
+          <!-- PROMINENT LEVEL-1 HERO KPI STRIP (4 COLOR-CODED CALLOUT CARDS) -->
+          <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3.5">
+            <!-- 01 · Hottest Active Record Chase / Live Streak -->
+            <div onclick="${k1.player_id ? `openPlayerModal(${k1.player_id})` : ""}" class="stretch-hero-kpi stretch-kpi-crimson p-3.5 ${k1.player_id ? 'cursor-pointer' : ''}">
+              <div class="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-rose-500 via-amber-400 to-rose-500"></div>
+              <div class="flex items-center justify-between gap-2 text-[10px] font-mono font-extrabold uppercase text-rose-400 mb-1.5">
+                <span>01 · ${escRecHtml(k1.badge || "HOTTEST RECORD CHASE")}</span>
+                ${k1.team?.abbr ? `<span class="px-1.5 py-0.2 rounded bg-rose-500/20 border border-rose-400/30">${escRecHtml(k1.team.abbr)} · ${escRecHtml(k1.position || "")}</span>` : ""}
+              </div>
+              <div class="flex items-center justify-between gap-2.5">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  ${k1.player_id ? `<img src="${playerPicUrl(k1.player_id)}" class="w-11 h-14 rounded-lg object-cover bg-slate-950 border border-rose-400/50 shrink-0" onerror="this.style.display='none'">` : ""}
+                  <div class="min-w-0">
+                    <div class="text-sm font-black truncate">${escRecHtml(k1.name || "—")}</div>
+                    <div class="text-[10.5px] font-mono bnn-muted line-clamp-2 mt-0.5">${escRecHtml(k1.sub_line || "")}</div>
+                  </div>
+                </div>
+                <div class="text-right shrink-0">
+                  <div class="text-2xl sm:text-3xl font-black font-mono text-rose-400 leading-none">${escRecHtml(k1.hero_val || "—")}</div>
+                  <div class="text-[10px] font-mono font-bold uppercase bnn-muted mt-1">${escRecHtml(k1.hero_unit || "")}</div>
+                </div>
+              </div>
+              <div class="mt-2.5">
+                <div class="w-full h-1.5 rounded-full bg-slate-900/90 overflow-hidden">
+                  <div class="h-full bg-gradient-to-r from-rose-500 to-amber-400" style="width:${Number(k1.pct_bar || 50)}%"></div>
+                </div>
+                <div class="flex justify-between text-[9.5px] font-mono bnn-muted mt-1">
+                  <span>${escRecHtml(k1.left_label || "")}</span>
+                  <span>${escRecHtml(k1.right_label || "")}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 02 · All-Time Career WAR & Immortal Benchmark King -->
+            <div onclick="${k2.player_id ? `openPlayerModal(${k2.player_id})` : ""}" class="stretch-hero-kpi stretch-kpi-amber p-3.5 ${k2.player_id ? 'cursor-pointer' : ''}">
+              <div class="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500"></div>
+              <div class="flex items-center justify-between gap-2 text-[10px] font-mono font-extrabold uppercase text-amber-400 mb-1.5">
+                <span>02 · ${escRecHtml(k2.badge || "CAREER WAR IMMORTAL")}</span>
+                <span class="px-1.5 py-0.2 rounded bg-amber-500/20 border border-amber-400/35">${escRecHtml(k2.margin_str || "#1 ALL-TIME")}</span>
+              </div>
+              <div class="flex items-center justify-between gap-2.5">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  ${k2.player_id ? `<img src="${playerPicUrl(k2.player_id)}" class="w-11 h-14 rounded-lg object-cover bg-slate-950 border border-amber-400/60 shrink-0" onerror="this.style.display='none'">` : ""}
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-1">
+                      <span class="text-sm font-black truncate">${escRecHtml(k2.name || "—")}</span>
+                      ${recStatusBadgesHtml(k2)}
+                    </div>
+                    <div class="text-[10.5px] font-mono bnn-muted mt-0.5">${escRecHtml(k2.team?.abbr || "")} · ${escRecHtml(k2.years || "")} (${k2.seasons || 1} Yrs)</div>
+                    <div class="text-[10px] font-mono bnn-muted truncate">${escRecHtml(k2.sub_line || "")}</div>
+                  </div>
+                </div>
+                <div class="text-right shrink-0">
+                  <div class="text-2xl sm:text-3xl font-black font-mono text-amber-400 leading-none">${escRecHtml(k2.hero_val || "0.0")}</div>
+                  <div class="text-[10px] font-mono font-bold uppercase bnn-muted mt-1">CAREER WAR</div>
+                </div>
+              </div>
+              <div class="mt-2.5">
+                <div class="w-full h-1.5 rounded-full bg-slate-900/90 overflow-hidden">
+                  <div class="h-full bg-gradient-to-r from-amber-500 to-yellow-300" style="width:100%"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 03 · Greatest Era-Adjusted Single-Season Peak -->
+            <div onclick="${k3.player_id ? `openPlayerModal(${k3.player_id})` : ""}" class="stretch-hero-kpi stretch-kpi-emerald p-3.5 ${k3.player_id ? 'cursor-pointer' : ''}">
+              <div class="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-emerald-400 via-cyan-400 to-emerald-500"></div>
+              <div class="flex items-center justify-between gap-2 text-[10px] font-mono font-extrabold uppercase text-emerald-400 mb-1.5">
+                <span>03 · ${escRecHtml(k3.badge || "GREATEST SEASON PEAK")}</span>
+                ${k3.era_badge ? `<span class="px-1.5 py-0.2 rounded bg-emerald-500/20 border border-emerald-400/35">${escRecHtml(k3.era_badge)}</span>` : ""}
+              </div>
+              <div class="flex items-center justify-between gap-2.5">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  ${k3.player_id ? `<img src="${playerPicUrl(k3.player_id)}" class="w-11 h-14 rounded-lg object-cover bg-slate-950 border border-emerald-400/60 shrink-0" onerror="this.style.display='none'">` : ""}
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-1">
+                      <span class="text-sm font-black truncate">${escRecHtml(k3.name || "—")}</span>
+                      ${k3.is_hof ? `<span class="records-hof-pill">HOF</span>` : ""}
+                    </div>
+                    <div class="text-[10.5px] font-mono text-cyan-400 font-bold mt-0.5">${escRecHtml(k3.team?.abbr || "")} · ${escRecHtml(k3.era_index_str || "")}</div>
+                    <div class="text-[10px] font-mono bnn-muted truncate">${escRecHtml(k3.sub_line || "")}</div>
+                  </div>
+                </div>
+                <div class="text-right shrink-0">
+                  <div class="text-2xl sm:text-3xl font-black font-mono text-emerald-400 leading-none">${escRecHtml(k3.hero_val || "0.0")}</div>
+                  <div class="text-[10px] font-mono font-bold uppercase bnn-muted mt-1">SEASON WAR</div>
+                </div>
+              </div>
+              <div class="mt-2.5">
+                <div class="w-full h-1.5 rounded-full bg-slate-900/90 overflow-hidden">
+                  <div class="h-full bg-gradient-to-r from-emerald-400 to-cyan-400" style="width:${Number(k3.pct_bar || 95)}%"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 04 · Greatest Single-Game Explosion / Pitching Gem -->
+            <div onclick="${k4.player_id ? `openPlayerModal(${k4.player_id})` : ""}" class="stretch-hero-kpi stretch-kpi-cobalt p-3.5 ${k4.player_id ? 'cursor-pointer' : ''}">
+              <div class="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-blue-500 via-cyan-400 to-blue-500"></div>
+              <div class="flex items-center justify-between gap-2 text-[10px] font-mono font-extrabold uppercase text-cyan-400 mb-1.5">
+                <span>04 · ${escRecHtml(k4.badge || "SINGLE-GAME GEM")}</span>
+                ${k4.team?.abbr ? `<span class="px-1.5 py-0.2 rounded bg-blue-500/20 border border-cyan-400/35">${escRecHtml(k4.team.abbr)}</span>` : ""}
+              </div>
+              <div class="flex items-center justify-between gap-2.5">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  ${k4.player_id ? `<img src="${playerPicUrl(k4.player_id)}" class="w-11 h-14 rounded-lg object-cover bg-slate-950 border border-cyan-400/60 shrink-0" onerror="this.style.display='none'">` : ""}
+                  <div class="min-w-0">
+                    <div class="text-sm font-black truncate">${escRecHtml(k4.name || "—")}</div>
+                    <div class="text-[10.5px] font-mono text-amber-400 font-bold truncate mt-0.5">${escRecHtml(k4.line || "")}</div>
+                    <div class="text-[10px] font-mono bnn-muted truncate">${escRecHtml(k4.sub_line || "")}</div>
+                  </div>
+                </div>
+                <div class="text-right shrink-0">
+                  <div class="text-2xl sm:text-3xl font-black font-mono text-cyan-400 leading-none">${escRecHtml(k4.hero_val || "—")}</div>
+                  <div class="text-[10px] font-mono font-bold uppercase bnn-muted mt-1">${escRecHtml(k4.hero_unit || "")}</div>
+                </div>
+              </div>
+              <div class="mt-2.5">
+                <div class="w-full h-1.5 rounded-full bg-slate-900/90 overflow-hidden">
+                  <div class="h-full bg-gradient-to-r from-blue-500 to-cyan-300" style="width:${Number(k4.pct_bar || 90)}%"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ============================================================= -->
+          <!-- ARCHETYPE SWITCH: 1. LIVING BOOK | 2. ELIAS | 3. HOF | 4. LAB -->
+          <!-- ============================================================= -->
+          ${viewMode === "elias"
+            ? renderEliasArchetypeHtml(data, contextMode, statusFilter)
+            : viewMode === "cooperstown"
+            ? renderCooperstownArchetypeHtml(data)
+            : viewMode === "translator"
+            ? renderTranslatorLabArchetypeHtml(data)
+            : `
+              <!-- ARCHETYPE 1 (PRIMARY): BNN.COM LIVING RECORD BOOK 3-COL / 4-COL COCKPIT -->
+              <section class="bnn-records-grid">
+
+                <!-- LEFT MARGIN: MILESTONE RADAR, STREAK WATCH & FRANCHISE DYNASTIES -->
+                <aside class="bnn-records-col-left space-y-3.5">
+                  <!-- Active Career Milestone Radar -->
+                  <div class="bnn-card rounded-xl overflow-hidden">
+                    <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 flex items-center justify-between">
+                      <div>
+                        <span class="text-[10px] font-mono uppercase text-amber-400 font-extrabold">IMMORTAL COUNTDOWN</span>
+                        <h3 class="text-xs font-extrabold mb-0">Active Career Milestone Radar</h3>
+                      </div>
+                      <span class="records-active-pill"><span class="records-pulse-dot"></span>LIVE</span>
+                    </div>
+                    <div class="p-2.5 space-y-2">
+                      ${(data.milestone_radar || []).length ? (data.milestone_radar || []).slice(0, 7).map(ms => `
+                        <div onclick="openPlayerModal(${ms.player_id})" class="p-2 rounded-lg bnn-subcard bnn-row-hover cursor-pointer">
+                          <div class="flex items-center justify-between gap-1 text-xs">
+                            <span class="font-extrabold truncate">${escRecHtml(ms.name)} <span class="font-mono text-[10px] bnn-muted">(${escRecHtml(ms.team_abbr)} · ${ms.age})</span></span>
+                            <span class="font-mono font-black text-amber-400 shrink-0">${escRecHtml(ms.current_str)}</span>
+                          </div>
+                          <div class="w-full h-1.5 rounded-full bg-slate-900/90 overflow-hidden my-1">
+                            <div class="h-full bg-gradient-to-r from-amber-500 to-emerald-400" style="width:${ms.pct_complete}%"></div>
+                          </div>
+                          <div class="flex items-center justify-between text-[10px] font-mono bnn-muted">
+                            <span>Target: <strong class="text-cyan-400">${escRecHtml(ms.target_label)}</strong></span>
+                            <span class="text-emerald-400 font-bold">${escRecHtml(ms.gap_str)}</span>
+                          </div>
+                        </div>
+                      `).join("") : `<div class="p-3 text-center text-xs font-mono bnn-muted">Building multi-season career totals...</div>`}
+                    </div>
+                  </div>
+
+                  <!-- Live Active vs. All-Time Streak Watch -->
+                  <div class="bnn-card rounded-xl overflow-hidden">
+                    <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 flex items-center justify-between">
+                      <div>
+                        <span class="text-[10px] font-mono uppercase text-emerald-400 font-extrabold">STREAK RADAR</span>
+                        <h3 class="text-xs font-extrabold mb-0">Active &amp; All-Time Streaks</h3>
+                      </div>
+                      <button onclick="setRecordsOption('recordsSubTab','streaks')" class="text-[10px] font-mono text-cyan-400 hover:underline">All →</button>
+                    </div>
+                    <div class="p-2.5 space-y-1.5">
+                      ${(data.streaks || []).slice(0, 6).map(st => `
+                        <div onclick="openPlayerModal(${st.player_id})" class="px-2 py-1.5 rounded-lg bnn-subcard bnn-row-hover cursor-pointer flex items-center justify-between gap-2 text-xs">
+                          <div class="min-w-0">
+                            <div class="flex items-center gap-1.5">
+                              <span class="font-bold truncate">${escRecHtml(st.name)}</span>
+                              ${st.is_active ? `<span class="records-active-pill"><span class="records-pulse-dot"></span>LIVE</span>` : ""}
+                            </div>
+                            <div class="text-[10px] font-mono bnn-muted truncate">${escRecHtml(st.team?.abbr || "")} · ${escRecHtml(st.streak_name)}</div>
+                          </div>
+                          <div class="text-right font-mono shrink-0">
+                            <div class="font-black text-amber-400">${st.value} ${escRecHtml(st.streak_unit)}</div>
+                            <div class="text-[9.5px] bnn-muted">Rec: ${st.benchmark_val}</div>
+                          </div>
+                        </div>
+                      `).join("")}
+                    </div>
+                  </div>
+
+                  <!-- Franchise Dynasty & Single-Season Team Juggernauts -->
+                  <div class="bnn-card rounded-xl overflow-hidden">
+                    <div class="px-3.5 py-2.5 bnn-subcard border-t-0 border-x-0 flex items-center justify-between">
+                      <div>
+                        <span class="text-[10px] font-mono uppercase text-cyan-400 font-extrabold">CLUB JUGGERNAUTS</span>
+                        <h3 class="text-xs font-extrabold mb-0">Best Team Seasons &amp; Dynasties</h3>
+                      </div>
+                      <button onclick="setRecordsOption('recordsSubTab','teams')" class="text-[10px] font-mono text-cyan-400 hover:underline">Ledger →</button>
+                    </div>
+                    <div class="p-2.5 space-y-1.5">
+                      ${(data.team_season_records || []).slice(0, 5).map((t, idx) => `
+                        <div onclick="switchTeamAndGo(${t.team_id})" class="px-2 py-1.5 rounded-lg bnn-subcard bnn-row-hover cursor-pointer flex items-center justify-between gap-2 text-xs">
+                          <div class="flex items-center gap-1.5 min-w-0">
+                            <span class="font-mono text-[10px] bnn-muted">${idx + 1}.</span>
+                            <img src="${teamLogoUrl(t.team?.logo)}" class="w-4 h-4 object-contain shrink-0">
+                            <span class="font-bold truncate">${t.year} ${escRecHtml(t.team?.abbr || "")}</span>
+                          </div>
+                          <div class="font-mono text-right shrink-0">
+                            <span class="font-black text-emerald-400">${t.w}-${t.l}</span>
+                            <span class="text-[10px] bnn-muted ml-1">(${fmtAvg(t.pct)})</span>
+                          </div>
+                        </div>
+                      `).join("")}
+                    </div>
+                  </div>
+                </aside>
+
+                <!-- CENTER STAGE: VISUAL SUITE (TOP) + MASTER RECORD VAULT (BELOW) -->
+                <div class="bnn-records-col-center space-y-3.5">
+                  ${renderRecordsVisualSuiteHtml(data, visualMode, trajMetric, contextMode)}
+                  ${centerVaultHtml}
+                </div>
+
+                <!-- RIGHT MARGIN (16:9 UHD: SPLIT INSPECTOR + CHRONICLE | 21:9: CHRONICLE & STANDARDS) -->
+                <aside class="bnn-records-col-right space-y-3.5">
+                  <div class="records-std-inspector">
+                    ${renderSplitInspectorHtml(selKey, selSeason, selCareer, contextMode, statusFilter, false)}
+                  </div>
+                  ${chronicleCardHtml}
+                </aside>
+
+                <!-- DEDICATED 4TH COLUMN (21:9 ULTRAWIDE ONLY: SIDE-BY-SIDE TOP-15 SEASON | TOP-20 CAREER) -->
+                <aside class="bnn-records-col-uw">
+                  ${renderSplitInspectorHtml(selKey, selSeason, selCareer, contextMode, statusFilter, true)}
+                </aside>
+
+              </section>
+            `}
+        </main>
+      </div>
     </div>
   `;
 
   initSortableTables(container);
 }
-
 
 // ============================================================================
 // MODULE 11: HALL OF FAME MUSEUM, JAWS ANALYTICS & FUTURE HOF WATCHLIST
