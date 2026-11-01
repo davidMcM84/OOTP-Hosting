@@ -7307,10 +7307,56 @@ def get_league_leaders_hub(save_slug: str, league_id: int = None, year: int = No
                 "fld_pct": fld_pct,
                 "rf9": rf9,
                 "is_qualified": is_qual_fld,
+                "is_half_qualified": (agg["fld_g"] >= max(3, qual_fld_g // 2)) or (f_ip >= max(9, qual_fld_ip / 2.0)),
                 "awards": player_awards_map.get(pid, []),
             })
 
+    # Prior-year MLB experience lookup for official Rookie eligibility (<130 prior AB & <50 prior IP / 150 outs)
+    prior_bat_ab = {}
+    prior_pit_outs = {}
+    try:
+        if table_exists(conn, "players_career_batting_stats"):
+            if league_id:
+                rows_pb = conn.execute(
+                    "SELECT player_id, SUM(ab) AS pab FROM players_career_batting_stats WHERE year < ? AND split_id = 1 AND league_id = ? GROUP BY player_id",
+                    (season_year, league_id),
+                ).fetchall()
+            else:
+                rows_pb = conn.execute(
+                    "SELECT player_id, SUM(ab) AS pab FROM players_career_batting_stats WHERE year < ? AND split_id = 1 GROUP BY player_id",
+                    (season_year,),
+                ).fetchall()
+            for r in rows_pb:
+                prior_bat_ab[safe_int(r[0])] = safe_int(r[1])
+        if table_exists(conn, "players_career_pitching_stats"):
+            if league_id:
+                rows_pp = conn.execute(
+                    "SELECT player_id, SUM(outs) AS pouts, SUM(ip) AS pip FROM players_career_pitching_stats WHERE year < ? AND split_id = 1 AND league_id = ? GROUP BY player_id",
+                    (season_year, league_id),
+                ).fetchall()
+            else:
+                rows_pp = conn.execute(
+                    "SELECT player_id, SUM(outs) AS pouts, SUM(ip) AS pip FROM players_career_pitching_stats WHERE year < ? AND split_id = 1 GROUP BY player_id",
+                    (season_year,),
+                ).fetchall()
+            for r in rows_pp:
+                prior_pit_outs[safe_int(r[0])] = safe_int(r[1]) or (safe_int(r[2]) * 3)
+    except Exception:
+        pass
+
     conn.close()
+
+    has_prior_history = bool(prior_bat_ab or prior_pit_outs)
+
+    # Enrich fielders with Platinum Glove composite score
+    pos_def_bonus_map = {"C": 4.0, "SS": 3.5, "CF": 3.0, "2B": 2.0, "3B": 2.0, "RF": 1.0, "LF": 0.5, "P": 0.5, "1B": 0.0}
+    for f in fielders:
+        f_pos = f.get("position", "")
+        f_mult = 1.0 if f.get("is_qualified") else (0.80 if f.get("is_half_qualified") else 0.55)
+        f["platinum_score"] = round(
+            (safe_float(f.get("def_runs")) * 3.6 + pos_def_bonus_map.get(f_pos, 1.0) + min(8.0, safe_float(f.get("fld_ip")) / 160.0)) * f_mult,
+            1,
+        )
 
     # Get full batting & pitching leaderboards from get_sabermetric_leaderboards
     lb_data = get_sabermetric_leaderboards(
@@ -7325,7 +7371,10 @@ def get_league_leaders_hub(save_slug: str, league_id: int = None, year: int = No
     batters = lb_data.get("batters", [])
     pitchers = lb_data.get("pitchers", [])
 
+    pos_adj_162_map = {"C": 12.5, "SS": 7.5, "2B": 2.5, "CF": 2.5, "3B": 2.5, "RF": -7.5, "LF": -7.5, "1B": -12.5, "DH": -17.5}
+
     for b in batters:
+        pid = b["player_id"]
         sl_id = safe_int(b.get("sub_league_id"), 0)
         sl_info = sub_leagues_map.get(sl_id, {})
         b["sub_league_abbr"] = sl_info.get("abbr", "")
@@ -7333,38 +7382,189 @@ def get_league_leaders_hub(save_slug: str, league_id: int = None, year: int = No
             b["sub_league_name"] = sl_info["name"]
         b["is_qualified"] = b.get("pa", 0) >= qual_pa
         b["is_half_qualified"] = b.get("pa", 0) >= max(5, qual_pa // 2)
-        b["awards"] = player_awards_map.get(b["player_id"], [])
+        b["awards"] = player_awards_map.get(pid, [])
+
+        age_v = safe_int(b.get("age"), 26)
+        b["is_u25"] = age_v <= 25
+        b["is_rookie"] = (
+            (prior_bat_ab.get(pid, 0) < 130 and prior_pit_outs.get(pid, 0) < 150 and age_v <= 27)
+            if has_prior_history else (age_v <= 23)
+        )
+
+        # WAR Component Decomposition (Batting + Baserunning + Defense + Positional Adj + Replacement)
+        pa_v = safe_float(b.get("pa"))
+        b["bat_runs"] = round(safe_float(b.get("wraa")), 1)
+        b["bsr_runs"] = round(safe_float(b.get("ubr")), 1)
+        b["def_runs"] = round(safe_float(b.get("zr")) + safe_float(b.get("framing")) + safe_float(b.get("arm")), 1)
+        b["pos_adj"] = round(pos_adj_162_map.get(b.get("position", ""), 0.0) * min(1.15, pa_v / 650.0), 1)
+        b["rep_runs"] = round(20.0 * (pa_v / 600.0), 1)
+
+        # Composite MVP & Rookie Index scores
+        war_v = safe_float(b.get("war"))
+        wrc_p = safe_float(b.get("wrc_plus"), 100)
+        wpa_v = safe_float(b.get("wpa"))
+        hr_v = safe_int(b.get("hr"))
+        rbi_v = safe_int(b.get("rbi"))
+        sb_v = safe_int(b.get("sb"))
+        bq_mult = 1.0 if b["is_qualified"] else (0.88 if b["is_half_qualified"] else 0.70)
+        b["mvp_score"] = round(
+            max(0.0, (war_v * 8.2 + max(0.0, wrc_p - 90.0) * 0.34 + wpa_v * 3.8 + hr_v * 0.22 + rbi_v * 0.08) * bq_mult),
+            1,
+        )
+        b["rookie_score"] = round(
+            max(0.0, (war_v * 11.5 + max(0.0, wrc_p - 85.0) * 0.38 + hr_v * 0.25 + sb_v * 0.15) * (1.0 if b["is_half_qualified"] else 0.78)),
+            1,
+        )
 
     for p in pitchers:
+        pid = p["player_id"]
         sl_id = safe_int(p.get("sub_league_id"), 0)
         sl_info = sub_leagues_map.get(sl_id, {})
         p["sub_league_abbr"] = sl_info.get("abbr", "")
         if sl_info.get("name"):
             p["sub_league_name"] = sl_info["name"]
         p["is_qualified"] = p.get("ip", 0) >= qual_ip
+        p["is_half_qualified"] = p.get("ip", 0) >= max(5, qual_ip / 2.0)
         p["is_reliever_qualified"] = p.get("ip", 0) >= qual_reliever_ip
-        p["awards"] = player_awards_map.get(p["player_id"], [])
+        p["awards"] = player_awards_map.get(pid, [])
 
-    # Helper to compute Triple Crown status for a subset of batters & pitchers
-    def _compute_triple_crown(bat_pool, pit_pool, scope_label):
+        age_v = safe_int(p.get("age"), 26)
+        p["is_u25"] = age_v <= 25
+        p["is_rookie"] = (
+            (prior_bat_ab.get(pid, 0) < 130 and prior_pit_outs.get(pid, 0) < 150 and age_v <= 27)
+            if has_prior_history else (age_v <= 23)
+        )
+
+        # Composite Cy Young, Reliever of the Year & Rookie Index scores
+        p_war = safe_float(p.get("war"))
+        p_ra9 = safe_float(p.get("ra9war"), p_war)
+        era_p = min(300.0, safe_float(p.get("era_plus"), 100))
+        k_bb_p = safe_float(p.get("k_minus_bb"))
+        ip_v = safe_float(p.get("ip"))
+        w_v = safe_int(p.get("w"))
+        k_v = safe_int(p.get("k"))
+        sv_v = safe_int(p.get("sv"))
+        hld_v = safe_int(p.get("hld"))
+        sd_v = safe_int(p.get("sd"))
+        wpa_p = safe_float(p.get("wpa"))
+        pq_mult = 1.0 if p["is_qualified"] else (0.85 if p["is_reliever_qualified"] else 0.62)
+        p["cy_score"] = round(
+            max(0.0, (((p_war * 0.6 + p_ra9 * 0.4) * 8.8) + max(0.0, era_p - 95.0) * 0.24 + k_bb_p * 0.65 + ip_v * 0.06 + w_v * 0.45 + k_v * 0.04) * pq_mult),
+            1,
+        )
+        is_rp = (p.get("role") != "SP") and (safe_int(p.get("gs")) < max(1, safe_int(p.get("g"))) * 0.35)
+        rp_mult = 1.0 if (is_rp and p["is_reliever_qualified"]) else (0.72 if is_rp else 0.12)
+        p["reliever_score"] = round(
+            max(0.0, (p_war * 13.0 + max(0.0, era_p - 100.0) * 0.22 + k_bb_p * 0.75 + sv_v * 0.72 + hld_v * 0.38 + sd_v * 0.32 + wpa_p * 5.0) * rp_mult),
+            1,
+        )
+        p["rookie_score"] = round(
+            max(0.0, (((p_war * 0.6 + p_ra9 * 0.4) * 12.0) + max(0.0, era_p - 90.0) * 0.28 + k_v * 0.07 + sv_v * 0.35) * (1.0 if p["is_reliever_qualified"] else 0.75)),
+            1,
+        )
+
+    # Helper to compute Triple Crown status & 2-of-3 / Top-3 Threat Radar for a subset of batters & pitchers
+    def _compute_triple_crown(bat_pool, pit_pool, scope_label, scope_abbr="", sl_id=None):
         qual_b = [b for b in bat_pool if b.get("is_qualified")] or bat_pool
         qual_p = [p for p in pit_pool if p.get("is_qualified")] or pit_pool
 
-        bat_avg_ldr = max(qual_b, key=lambda x: (x.get("avg", 0), x.get("pa", 0)), default=None)
-        bat_hr_ldr = max(bat_pool, key=lambda x: (x.get("hr", 0), -x.get("pa", 0)), default=None)
-        bat_rbi_ldr = max(bat_pool, key=lambda x: (x.get("rbi", 0), -x.get("pa", 0)), default=None)
+        bat_avg_sorted = sorted(qual_b, key=lambda x: (x.get("avg", 0), x.get("pa", 0)), reverse=True)
+        bat_hr_sorted = sorted(bat_pool, key=lambda x: (x.get("hr", 0), -x.get("pa", 0)), reverse=True)
+        bat_rbi_sorted = sorted(bat_pool, key=lambda x: (x.get("rbi", 0), -x.get("pa", 0)), reverse=True)
+
+        bat_avg_ldr = bat_avg_sorted[0] if bat_avg_sorted else None
+        bat_hr_ldr = bat_hr_sorted[0] if bat_hr_sorted else None
+        bat_rbi_ldr = bat_rbi_sorted[0] if bat_rbi_sorted else None
         is_bat_tc = bool(
             bat_avg_ldr and bat_hr_ldr and bat_rbi_ldr
             and bat_avg_ldr["player_id"] == bat_hr_ldr["player_id"] == bat_rbi_ldr["player_id"]
         )
 
-        pit_era_ldr = min(qual_p, key=lambda x: (x.get("era", 99.0), -x.get("ip", 0)), default=None)
-        pit_w_ldr = max(pit_pool, key=lambda x: (x.get("w", 0), -x.get("era", 99.0)), default=None)
-        pit_k_ldr = max(pit_pool, key=lambda x: (x.get("k", 0), -x.get("ip", 0)), default=None)
+        avg_ranks = {pl["player_id"]: idx + 1 for idx, pl in enumerate(bat_avg_sorted)}
+        hr_ranks = {pl["player_id"]: idx + 1 for idx, pl in enumerate(bat_hr_sorted)}
+        rbi_ranks = {pl["player_id"]: idx + 1 for idx, pl in enumerate(bat_rbi_sorted)}
+
+        bat_threat = None
+        if qual_b and bat_avg_ldr and bat_hr_ldr and bat_rbi_ldr:
+            best_cand = max(
+                qual_b,
+                key=lambda pl: (
+                    int(avg_ranks.get(pl["player_id"], 999) == 1) + int(hr_ranks.get(pl["player_id"], 999) == 1) + int(rbi_ranks.get(pl["player_id"], 999) == 1),
+                    int(avg_ranks.get(pl["player_id"], 999) <= 3) + int(hr_ranks.get(pl["player_id"], 999) <= 3) + int(rbi_ranks.get(pl["player_id"], 999) <= 3),
+                    -(avg_ranks.get(pl["player_id"], 999) + hr_ranks.get(pl["player_id"], 999) + rbi_ranks.get(pl["player_id"], 999)),
+                    safe_float(pl.get("war")),
+                ),
+            )
+            cpid = best_cand["player_id"]
+            r_avg = avg_ranks.get(cpid, 99)
+            r_hr = hr_ranks.get(cpid, 99)
+            r_rbi = rbi_ranks.get(cpid, 99)
+            bat_threat = {
+                "player_id": cpid,
+                "name": best_cand["name"],
+                "team_abbr": best_cand.get("team_abbr", ""),
+                "team_logo": best_cand.get("team_logo", ""),
+                "crowns_led": int(r_avg == 1) + int(r_hr == 1) + int(r_rbi == 1),
+                "top3_legs": int(r_avg <= 3) + int(r_hr <= 3) + int(r_rbi <= 3),
+                "avg": best_cand.get("avg", 0),
+                "avg_rank": r_avg,
+                "avg_ldr": bat_avg_ldr.get("avg", 0),
+                "hr": best_cand.get("hr", 0),
+                "hr_rank": r_hr,
+                "hr_ldr": bat_hr_ldr.get("hr", 0),
+                "rbi": best_cand.get("rbi", 0),
+                "rbi_rank": r_rbi,
+                "rbi_ldr": bat_rbi_ldr.get("rbi", 0),
+            }
+
+        pit_era_sorted = sorted(qual_p, key=lambda x: (x.get("era", 99.0), -x.get("ip", 0)))
+        pit_w_sorted = sorted(pit_pool, key=lambda x: (x.get("w", 0), -x.get("era", 99.0)), reverse=True)
+        pit_k_sorted = sorted(pit_pool, key=lambda x: (x.get("k", 0), -x.get("ip", 0)), reverse=True)
+
+        pit_era_ldr = pit_era_sorted[0] if pit_era_sorted else None
+        pit_w_ldr = pit_w_sorted[0] if pit_w_sorted else None
+        pit_k_ldr = pit_k_sorted[0] if pit_k_sorted else None
         is_pit_tc = bool(
             pit_era_ldr and pit_w_ldr and pit_k_ldr
             and pit_era_ldr["player_id"] == pit_w_ldr["player_id"] == pit_k_ldr["player_id"]
         )
+
+        era_ranks = {pl["player_id"]: idx + 1 for idx, pl in enumerate(pit_era_sorted)}
+        w_ranks = {pl["player_id"]: idx + 1 for idx, pl in enumerate(pit_w_sorted)}
+        k_ranks = {pl["player_id"]: idx + 1 for idx, pl in enumerate(pit_k_sorted)}
+
+        pit_threat = None
+        if qual_p and pit_era_ldr and pit_w_ldr and pit_k_ldr:
+            best_pcand = max(
+                qual_p,
+                key=lambda pl: (
+                    int(era_ranks.get(pl["player_id"], 999) == 1) + int(w_ranks.get(pl["player_id"], 999) == 1) + int(k_ranks.get(pl["player_id"], 999) == 1),
+                    int(era_ranks.get(pl["player_id"], 999) <= 3) + int(w_ranks.get(pl["player_id"], 999) <= 3) + int(k_ranks.get(pl["player_id"], 999) <= 3),
+                    -(era_ranks.get(pl["player_id"], 999) + w_ranks.get(pl["player_id"], 999) + k_ranks.get(pl["player_id"], 999)),
+                    safe_float(pl.get("war")),
+                ),
+            )
+            ppid = best_pcand["player_id"]
+            r_era = era_ranks.get(ppid, 99)
+            r_w = w_ranks.get(ppid, 99)
+            r_k = k_ranks.get(ppid, 99)
+            pit_threat = {
+                "player_id": ppid,
+                "name": best_pcand["name"],
+                "team_abbr": best_pcand.get("team_abbr", ""),
+                "team_logo": best_pcand.get("team_logo", ""),
+                "crowns_led": int(r_era == 1) + int(r_w == 1) + int(r_k == 1),
+                "top3_legs": int(r_era <= 3) + int(r_w <= 3) + int(r_k <= 3),
+                "era": best_pcand.get("era", 0),
+                "era_rank": r_era,
+                "era_ldr": pit_era_ldr.get("era", 0),
+                "w": best_pcand.get("w", 0),
+                "w_rank": r_w,
+                "w_ldr": pit_w_ldr.get("w", 0),
+                "k": best_pcand.get("k", 0),
+                "k_rank": r_k,
+                "k_ldr": pit_k_ldr.get("k", 0),
+            }
 
         def _mini(pl, stat_key):
             if not pl:
@@ -7379,27 +7579,336 @@ def get_league_leaders_hub(save_slug: str, league_id: int = None, year: int = No
 
         return {
             "scope": scope_label,
+            "scope_abbr": scope_abbr or scope_label,
+            "sub_league_id": sl_id,
             "batting": {
                 "is_triple_crown": is_bat_tc,
                 "avg": _mini(bat_avg_ldr, "avg"),
                 "hr": _mini(bat_hr_ldr, "hr"),
                 "rbi": _mini(bat_rbi_ldr, "rbi"),
+                "threat": bat_threat,
             },
             "pitching": {
                 "is_triple_crown": is_pit_tc,
                 "era": _mini(pit_era_ldr, "era"),
                 "w": _mini(pit_w_ldr, "w"),
                 "k": _mini(pit_k_ldr, "k"),
+                "threat": pit_threat,
             },
         }
 
-    triple_crown = [_compute_triple_crown(batters, pitchers, active_league.get("abbr") or "Overall")]
+    lg_abbr_lbl = active_league.get("abbr") or "Overall"
+    triple_crown = [_compute_triple_crown(batters, pitchers, lg_abbr_lbl, scope_abbr=lg_abbr_lbl, sl_id=None)]
     for sl in sub_leagues:
         sl_id = sl["sub_league_id"]
         sl_b = [b for b in batters if b.get("sub_league_id") == sl_id]
         sl_p = [p for p in pitchers if p.get("sub_league_id") == sl_id]
         if sl_b or sl_p:
-            triple_crown.append(_compute_triple_crown(sl_b, sl_p, sl["name"]))
+            triple_crown.append(_compute_triple_crown(sl_b, sl_p, sl["name"], scope_abbr=sl.get("abbr") or sl["name"], sl_id=sl_id))
+
+    # Build Hardware Ledger (auto-switches between OFFICIAL OOTP awards and PROJECTED composite leaders)
+    bat_by_pid = {b["player_id"]: b for b in batters}
+    pit_by_pid = {p["player_id"]: p for p in pitchers}
+    fld_by_pid = {f["player_id"]: f for f in fielders}
+    has_official_major = any(a.get("award_id") in (4, 5, 6, 7, 9, 11) for a in season_awards)
+
+    award_scopes = (
+        [{"sub_league_id": sl["sub_league_id"], "abbr": sl.get("abbr") or sl["name"], "name": sl["name"]} for sl in sub_leagues]
+        if len(sub_leagues) >= 1
+        else [{"sub_league_id": None, "abbr": lg_abbr_lbl, "name": active_league.get("name", "Major League")}]
+    )
+
+    def _bat_stat_line(b_obj):
+        if not b_obj:
+            return ""
+        return f"{safe_float(b_obj.get('war')):.1f} WAR · {safe_int(b_obj.get('wrc_plus'))} wRC+ · {safe_int(b_obj.get('hr'))} HR"
+
+    def _pit_stat_line(p_obj, is_rel=False):
+        if not p_obj:
+            return ""
+        if is_rel:
+            return f"{safe_int(p_obj.get('sv'))} SV · {safe_float(p_obj.get('era')):.2f} ERA · {safe_float(p_obj.get('k_minus_bb')):.1f}% K-BB"
+        return f"{safe_float(p_obj.get('war')):.1f} WAR · {safe_float(p_obj.get('era')):.2f} ERA · {safe_int(p_obj.get('k'))} K"
+
+    def _fld_stat_line(f_obj):
+        if not f_obj:
+            return ""
+        dr = safe_float(f_obj.get("def_runs"))
+        sign = "+" if dr > 0 else ""
+        return f"{sign}{dr:.1f} DEF · {safe_float(f_obj.get('zr')):.1f} ZR · {safe_float(f_obj.get('fld_pct')):.3f}"
+
+    hw_major = []
+    hw_gg = []
+    hw_ss = []
+
+    for sc in award_scopes:
+        sc_sl = sc["sub_league_id"]
+        sc_abbr = sc["abbr"]
+        sc_bat = [b for b in batters if sc_sl is None or b.get("sub_league_id") == sc_sl]
+        sc_pit = [p for p in pitchers if sc_sl is None or p.get("sub_league_id") == sc_sl]
+        sc_fld = [f for f in fielders if sc_sl is None or f.get("sub_league_id") == sc_sl]
+
+        # Official lookup helper
+        def _find_off(aid, pos_code=None):
+            for aw in season_awards:
+                if aw.get("award_id") != aid:
+                    continue
+                if sc_sl is not None and aw.get("sub_league_id") not in (sc_sl, 0):
+                    continue
+                if pos_code and aw.get("position") != pos_code:
+                    continue
+                return aw
+            return None
+
+        # 1. MVP (award_id = 5)
+        off_mvp = _find_off(5)
+        if off_mvp:
+            b_ref = bat_by_pid.get(off_mvp["player_id"]) or pit_by_pid.get(off_mvp["player_id"])
+            hw_major.append({
+                "award_code": "MVP", "award_label": "Most Valuable Player",
+                "sub_league_id": sc_sl, "sub_league_abbr": sc_abbr, "status": "OFFICIAL",
+                "player_id": off_mvp["player_id"], "name": off_mvp["player_name"],
+                "position": off_mvp.get("position") or (b_ref.get("position", "") if b_ref else ""),
+                "team_abbr": off_mvp.get("team_abbr", ""), "team_logo": off_mvp.get("team_logo", ""),
+                "score": b_ref.get("mvp_score", 0) if b_ref else 0,
+                "stat_line": _bat_stat_line(b_ref) if b_ref in sc_bat else _pit_stat_line(b_ref),
+            })
+        elif sc_bat:
+            top_mvp = max(sc_bat, key=lambda x: (x.get("mvp_score", 0), x.get("war", 0)))
+            hw_major.append({
+                "award_code": "MVP", "award_label": "Most Valuable Player",
+                "sub_league_id": sc_sl, "sub_league_abbr": sc_abbr, "status": "PROJECTED",
+                "player_id": top_mvp["player_id"], "name": top_mvp["name"],
+                "position": top_mvp.get("position", ""),
+                "team_abbr": top_mvp.get("team_abbr", ""), "team_logo": top_mvp.get("team_logo", ""),
+                "score": top_mvp.get("mvp_score", 0), "stat_line": _bat_stat_line(top_mvp),
+            })
+
+        # 2. Cy Young (award_id = 4)
+        off_cy = _find_off(4)
+        if off_cy:
+            p_ref = pit_by_pid.get(off_cy["player_id"])
+            hw_major.append({
+                "award_code": "CY", "award_label": "Cy Young / Pitcher of Year",
+                "sub_league_id": sc_sl, "sub_league_abbr": sc_abbr, "status": "OFFICIAL",
+                "player_id": off_cy["player_id"], "name": off_cy["player_name"],
+                "position": p_ref.get("role", "SP") if p_ref else "P",
+                "team_abbr": off_cy.get("team_abbr", ""), "team_logo": off_cy.get("team_logo", ""),
+                "score": p_ref.get("cy_score", 0) if p_ref else 0,
+                "stat_line": _pit_stat_line(p_ref),
+            })
+        elif sc_pit:
+            top_cy = max(sc_pit, key=lambda x: (x.get("cy_score", 0), x.get("war", 0)))
+            hw_major.append({
+                "award_code": "CY", "award_label": "Cy Young / Pitcher of Year",
+                "sub_league_id": sc_sl, "sub_league_abbr": sc_abbr, "status": "PROJECTED",
+                "player_id": top_cy["player_id"], "name": top_cy["name"],
+                "position": top_cy.get("role", "SP"),
+                "team_abbr": top_cy.get("team_abbr", ""), "team_logo": top_cy.get("team_logo", ""),
+                "score": top_cy.get("cy_score", 0), "stat_line": _pit_stat_line(top_cy),
+            })
+
+        # 3. Rookie of the Year (award_id = 6)
+        off_roy = _find_off(6)
+        if off_roy:
+            r_bat = bat_by_pid.get(off_roy["player_id"])
+            r_pit = pit_by_pid.get(off_roy["player_id"])
+            hw_major.append({
+                "award_code": "ROY", "award_label": "Rookie of the Year",
+                "sub_league_id": sc_sl, "sub_league_abbr": sc_abbr, "status": "OFFICIAL",
+                "player_id": off_roy["player_id"], "name": off_roy["player_name"],
+                "position": off_roy.get("position") or (r_bat.get("position") if r_bat else (r_pit.get("role", "P") if r_pit else "")),
+                "team_abbr": off_roy.get("team_abbr", ""), "team_logo": off_roy.get("team_logo", ""),
+                "score": (r_bat or r_pit or {}).get("rookie_score", 0),
+                "stat_line": _bat_stat_line(r_bat) if r_bat else _pit_stat_line(r_pit),
+            })
+        else:
+            rk_cands = [(b, True) for b in sc_bat if b.get("is_rookie")] + [(p, False) for p in sc_pit if p.get("is_rookie")]
+            if not rk_cands:
+                rk_cands = [(b, True) for b in sc_bat if b.get("is_u25")] + [(p, False) for p in sc_pit if p.get("is_u25")]
+            if rk_cands:
+                top_rk, is_rk_bat = max(rk_cands, key=lambda pair: (pair[0].get("rookie_score", 0), pair[0].get("war", 0)))
+                hw_major.append({
+                    "award_code": "ROY", "award_label": "Rookie of the Year",
+                    "sub_league_id": sc_sl, "sub_league_abbr": sc_abbr, "status": "PROJECTED",
+                    "player_id": top_rk["player_id"], "name": top_rk["name"],
+                    "position": top_rk.get("position") if is_rk_bat else top_rk.get("role", "P"),
+                    "team_abbr": top_rk.get("team_abbr", ""), "team_logo": top_rk.get("team_logo", ""),
+                    "score": top_rk.get("rookie_score", 0),
+                    "stat_line": _bat_stat_line(top_rk) if is_rk_bat else _pit_stat_line(top_rk),
+                })
+
+        # 4. Reliever of the Year (award_id = 9)
+        off_rel = _find_off(9)
+        if off_rel:
+            p_ref = pit_by_pid.get(off_rel["player_id"])
+            hw_major.append({
+                "award_code": "REL", "award_label": "Reliever of the Year",
+                "sub_league_id": sc_sl, "sub_league_abbr": sc_abbr, "status": "OFFICIAL",
+                "player_id": off_rel["player_id"], "name": off_rel["player_name"],
+                "position": "RP",
+                "team_abbr": off_rel.get("team_abbr", ""), "team_logo": off_rel.get("team_logo", ""),
+                "score": p_ref.get("reliever_score", 0) if p_ref else 0,
+                "stat_line": _pit_stat_line(p_ref, is_rel=True),
+            })
+        elif sc_pit:
+            top_rel = max(sc_pit, key=lambda x: (x.get("reliever_score", 0), x.get("sv", 0)))
+            hw_major.append({
+                "award_code": "REL", "award_label": "Reliever of the Year",
+                "sub_league_id": sc_sl, "sub_league_abbr": sc_abbr, "status": "PROJECTED",
+                "player_id": top_rel["player_id"], "name": top_rel["name"],
+                "position": top_rel.get("role", "RP"),
+                "team_abbr": top_rel.get("team_abbr", ""), "team_logo": top_rel.get("team_logo", ""),
+                "score": top_rel.get("reliever_score", 0), "stat_line": _pit_stat_line(top_rel, is_rel=True),
+            })
+
+        # 5. Gold Glove by Position (award_id = 7)
+        for g_pos in ("C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "P"):
+            off_g = _find_off(7, pos_code=g_pos)
+            if off_g:
+                f_ref = fld_by_pid.get(off_g["player_id"])
+                hw_gg.append({
+                    "position": g_pos, "sub_league_id": sc_sl, "sub_league_abbr": sc_abbr, "status": "OFFICIAL",
+                    "player_id": off_g["player_id"], "name": off_g["player_name"],
+                    "team_abbr": off_g.get("team_abbr", ""), "team_logo": off_g.get("team_logo", ""),
+                    "stat_line": _fld_stat_line(f_ref) if f_ref else "Official Winner",
+                })
+            else:
+                pos_flds = [f for f in sc_fld if f.get("position") == g_pos and f.get("is_qualified")] or [
+                    f for f in sc_fld if f.get("position") == g_pos
+                ]
+                if pos_flds:
+                    best_f = max(pos_flds, key=lambda x: (x.get("platinum_score", 0), x.get("def_runs", 0)))
+                    hw_gg.append({
+                        "position": g_pos, "sub_league_id": sc_sl, "sub_league_abbr": sc_abbr, "status": "PROJECTED",
+                        "player_id": best_f["player_id"], "name": best_f["name"],
+                        "team_abbr": best_f.get("team_abbr", ""), "team_logo": best_f.get("team_logo", ""),
+                        "stat_line": _fld_stat_line(best_f),
+                    })
+
+        # 6. Silver Slugger / Platinum Stick by Position (award_id = 11)
+        for s_pos in ("C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"):
+            off_s = _find_off(11, pos_code=s_pos)
+            if off_s:
+                b_ref = bat_by_pid.get(off_s["player_id"])
+                hw_ss.append({
+                    "position": s_pos, "sub_league_id": sc_sl, "sub_league_abbr": sc_abbr, "status": "OFFICIAL",
+                    "player_id": off_s["player_id"], "name": off_s["player_name"],
+                    "team_abbr": off_s.get("team_abbr", ""), "team_logo": off_s.get("team_logo", ""),
+                    "stat_line": _bat_stat_line(b_ref) if b_ref else "Official Winner",
+                })
+            else:
+                pos_bats = [b for b in sc_bat if b.get("position") == s_pos and b.get("is_half_qualified")] or [
+                    b for b in sc_bat if b.get("position") == s_pos
+                ]
+                if pos_bats:
+                    best_b = max(
+                        pos_bats,
+                        key=lambda x: (
+                            safe_float(x.get("wraa")) + safe_float(x.get("wrc")) * 0.35 + safe_int(x.get("hr")) * 0.45,
+                            safe_int(x.get("wrc_plus")),
+                        ),
+                    )
+                    hw_ss.append({
+                        "position": s_pos, "sub_league_id": sc_sl, "sub_league_abbr": sc_abbr, "status": "PROJECTED",
+                        "player_id": best_b["player_id"], "name": best_b["name"],
+                        "team_abbr": best_b.get("team_abbr", ""), "team_logo": best_b.get("team_logo", ""),
+                        "stat_line": f"{safe_int(best_b.get('wrc_plus'))} wRC+ · {safe_int(best_b.get('hr'))} HR · {safe_float(best_b.get('ops')):.3f}",
+                    })
+
+    hardware_ledger = {
+        "mode": "official" if has_official_major else "projected",
+        "major": hw_major,
+        "gold_glove": hw_gg,
+        "silver_slugger": hw_ss,
+    }
+
+    # Qualification Cutline Watch (85%–99.9% of qual_pa / qual_ip + MLB Rule 9.22(a) Hitless-AB Batting Title Audit)
+    min_cut_pa = max(8, int(qual_pa * 0.85))
+    min_cut_ip = round(max(4.0, qual_ip * 0.85), 1)
+
+    qual_avg_ldr_by_sl = {}
+    overall_qual_bat = [b for b in batters if b.get("is_qualified")]
+    overall_avg_ldr = max(overall_qual_bat, key=lambda x: (x.get("avg", 0), x.get("pa", 0)), default=None)
+    for sl in sub_leagues:
+        sl_qb = [b for b in overall_qual_bat if b.get("sub_league_id") == sl["sub_league_id"]]
+        qual_avg_ldr_by_sl[sl["sub_league_id"]] = max(sl_qb, key=lambda x: (x.get("avg", 0), x.get("pa", 0)), default=overall_avg_ldr)
+
+    cutline_batters = []
+    if qual_pa >= 15:
+        for b in batters:
+            pa_cnt = safe_int(b.get("pa"))
+            if min_cut_pa <= pa_cnt < qual_pa:
+                pa_short = qual_pa - pa_cnt
+                ab_cnt = safe_int(b.get("ab"))
+                h_cnt = safe_int(b.get("h"))
+                tob_cnt = h_cnt + safe_int(b.get("bb")) + safe_int(b.get("hp"))
+                rule922_avg = round(h_cnt / max(1, ab_cnt + pa_short), 3)
+                rule922_obp = round(tob_cnt / max(1, pa_cnt + pa_short), 3)
+                sl_ldr = qual_avg_ldr_by_sl.get(b.get("sub_league_id")) or overall_avg_ldr
+                ldr_avg = safe_float(sl_ldr.get("avg")) if sl_ldr else 0.0
+                wins_922 = bool(sl_ldr and rule922_avg > ldr_avg)
+                if safe_int(b.get("wrc_plus")) >= 112 or safe_float(b.get("avg")) >= 0.280 or wins_922:
+                    cutline_batters.append({
+                        "player_id": b["player_id"],
+                        "name": b["name"],
+                        "position": b.get("position", ""),
+                        "team_id": b.get("team_id"),
+                        "team_abbr": b.get("team_abbr", ""),
+                        "team_logo": b.get("team_logo", ""),
+                        "sub_league_id": b.get("sub_league_id", 0),
+                        "sub_league_abbr": b.get("sub_league_abbr", ""),
+                        "pa": pa_cnt,
+                        "pa_short": pa_short,
+                        "pct_of_qual": round(100.0 * pa_cnt / max(1, qual_pa), 1),
+                        "avg": b.get("avg", 0),
+                        "ops": b.get("ops", 0),
+                        "wrc_plus": b.get("wrc_plus", 100),
+                        "war": b.get("war", 0),
+                        "rule922_avg": rule922_avg,
+                        "rule922_obp": rule922_obp,
+                        "target_leader_avg": ldr_avg,
+                        "target_leader_name": sl_ldr.get("name", "") if sl_ldr else "",
+                        "wins_rule922_title": wins_922,
+                    })
+    cutline_batters.sort(key=lambda x: (x["wins_rule922_title"], x["wrc_plus"], x["avg"]), reverse=True)
+
+    cutline_pitchers = []
+    if qual_ip >= 10:
+        for p in pitchers:
+            ip_cnt = safe_float(p.get("ip"))
+            if min_cut_ip <= ip_cnt < qual_ip:
+                ip_short = round(qual_ip - ip_cnt, 1)
+                if safe_int(p.get("era_plus")) >= 112 or safe_float(p.get("fip", 9.9)) <= 3.75:
+                    cutline_pitchers.append({
+                        "player_id": p["player_id"],
+                        "name": p["name"],
+                        "role": p.get("role", "SP"),
+                        "team_id": p.get("team_id"),
+                        "team_abbr": p.get("team_abbr", ""),
+                        "team_logo": p.get("team_logo", ""),
+                        "sub_league_id": p.get("sub_league_id", 0),
+                        "sub_league_abbr": p.get("sub_league_abbr", ""),
+                        "ip": round(ip_cnt, 1),
+                        "ip_display": p.get("ip_display", f"{ip_cnt:.1f}"),
+                        "ip_short": ip_short,
+                        "pct_of_qual": round(100.0 * ip_cnt / max(1.0, float(qual_ip)), 1),
+                        "era": p.get("era", 0),
+                        "fip": p.get("fip", 0),
+                        "era_plus": p.get("era_plus", 100),
+                        "k_minus_bb": p.get("k_minus_bb", 0),
+                        "war": p.get("war", 0),
+                    })
+    cutline_pitchers.sort(key=lambda x: (x["era_plus"], -x["fip"]), reverse=True)
+
+    cutline_watch = {
+        "min_cut_pa": min_cut_pa,
+        "qual_pa": qual_pa,
+        "min_cut_ip": min_cut_ip,
+        "qual_ip": qual_ip,
+        "batters": cutline_batters[:12],
+        "pitchers": cutline_pitchers[:12],
+    }
 
     # Collect teams in this league/season for filter dropdown
     league_teams = []
@@ -7439,6 +7948,8 @@ def get_league_leaders_hub(save_slug: str, league_id: int = None, year: int = No
         },
         "triple_crown": triple_crown,
         "season_awards": season_awards,
+        "hardware_ledger": hardware_ledger,
+        "cutline_watch": cutline_watch,
         "batters": batters,
         "pitchers": pitchers,
         "fielders": fielders,

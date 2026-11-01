@@ -2179,7 +2179,3 @@ function renderBallparkContourComparisonSVG(parkProfile, teamAbbr = "CLUB", isLi
     </svg>
   `;
 }
-
-
-
-
