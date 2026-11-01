@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 110" fill="none">
+  <defs>
+    <linearGradient id="csPlat" x1="20" y1="16" x2="96" y2="96" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F8FAFC"/>
+      <stop offset="50%" stop-color="#CBD5E1"/>
+      <stop offset="100%" stop-color="#64748B"/>
+    </linearGradient>
+    <clipPath id="csShield">
+      <path d="M35 26 H79 V56 L57 75 L35 56 Z"/>
+    </clipPath>
+  </defs>
+  <!-- Left: Set 2 Broadcast Shield -->
+  <path d="M31 22 H83 V58 L57 81 L31 58 Z" fill="url(#csPlat)"/>
+  <path d="M33.8 24.8 H80.2 V56.8 L57 77.2 L33.8 56.8 Z" fill="#070D1F"/>
+  <g clip-path="url(#csShield)">
+    <rect x="34" y="25" width="23" height="52" fill="#1D4ED8"/>
+    <rect x="57" y="25" width="23" height="52" fill="#E11D48"/>
+    <path d="M57 40 L69 52 L57 64 L45 52 Z" stroke="#FFFFFF" stroke-width="2.6" fill="none"/>
+  </g>
+  <path d="M57 46.5 V57.5 M51.5 52 H62.5" stroke="#FFFFFF" stroke-width="2.8" stroke-linecap="square"/>
+
+  <!-- Center: Animated Data Pipeline -->
+  <line x1="92" y1="52" x2="134" y2="52" stroke="#38BDF8" stroke-width="2.5" stroke-dasharray="5 5">
+    <animate attributeName="stroke-dashoffset" from="20" to="0" dur="1.1s" repeatCount="indefinite"/>
+  </line>
+  <polygon points="131,47 139,52 131,57" fill="#22D3EE"/>
+
+  <!-- Right: SQLite WAL Cylinder -->
+  <path d="M146 34 C146 28.5, 190 28.5, 190 34 V70 C190 75.5, 146 75.5, 146 70 Z" fill="#0E1733" stroke="#94A3B8" stroke-width="2"/>
+  <ellipse cx="168" cy="34" rx="22" ry="6.5" fill="#1D4ED8" stroke="#CBD5E1" stroke-width="1.8"/>
+  <path d="M146 46 C146 51.5, 190 51.5, 190 46" stroke="#64748B" stroke-width="1.5"/>
+  <path d="M146 58 C146 63.5, 190 63.5, 190 58" stroke="#64748B" stroke-width="1.5"/>
+  <text x="168" y="89" text-anchor="middle" fill="#CBD5E1" font-family="JetBrains Mono, monospace" font-weight="800" font-size="10">SQLITE WAL</text>
+</svg>

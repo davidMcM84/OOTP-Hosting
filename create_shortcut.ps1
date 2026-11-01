@@ -3,36 +3,38 @@ Add-Type -AssemblyName System.Drawing
 $ProjectDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 $IconPath = Join-Path $ProjectDir "static\ootp27_hub.ico"
 
-# Generate a custom high-contrast Baseball Diamond + Statcast Icon (.ico)
-$bmp = New-Object System.Drawing.Bitmap(64, 64)
-$g = [System.Drawing.Graphics]::FromImage($bmp)
-$g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+# Preserve the bundled multi-resolution Set 2 Broadcast Network .ico; generate fallback only if missing
+if (-not (Test-Path $IconPath)) {
+    $bmp = New-Object System.Drawing.Bitmap(64, 64)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
 
-$bgBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 11, 19, 36))
-$g.FillEllipse($bgBrush, 2, 2, 60, 60)
+    $bgBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 7, 13, 31))
+    $g.FillEllipse($bgBrush, 2, 2, 60, 60)
 
-$borderPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(255, 56, 189, 248), 3)
-$g.DrawEllipse($borderPen, 2, 2, 60, 60)
+    $borderPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(255, 203, 213, 225), 3)
+    $g.DrawEllipse($borderPen, 2, 2, 60, 60)
 
-$diamondPts = @(
-    (New-Object System.Drawing.Point(32, 12)),
-    (New-Object System.Drawing.Point(52, 32)),
-    (New-Object System.Drawing.Point(32, 52)),
-    (New-Object System.Drawing.Point(12, 32))
-)
-$turfBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 16, 185, 129))
-$g.FillPolygon($turfBrush, $diamondPts)
+    $diamondPts = @(
+        (New-Object System.Drawing.Point(32, 12)),
+        (New-Object System.Drawing.Point(52, 32)),
+        (New-Object System.Drawing.Point(32, 52)),
+        (New-Object System.Drawing.Point(12, 32))
+    )
+    $turfBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 225, 29, 72))
+    $g.FillPolygon($turfBrush, $diamondPts)
 
-$linePen = New-Object System.Drawing.Pen([System.Drawing.Color]::White, 2.5)
-$g.DrawPolygon($linePen, $diamondPts)
-$g.Dispose()
+    $linePen = New-Object System.Drawing.Pen([System.Drawing.Color]::White, 2.5)
+    $g.DrawPolygon($linePen, $diamondPts)
+    $g.Dispose()
 
-$hIcon = $bmp.GetHicon()
-$icon = [System.Drawing.Icon]::FromHandle($hIcon)
-$fs = New-Object System.IO.FileStream($IconPath, [System.IO.FileMode]::Create)
-$icon.Save($fs)
-$fs.Close()
-$bmp.Dispose()
+    $hIcon = $bmp.GetHicon()
+    $icon = [System.Drawing.Icon]::FromHandle($hIcon)
+    $fs = New-Object System.IO.FileStream($IconPath, [System.IO.FileMode]::Create)
+    $icon.Save($fs)
+    $fs.Close()
+    $bmp.Dispose()
+}
 
 $DesktopDir = [Environment]::GetFolderPath("Desktop")
 $ShortcutPath = Join-Path $DesktopDir "OOTP 27 Analytics & Hosting Hub.lnk"
