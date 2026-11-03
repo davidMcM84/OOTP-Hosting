@@ -1756,3 +1756,93 @@ select option {
 .bnn-portal-light .leaders-agate-table tbody tr:hover td {
   background: #E0F2FE;
 }
+
+/* ============================================================================
+ * TAB 04: LEAGUE PULSE & STANDINGS — 4-COL COCKPIT, AGATE TABLES & SVG CANVAS
+ * ============================================================================ */
+.bnn-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 0.875rem;
+  align-items: start;
+}
+.bnn-overview-col-left   { grid-column: span 3 / span 3; }
+.bnn-overview-col-center { grid-column: span 6 / span 6; }
+.bnn-overview-col-right  { grid-column: span 3 / span 3; }
+.bnn-overview-col-uw     { display: none; }
+
+.bnn-vp-ultrawide .bnn-overview-grid {
+  grid-template-columns: 17fr 42fr 21fr 20fr !important;
+  gap: 0.875rem !important;
+}
+.bnn-vp-ultrawide .bnn-overview-col-left,
+.bnn-vp-ultrawide .bnn-overview-col-center,
+.bnn-vp-ultrawide .bnn-overview-col-right {
+  grid-column: auto !important;
+}
+.bnn-vp-ultrawide .bnn-overview-col-uw {
+  display: flex !important;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+@media (min-width: 2150px) {
+  .bnn-vp-auto .bnn-overview-grid {
+    grid-template-columns: 17fr 42fr 21fr 20fr !important;
+    gap: 0.875rem !important;
+  }
+  .bnn-vp-auto .bnn-overview-col-left,
+  .bnn-vp-auto .bnn-overview-col-center,
+  .bnn-vp-auto .bnn-overview-col-right {
+    grid-column: auto !important;
+  }
+  .bnn-vp-auto .bnn-overview-col-uw {
+    display: flex !important;
+    flex-direction: column;
+    gap: 0.875rem;
+  }
+}
+
+@media (max-width: 1120px) {
+  .bnn-overview-grid,
+  .bnn-vp-ultrawide .bnn-overview-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .bnn-overview-col-left,
+  .bnn-overview-col-center,
+  .bnn-overview-col-right {
+    grid-column: span 1 / span 1 !important;
+  }
+}
+
+.bnn-visual-canvas {
+  background-color: #080B11;
+  border: 1px solid var(--bnn-border);
+}
+.bnn-portal-light .bnn-visual-canvas {
+  background-color: #F8FAFC;
+}
+
+.bnn-shell .saber-table thead th {
+  background-color: var(--bnn-subcard);
+  color: var(--bnn-muted);
+  border-bottom: 1px solid var(--bnn-border);
+  padding: 7px 8px;
+}
+.bnn-shell .saber-table thead th:hover {
+  background-color: var(--bnn-hover);
+  color: var(--bnn-text);
+}
+.bnn-shell .saber-table tbody td {
+  color: var(--bnn-text);
+  border-bottom: 1px solid var(--bnn-border);
+  padding: 6.5px 8px;
+}
+.bnn-shell .saber-table tbody tr:hover {
+  background-color: var(--bnn-hover);
+}
+.bnn-pill-btn.active-red {
+  background-color: var(--bnn-accent);
+  color: #FFFFFF;
+  border-color: var(--bnn-accent);
+}
